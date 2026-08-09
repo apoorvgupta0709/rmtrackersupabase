@@ -5,11 +5,25 @@ import json
 import math
 import re
 import shutil
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+# The tests load this file by path with `spec_from_file_location`, which does not put its
+# directory on the import path the way running it as a script does. Naming the directory
+# here means the sibling module resolves under both.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from sources import (  # noqa: E402
+    ExcelSources,
+    SheetMissing,
+    Sources,
+    slots_for_families,
+)
 
 
 def norm_code(value):
@@ -694,33 +708,36 @@ def sum_for_codes(grouped, codes, ctl_bucket, column):
     return total
 
 
-def find_input(input_dir: Path, *names: str) -> Path:
-    for name in names:
-        candidate = input_dir / name
-        if candidate.exists():
-            return candidate
-    raise FileNotFoundError(f"Required input not found. Expected one of: {', '.join(names)}")
+def build_sources(input_dir: Path) -> Sources:
+    """The dumps folder, with the three multi-sheet inputs expanded into slots."""
+    return ExcelSources(
+        input_dir,
+        extra_slots=slots_for_families(ORDER_BOOK_SHEETS, PRICING_SHEETS, SIGNOFF_SHEETS),
+    )
 
 
-def main(input_dir: Path, output_dir: Path, as_of: str | None = None):
+def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
+         sources: Sources | None = None):
     input_dir = input_dir.resolve()
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    # Where the input frames come from. The dumps folder by default; `scripts/sources.py`
+    # carries the read spec for every slot so that a second backend serves the same
+    # frames without restating twenty-one sheet names and header rows.
+    src = sources if sources is not None else build_sources(input_dir)
     # A month-neutral slot name. It used to be `july0626_rm_tracker_v1.xlsx`, which by
     # August held August demand on a sheet called Schedule August — a filename asserting
     # the wrong month, and one that could not be archived into a July folder without
     # taking the current month's workbook with it. Which file filled the slot is recorded
     # in dumps/README.md, not in the name.
-    model = find_input(input_dir, "rm_tracker_model.xlsx",
-                       "july0626_rm_tracker_v1.xlsx")
-    bucket_map = pd.read_excel(model, sheet_name="Bucketting", header=1, usecols="U:AF")
-    oem = pd.read_excel(model, sheet_name="OEM_key_1_rev codes", header=0, usecols="A:C")
+    bucket_map = src.frame("bucketting")
+    oem = src.frame("oem_key")
     # Pick the sheet for the month being published; fall back to whatever single
     # `Schedule <Month>` sheet the workbook has if that exact one is absent.
     as_of_month_name = (
         pd.Timestamp(as_of) if as_of else pd.Timestamp(datetime.now(timezone.utc).date())
     ).strftime("%B")
-    available = pd.ExcelFile(model).sheet_names
+    available = src.sheet_names("schedule")
     wanted = f"{SCHEDULE_SHEET_PREFIX}{as_of_month_name}"
     month_sheets = [
         name for name in available
@@ -737,17 +754,16 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None):
         raise SystemExit(
             f"No schedule sheet found. Wanted {wanted!r}; the workbook has {month_sheets}"
         )
-    schedule = pd.read_excel(model, sheet_name=schedule_sheet, header=2)
+    schedule = src.frame("schedule", sheet=schedule_sheet)
     # Every real row names a customer. Bounding on that rather than a row count means the
     # sheet can grow — it went from 742 rows to 748 between two workbooks, and a fixed
     # slice would have silently dropped the six new lines.
     schedule = schedule[schedule["Helper Customer"].notna()].copy()
     schedule_month = MONTH_NAMES.index(schedule_sheet[len(SCHEDULE_SHEET_PREFIX):]) + 1 \
         if schedule_sheet[len(SCHEDULE_SHEET_PREFIX):] in MONTH_NAMES else None
-    supplement_path = input_dir / SCHEDULE_SUPPLEMENT_FILE
     schedule_supplement_rows = 0
-    if supplement_path.exists():
-        supplement = pd.read_excel(supplement_path)
+    if src.available("schedule_supplement"):
+        supplement = src.frame("schedule_supplement")
         missing_columns = set(schedule.columns) - set(supplement.columns)
         if missing_columns:
             raise SystemExit(
@@ -756,31 +772,23 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None):
             )
         schedule_supplement_rows = int(len(supplement))
         schedule = pd.concat([schedule, supplement[schedule.columns]], ignore_index=True)
-    # Read material-code columns as text. pandas infers a float dtype for codes stored
-    # as text and silently drops their last digit: 3907863 reads as 3907860 on 3,603 of
-    # 3,989 sales rows and 111120634 as 111120630 on 626 of 706 WIP rows. Every other
-    # key column in every dump reads correctly.
-    sales = pd.read_excel(
-        input_dir / "sales.xlsx", sheet_name="Sheet1", dtype={"MATERAIL NUMBER": str}
-    )
+    # Material-code columns are read as text — the reason is on the `_sales_like` spec
+    # in `scripts/sources.py`, beside the pin that enforces it.
+    sales = src.frame("sales")
     # Kept unenriched for the code repository, which reads the raw invoice columns and
     # must not inherit the schedule-matching frame's later transformations.
     sales_raw = sales.copy()
-    stock = pd.read_excel(input_dir / "stock.xlsx", sheet_name="PLANT STOCKS", header=1)
-    wip = pd.read_excel(input_dir / "wip.xlsx", dtype={"Material\xa0No": str})
+    stock = src.frame("stock")
+    wip = src.frame("wip")
     wip.columns = [str(c).replace("\xa0", " ") for c in wip.columns]
-    rfd = pd.read_excel(
-        find_input(input_dir, "rfd_4731.xlsx", "rfd.xlsx"),
-        sheet_name="Sheet5",
-        header=1,
-    )
+    rfd = src.frame("rfd")
     # ZMAT is the single material master. A material-mapping extract covering
     # descriptions it lacks is merged into this file by
     # `scripts/merge_material_mapping.py` and then discarded — never read here as a
     # second source, which would mean filtering and reasoning about two files on every
     # run to answer one question.
-    zmat = pd.read_excel(input_dir / "zmat.xlsx", sheet_name="Sheet1")
-    vsm = pd.read_excel(input_dir / "rm_tracker_tvsm.xlsx", sheet_name="TVSM", header=2)
+    zmat = src.frame("zmat")
+    vsm = src.frame("vsm_tvsm")
     # Drop the sheet's own grand total before anything sums a column off it.
     vsm_total_rows = sheet_total_rows(
         vsm, "key", ("VSM Requirement", "VSM Sales", "VSM Stock")
@@ -796,62 +804,37 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None):
         for i in vsm_total_rows
     ]
     vsm = vsm.drop(index=vsm_total_rows)
-    receivables_path = input_dir / "yf65.xlsx"
-    receivables = (
-        pd.read_excel(receivables_path, sheet_name="Sheet1")
-        if receivables_path.exists()
-        else pd.DataFrame()
-    )
+    receivables = src.frame_or_empty("receivables")
     # An optional longer sales window. The daily sales dump is the current month only,
     # which is too short to see every code a customer has been billed under, so the
     # code repository reads this file when it is supplied and the daily dump otherwise.
-    history_path = input_dir / "sales_history.xlsx"
-    sales_history = (
-        pd.read_excel(history_path, dtype={"MATERAIL NUMBER": str})
-        if history_path.exists()
-        else pd.DataFrame()
-    )
+    sales_history = src.frame_or_empty("sales_history")
     # Quarterly sales extracts for the trend view. Optional, and read on the same terms
     # as the daily dump: material number as text, `Sheet1` only.
     trend_history_raw = []
     trend_sources = []
     for filename in SALES_TREND_FILES:
-        path = input_dir / filename
-        if not path.exists():
+        slot = Path(filename).stem
+        if not src.available(slot):
             continue
-        frame = pd.read_excel(
-            path, sheet_name=SALES_TREND_SHEET, dtype={"MATERAIL NUMBER": str}
-        )
+        frame = src.frame(slot)
         trend_history_raw.append(frame)
         trend_sources.append({"file": filename, "rows": int(len(frame))})
     # Order book from the sales-planning consolidation: three sheets, one per despatching
     # origin, each with its own quantity column. Optional, like the other planning files.
-    orders_path = input_dir / "orders.xlsx"
-    order_sheets = {}
-    if orders_path.exists():
-        for sheet, spec in ORDER_BOOK_SHEETS.items():
-            # Read every candidate code column as text — pandas infers a float for codes
-            # stored as text and drops their last digit. Naming a column the sheet does
-            # not have is harmless, which is what lets the spec list alternatives.
-            candidates = spec["code_column"]
-            candidates = (candidates,) if isinstance(candidates, str) else (candidates or ())
-            order_sheets[sheet] = pd.read_excel(
-                orders_path, sheet_name=sheet, header=spec["header"],
-                dtype={column: str for column in candidates} or None,
-            )
-    contract_path = input_dir / "contract.xlsx"
-    contract_sheets = {}
-    if contract_path.exists():
-        contract_sheets = {
-            route: pd.read_excel(contract_path, sheet_name=spec["sheet"], header=None)
-            for route, spec in PRICING_SHEETS.items()
-        }
-    transfer_path = input_dir / "transfer.xlsx"
-    transfers_raw = (
-        pd.read_excel(transfer_path, dtype={"MATERAIL NUMBER": str})
-        if transfer_path.exists()
-        else pd.DataFrame()
-    )
+    # Each sheet of the order book and the contract is its own slot; the code columns
+    # read as text for the same reason sales does, declared once on the slot.
+    order_sheets = {
+        sheet: src.frame(f"orders:{sheet}")
+        for sheet in ORDER_BOOK_SHEETS
+        if src.available(f"orders:{sheet}")
+    }
+    contract_sheets = {
+        route: src.frame(f"contract:{route}")
+        for route in PRICING_SHEETS
+        if src.available(f"contract:{route}")
+    }
+    transfers_raw = src.frame_or_empty("transfers")
 
     # 1. Build the governed material dimension.
     bucket_map["material_key"] = bucket_map["Material Codes"].map(norm_code)
@@ -2518,9 +2501,7 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None):
     # That sheet is the operating plan for what Megh converts: it carries the schedule,
     # what is on the ground, what is in transit and what has been ordered, all in kg
     # (Stock reconciles to NOS x Wt/Len, and its own Coverage = Stock / Schedule x 30).
-    vsm_stock = pd.read_excel(
-        input_dir / "rm_tracker_tvsm.xlsx", sheet_name="vsm stock", header=2
-    )
+    vsm_stock = src.frame("vsm_stock")
 
     def vsm_key(od, inner, thickness, length, grade, cut):
         parts = [
@@ -4546,13 +4527,12 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None):
     # 16b. Order sign-off. Two columns rather than one total, so a SKU's coverage can be
     # read against firm demand and against the rest separately.
     signoff_by_bucket, signoff_by_sku, signoff_rows = {}, {}, []
-    signoff_path = input_dir / SIGNOFF_FILE
     signoff_unmapped = []
-    if signoff_path.exists():
+    if any(src.available(f"signoff:{sheet}") for sheet in SIGNOFF_SHEETS):
         for sheet, spec in SIGNOFF_SHEETS.items():
             try:
-                frame = pd.read_excel(signoff_path, sheet_name=sheet)
-            except ValueError:
+                frame = src.frame(f"signoff:{sheet}")
+            except (SheetMissing, FileNotFoundError):
                 continue
             if spec["code"] not in frame.columns:
                 continue

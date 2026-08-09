@@ -28,6 +28,28 @@ def load_refresh_module():
     return module
 
 
+def all_input_slots():
+    """Every declared read, including the three inputs whose sheets come from a spec.
+
+    `orders`, `contract` and `signoff` list their sheets in the pipeline rather than in
+    the registry, because the rest of the pipeline reads those specs for their business
+    columns too. Expanding them here means a test asking "what does the pipeline read"
+    gets the whole answer, not the part that happened to be written as a literal.
+    """
+    refresh_module = load_refresh_module()
+    # Loading the pipeline puts its own directory on the import path, which is what makes
+    # the sibling registry importable here by name.
+    import sources
+
+    slots = dict(sources.SLOTS)
+    slots.update(sources.slots_for_families(
+        refresh_module.ORDER_BOOK_SHEETS,
+        refresh_module.PRICING_SHEETS,
+        refresh_module.SIGNOFF_SHEETS,
+    ))
+    return slots
+
+
 def test_approved_master_checksums_and_sheets():
     manifest = json.loads(
         (SKILL_ROOT / "config" / "master_manifest.json").read_text(encoding="utf-8")
@@ -387,18 +409,46 @@ def test_config_lists_every_input_the_pipeline_reads():
     longer used, and `required_sheets` never gained the `vsm stock` sheet the Megh
     tracker depends on, because nothing compared the two.
     """
-    script = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
     config = json.loads(
         (SKILL_ROOT / "config" / "pipeline.json").read_text(encoding="utf-8")
     )
-    read = set(re.findall(r'input_dir / "([a-z0-9_]+\.xlsx)"', script))
-    read |= set(re.findall(r'find_input\(input_dir, "([a-z0-9_]+\.xlsx)"', script))
-    # Files read through a constant rather than a literal path still have to be declared.
-    refresh_module = load_refresh_module()
-    read |= set(refresh_module.SALES_TREND_FILES)
-    read.add(refresh_module.SIGNOFF_FILE)
+    # Every read the pipeline makes is declared once, as a slot in `scripts/sources.py`.
+    # Comparing the registry against the config beats grepping for `pd.read_excel` — it is
+    # the same question asked of the thing that now answers it, and it keeps holding when a
+    # second backend serves the same slots from somewhere other than a file.
+    slots = all_input_slots()
+    # A slot's first filename is the canonical one; any after it are older names still
+    # accepted so that a workbook already archived under one keeps loading. The config
+    # declares canonical names, so those are what it is compared against — and the
+    # fallbacks are named here, because one added silently is a second file the pipeline
+    # will read without anything saying so.
+    read = {spec.files[0] for spec in slots.values()}
     declared = set(config["canonical_inputs"].values()) | set(config["optional_inputs"])
     assert read == declared, f"undeclared {read - declared}, stale {declared - read}"
+    fallbacks = {name for spec in slots.values() for name in spec.files[1:]}
+    assert fallbacks == {"july0626_rm_tracker_v1.xlsx", "rfd.xlsx"}
+
+
+def test_the_pipeline_reads_nothing_except_through_the_source_registry():
+    """One inline `pd.read_excel` is enough to break a second backend, silently.
+
+    The whole point of the registry is that a backend other than the dumps folder can
+    serve every frame the pipeline needs. A read that goes straight to a file bypasses
+    it: run against Postgres, that one frame would still come off disk — stale, or
+    absent, and in neither case announced. The failure would surface as a wrong number
+    on a page, not as an error.
+
+    So the pipeline gets its frames from `src` and from nowhere else. The registry
+    itself is exempt, since performing the reads is its job.
+    """
+    script = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
+    for forbidden in ("pd.read_excel", "pd.ExcelFile", "pd.read_csv"):
+        assert forbidden not in script, f"{forbidden} belongs in scripts/sources.py"
+    # Reaching into the input directory by hand is the same bypass wearing a hat.
+    assert "input_dir /" not in script
+
+    registry = (SKILL_ROOT / "scripts" / "sources.py").read_text(encoding="utf-8")
+    assert "pd.read_excel" in registry
 
 
 def test_config_lists_every_sheet_the_pipeline_reads():
@@ -580,7 +630,8 @@ def test_a_schedule_from_another_month_is_announced_on_the_page():
         "if schedule_month is not None and as_of_date.month != schedule_month:"):]
     guard = guard[:guard.index("if qc[")]
     assert "warnings.append" in guard and "failures.append" not in guard
-    assert "sheet_name=schedule_sheet" in script, "the sheet must be the resolved one"
+    assert 'src.frame("schedule", sheet=schedule_sheet)' in script, \
+        "the sheet must be the resolved one"
 
 
 def test_near_gauge_thicknesses_group_onto_a_governed_one():
@@ -657,8 +708,12 @@ def test_dumps_shows_the_current_month_and_archives_the_rest():
 
     config = json.loads((SKILL_ROOT / "config" / "pipeline.json").read_text(encoding="utf-8"))
     assert config["canonical_inputs"]["model"] == "rm_tracker_model.xlsx"
-    script = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
-    assert '"july0626_rm_tracker_v1.xlsx"' in script, "the old name stays readable as a fallback"
+    # The slot accepts the month-neutral name first and the old one after it, so a
+    # workbook already archived under the July name still loads.
+    model_files = all_input_slots()["schedule"].files
+    assert model_files[0] == "rm_tracker_model.xlsx"
+    assert "july0626_rm_tracker_v1.xlsx" in model_files, \
+        "the old name stays readable as a fallback"
 
     repo = REPO_ROOT
     if (repo / "dumps").is_dir():
