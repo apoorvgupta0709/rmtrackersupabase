@@ -8,3 +8,7 @@ node_modules/
 .vercel/
 .env*.local
 tools/.cells/
+/.next/
+next-env.d.ts
+*.tsbuildinfo
+.playwright-mcp/

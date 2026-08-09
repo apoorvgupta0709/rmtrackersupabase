@@ -1,0 +1,234 @@
+/*
+ * Mill-floor instrumentation.
+ *
+ * This is not a product dashboard; it is the screen someone checks at 12:10 IST to find
+ * out whether a size is short before the plant rolls it. So it reads like a technical
+ * drawing: blueprint stock rather than white, graphite ink, hairline rules, registration
+ * marks in the corners, and every figure set in tabular mono so columns of tonnage line
+ * up on the decimal. The one warm colour is furnace orange, spent sparingly, on the
+ * things that mean act now.
+ */
+
+:root {
+  --paper: #f4f2ee;
+  --paper-deep: #eae6df;
+  --surface: #fffdfa;
+  --ink: #16181c;
+  --ink-soft: #4a4f57;
+  --ink-faint: #878b91;
+  --rule: #d9d4ca;
+  --rule-strong: #b9b2a5;
+
+  --furnace: #d64500;
+  --furnace-soft: #fbeadf;
+  --steel: #1f4e5f;
+
+  --pass: #16704a;
+  --warn: #9a5b06;
+  --fail: #a5251c;
+
+  --grid: rgba(22, 24, 28, 0.045);
+
+  --display: var(--font-display), "Helvetica Neue", sans-serif;
+  --mono: var(--font-mono), ui-monospace, monospace;
+
+  --tight: 0.02em;
+  --shadow-lift: 0 1px 0 rgba(22, 24, 28, 0.04), 0 8px 24px -18px rgba(22, 24, 28, 0.5);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Graph paper, barely there. Enough to say "drawing", not enough to read through. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+body > * { position: relative; z-index: 1; }
+
+h1, h2, h3 { font-weight: 600; letter-spacing: -0.015em; margin: 0; }
+
+a { color: var(--steel); text-underline-offset: 3px; }
+
+/* ---- Type helpers ------------------------------------------------------- */
+
+.label {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.figure {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.hint { color: var(--ink-soft); font-size: 13.5px; }
+
+/* ---- Registration marks ------------------------------------------------- */
+/* The corner ticks on a drawing sheet. Purely decorative, and the detail that makes
+   the page feel measured rather than laid out. */
+
+.sheet {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+}
+
+.sheet::before, .sheet::after {
+  content: "";
+  position: absolute;
+  width: 9px; height: 9px;
+  border: 1px solid var(--rule-strong);
+  pointer-events: none;
+}
+.sheet::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+.sheet::after { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+
+/* ---- Controls ----------------------------------------------------------- */
+
+.field { display: block; margin-bottom: 16px; }
+.field > .label { display: block; margin-bottom: 6px; }
+
+input[type="email"], input[type="password"], input[type="text"], select {
+  width: 100%;
+  padding: 10px 12px;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule-strong);
+  border-radius: 0;
+  outline: none;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+input:focus, select:focus {
+  border-color: var(--furnace);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--furnace);
+}
+
+button {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 11px 20px;
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  background: var(--ink);
+  color: var(--paper);
+  cursor: pointer;
+  transition: transform 90ms ease, background 120ms ease, color 120ms ease;
+}
+button:hover:not(:disabled) { background: var(--furnace); border-color: var(--furnace); }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+button.ghost {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--rule-strong);
+}
+button.ghost:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+
+/* ---- Status stamp ------------------------------------------------------- */
+/* Reads as something applied to the sheet after inspection, which is what it is. */
+
+.stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border: 1px solid currentColor;
+}
+.stamp::before {
+  content: "";
+  width: 5px; height: 5px;
+  background: currentColor;
+}
+.stamp.pass { color: var(--pass); }
+.stamp.warn { color: var(--warn); }
+.stamp.fail { color: var(--fail); }
+
+/* ---- Notices ------------------------------------------------------------ */
+
+.notice {
+  border-left: 3px solid var(--rule-strong);
+  padding: 10px 14px;
+  font-size: 13.5px;
+  background: var(--paper-deep);
+  color: var(--ink-soft);
+}
+.notice.bad { border-left-color: var(--fail); color: var(--fail); background: #fdf1f0; }
+.notice.warn { border-left-color: var(--warn); color: var(--warn); background: #fdf6ec; }
+
+/* ---- Data table --------------------------------------------------------- */
+
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+thead th {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  text-align: left;
+  font-weight: 500;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--rule-strong);
+  white-space: nowrap;
+}
+tbody td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+}
+tbody tr:hover td { background: var(--paper); }
+td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+.scroll-x { overflow-x: auto; }
+
+/* ---- Page load ---------------------------------------------------------- */
+/* One orchestrated reveal, staggered down the page. Nothing else animates on load. */
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.rise { animation: rise 420ms cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rise { animation: none; }
+  * { transition: none !important; }
+}
