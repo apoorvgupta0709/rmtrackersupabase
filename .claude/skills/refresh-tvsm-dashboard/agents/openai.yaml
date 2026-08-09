@@ -1,0 +1,12 @@
+interface:
+  display_name: Refresh TVSM Dashboard
+  short_description: Build and refresh the TVSM operations dashboard
+  default_prompt: Use $refresh-tvsm-dashboard to process the latest dumps and refresh
+    the TVSM dashboard.
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

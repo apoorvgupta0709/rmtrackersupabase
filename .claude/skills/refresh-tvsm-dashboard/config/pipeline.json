@@ -1,0 +1,344 @@
+{
+  "entry_script": "scripts/refresh_dashboard.py",
+  "canonical_inputs": {
+    "model": "rm_tracker_model.xlsx",
+    "sales": "sales.xlsx",
+    "stock": "stock.xlsx",
+    "wip": "wip.xlsx",
+    "rfd_4731": "rfd_4731.xlsx",
+    "zmat": "zmat.xlsx",
+    "rm_tracker_tvsm": "rm_tracker_tvsm.xlsx"
+  },
+  "required_sheets": {
+    "july0626_rm_tracker_v1.xlsx": [
+      "Schedule July",
+      "Bucketting",
+      "OEM_key_1_rev codes"
+    ],
+    "sales.xlsx": [
+      "Sheet1"
+    ],
+    "stock.xlsx": [
+      "PLANT STOCKS"
+    ],
+    "rfd_4731.xlsx": [
+      "Sheet5"
+    ],
+    "zmat.xlsx": [
+      "Sheet1"
+    ],
+    "rm_tracker_tvsm.xlsx": [
+      "TVSM",
+      "vsm stock"
+    ],
+    "yf65.xlsx": [
+      "Sheet1"
+    ],
+    "contract.xlsx": [
+      "Tata _ERW-Q4 FY26",
+      "Tata_CEW - Q1 FY27"
+    ],
+    "orders.xlsx": [
+      "jsr",
+      "hk_so",
+      "hk_str"
+    ],
+    "sales_q1.xlsx": [
+      "Sheet1"
+    ],
+    "sales_q4.xlsx": [
+      "Sheet1"
+    ],
+    "sales_jul.xlsx": [
+      "Sheet1"
+    ]
+  },
+  "ctl_sources": [
+    "0789 PLANT STOCKS CTL",
+    "4731 rfd_4731 RFD Qty."
+  ],
+  "ll_sources": [
+    "PLANT STOCKS LL",
+    "wip ystockn",
+    "PLANT STOCKS transit rows",
+    "TVSM RM tracker stock"
+  ],
+  "coverage_days": {
+    "critical_below": 15,
+    "low_below": 30,
+    "watch_below": 45,
+    "target": 45
+  },
+  "boiler_material_groups": [
+    "BOT",
+    "COR",
+    "AHT"
+  ],
+  "publication": {
+    "pass": true,
+    "warn": true,
+    "fail": false
+  },
+  "optional_inputs": [
+    "contract.xlsx",
+    "orders.xlsx",
+    "sales_history.xlsx",
+    "sales_jul.xlsx",
+    "sales_q1.xlsx",
+    "sales_q4.xlsx",
+    "signoff.xlsx",
+    "transfer.xlsx",
+    "yf65.xlsx"
+  ],
+  "length": {
+    "long_length_min_m": 3.5,
+    "rule": "LL when CTL/LL flag is LL or LENGTH >= 3.5; CTL only when flag is CTL and LENGTH < 3.5"
+  },
+  "stock_ageing": {
+    "high_age_days": 60,
+    "measured_at": "month end of the as-of date"
+  },
+  "receivables": {
+    "due_days_from_invoice": 47,
+    "billing_doc_types": [
+      "RV",
+      "RD"
+    ],
+    "invoice_number_field": "Billing Doc",
+    "scope": "customers whose OEM resolves to TVS"
+  },
+  "conversion_agent_oem_by_code": {
+    "943209": "TVS",
+    "943210": "HMSIL",
+    "943211": "RE"
+  },
+  "tvs_proxy_customer_names": [
+    "MEGH STEELS PRIVATE LIMITED TVS A"
+  ],
+  "transit_customer_name": "TRANSIT STOCK",
+  "rfd_reconciliation": {
+    "plant": "4731",
+    "applies_to": "CTL",
+    "compare": "MT to MT: SAP holds 4731 in kilograms and repeats KG in NOS, so a piece-for-piece comparison against RFD Qty. is kilograms against units",
+    "rfd_weight_column": "WEIGHT (MT); RFD Qty. is pieces and is quoted in the comment only",
+    "backed_when": "RFD weight for the material is at least what SAP holds, within 10 kg",
+    "shared_rfd_line": "split between the SAP codes it names in proportion to what SAP holds",
+    "write_off": "the sum of the per-material gaps, not whole unbacked lines",
+    "no_piece_count_plants": [
+      "4731",
+      "8406"
+    ]
+  },
+  "do_not_read_sheets": {
+    "stock.xlsx": [
+      "TRANSIT STOCK"
+    ]
+  },
+  "str_plan": {
+    "destination_plant": "8406",
+    "source_plants": [
+      "789",
+      "788",
+      "4731"
+    ],
+    "target_days": 15,
+    "customers": [
+      "NMPL",
+      "Rajsriya Automotive Hosur",
+      "Rajsriya Automotive Mysore",
+      "SANDHAR Hosur",
+      "SANDHAR Mysore"
+    ],
+    "grain": "Bucket (8406 cuts to order, so cover is held at bucket level and one STR line serves any plan customer)",
+    "requirement": "max(0, target_days x schedule MT / days in month - cover)",
+    "cover": "stock at 8406 earmarked to the plan customers + tonnage in transit to 8406",
+    "source_pool": "finished goods at the source plants plus WIP mother tubes, long lengths offered before cut lengths and finished goods before WIP",
+    "wip_to_fg": {
+      "rule": "an STR needs a finished-goods code, so a mother tube is offered under the FERT code whose zmat description matches its own with PTM- swapped for TUB-",
+      "wip_description_prefix": "PTM",
+      "fg_description_prefix": "TUB",
+      "fg_material_type": "FERT",
+      "tie_break": "prefer a code extended to the despatching plant, then one whose governed bucket matches, then the lowest code"
+    }
+  },
+  "transfers": {
+    "source_plant_field": "DESP P LANT",
+    "destination_plant_field": "CUSTOMER  CD",
+    "in_transit_when": "GR DATE is empty",
+    "quantity_unit": "KG",
+    "invoice_type_marker": "TRANSFER"
+  },
+  "order_book": {
+    "source": "sales-planning consolidation, one sheet per despatching origin",
+    "open_quantity_column": {
+      "jsr": "Bal to Desp",
+      "hk_so": "BAL FOR PROD/ROLL(MT)",
+      "hk_str": "Actual BTP (MT)"
+    },
+    "remarks_column": {
+      "jsr": "Remarks",
+      "hk_so": "Remarks",
+      "hk_str": "REMARKS"
+    },
+    "exclude_remark": "C",
+    "age_source": {
+      "jsr": "AGE column",
+      "hk_so": "Ageing Days column",
+      "hk_str": "as-of date less STR Date"
+    },
+    "header_row": {
+      "jsr": 1,
+      "hk_so": 2,
+      "hk_str": 1
+    },
+    "plant_codes": {
+      "PT-HOUS": "789",
+      "PT-KHP": "788",
+      "PT-JSR": "56"
+    },
+    "pooled_to": "governed bucket for the long-length tracker, VSM SKU key for Megh Steel",
+    "megh_customer_match": "customer name contains MEGH",
+    "notes": [
+      "hk_str states no material number, so its code is recovered from the description.",
+      "The three quantity columns report different stages of the same commitment and are never interchanged.",
+      "hk_str states no age, only the date the STR was raised; the age is derived from it.",
+      "Every order line reaching no tracker row is listed individually on the missing-mappings tab.",
+      "A line marked c in the remarks column is not live demand and pools into neither tracker; it is still listed on the missing-mappings tab so the book reconciles."
+    ],
+    "code_recovery": {
+      "order": [
+        "sheet code column",
+        "zmat description",
+        "Megh length-bucketing"
+      ],
+      "supplement": "a material-mapping extract is merged into zmat.xlsx by scripts/merge_material_mapping.py, never read as a second source",
+      "ambiguous": "a description extended under several codes recovers none; the candidates are quoted"
+    }
+  },
+  "megh_length_bucketing": {
+    "source": "the vsm stock plan's own key, length and per-plant material-code columns",
+    "key": "OD-ID-thickness-length-grade-cuttype",
+    "why": "Megh Steel buys length-specific sizes, and the plan names codes Bucketting does not carry",
+    "plant_code_columns": [
+      "056",
+      "0789",
+      "0788"
+    ],
+    "non_numeric_code_is_a_note": true,
+    "export": "megh_length_bucketing.csv",
+    "length_mm_above_m": 20,
+    "assignment_worksheet": "megh_sku_mapping.csv"
+  },
+  "pricing": {
+    "source": "contract.xlsx",
+    "sheets": {
+      "ERW": "Tata _ERW-Q4 FY26",
+      "CEW": "Tata_CEW - Q1 FY27"
+    },
+    "quarters": [
+      "Q3 FY26",
+      "Q4 FY26",
+      "Q1 FY27"
+    ],
+    "operation_rates_inr_per_ton": {
+      "Angle cut": 200,
+      "Chamferring": 700,
+      "Fin cut": 250,
+      "Annealing ERW": 1000,
+      "Annealing CEW": 1250
+    },
+    "bore_tolerance_mm": 0.6,
+    "key": "contract Key = dimension1-dimension2-thickness, matching the first three parts of a governed Bucket; the second dimension is empty for a round tube",
+    "rule": "price per m = base price per m for the quarter + sum(rate INR/tonne x contract kg/m / 1000); LL quoted per metre, CTL per piece at its own length",
+    "high_strength": "ERW 2 and HST grades price off the contract's -HST variant where the size has one; the contract heads that band 'High strength / HST 370/ERW2'",
+    "value_add_sources": {
+      "Fin cut": "Schedule July FC/NFC is FC or FIN CUT",
+      "Chamferring": "Schedule July Chamferring column",
+      "Angle cut": "Schedule July Angle Cut column is AG",
+      "Annealing": "Bucketting Annealed is AN, or the material description carries an -AN- segment"
+    }
+  },
+  "code_repository": {
+    "source": "sales_history.xlsx when supplied, otherwise sales.xlsx",
+    "scope": "customers whose OEM resolves to TVS, plus the Megh Steel conversion codes",
+    "grain": "bill-to code x ship-to code x despatch plant x material code",
+    "purpose": "a price change must be raised against every combination that has actually been billed, and one SKU is often billed under several material codes",
+    "fields": [
+      "bill_to_code",
+      "bill_to_name",
+      "ship_to_code",
+      "ship_to_name",
+      "plant",
+      "material_code",
+      "description",
+      "bucket",
+      "ctl_bucket",
+      "length_mm",
+      "invoices",
+      "qty_nos",
+      "qty_mt",
+      "first_billed",
+      "last_billed"
+    ]
+  },
+  "sales_trend": {
+    "sources": [
+      "sales_q4.xlsx",
+      "sales_q1.xlsx",
+      "sales_jul.xlsx",
+      "sales.xlsx"
+    ],
+    "sheet": "Sheet1",
+    "note": "the other sheets in those workbooks are working copies whose rows are all in Sheet1; reading them double counts",
+    "segments": {
+      "direct": "OEM_key_1_rev codes = TVS, excluding 943209",
+      "agent": "customer code 943209, Megh Steel converting for TVS"
+    },
+    "value_add_source": "Schedule July, matched on material code",
+    "long_length_min_m": 3.5,
+    "month_source": "one month from one source; the daily dump wins, archives fill the rest"
+  },
+  "reference_dumps": {
+    "folder": "dumps",
+    "holds": "every file the owner shared, under the canonical input filenames",
+    "never_deployed": true,
+    "reason": "the GitHub repository is private, the Vercel deployment is not"
+  },
+  "megh_bop": {
+    "source": "list supplied by the owner; dimensions, nominal length, pieces and plant",
+    "items": 17,
+    "nos": 584,
+    "match": "bucket dim1-dim2-thickness exact, then nearest length, one SKU per listed line",
+    "length_tolerance_mm": 50,
+    "unmatched": "added to the Megh tab as its own line item, plan columns zero"
+  },
+  "schedule": {
+    "sheet_prefix": "Schedule ",
+    "resolved_from": "the as-of month, e.g. Schedule August",
+    "fallback": "Schedule July",
+    "row_bound": "every row naming a Helper Customer, not a fixed count"
+  },
+  "dumps_layout": {
+    "current_month": "dumps/ holds the latest of every file for the month being published",
+    "archive": "dumps/YYYY-MM/ holds the month's final set, moved there when the month closes",
+    "archived_by": "scripts/archive_month.py",
+    "stays_at_top_level": [
+      "sales_<mon>.xlsx \u2014 still read as a trend source",
+      "sales_q4.xlsx, sales_q1.xlsx \u2014 still read as trend sources",
+      "zmat.xlsx, contract.xlsx \u2014 masters, not month-specific"
+    ]
+  },
+  "order_signoff": {
+    "file": "signoff.xlsx",
+    "sheets": {
+      "jsr": "Y/N flag on Sign Off; the line's Bal to Desp falls whole to one side",
+      "hosur": "SIGN OFF is the signed MT; the rest of Order Qty in MT is unsigned",
+      "khopoli": "Sign Off and Non Sign Off are both stated; its Order Qty in MT is pieces"
+    },
+    "unused": "jsr's Sign Off Qty \u2014 exceeds Bal to Desp on 9 of 27 rows, so it measures something else",
+    "shown_on": [
+      "long-length tracker",
+      "Megh Steel tracker"
+    ]
+  }
+}

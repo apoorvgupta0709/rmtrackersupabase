@@ -1,0 +1,34 @@
+{
+  "approved_as_of": "2026-08-05",
+  "source": "AgentMail attachments forwarded from apoorv.gupta@tatasteel.com",
+  "masters": [
+    {
+      "path": "assets/masters/rm_tracker_model.xlsx",
+      "sha256": "c232d66c7bc1394987339ad022ae84fd83a46654198562269bad83e84b05e427",
+      "contains": [
+        "Schedule August",
+        "Bucketting",
+        "OEM_key_1_rev codes"
+      ]
+    },
+    {
+      "path": "assets/masters/zmat.xlsx",
+      "sha256": "2dfffaf1c795d49e9145f15213b997136b98a79cf50717a49c93d41861e7f02f",
+      "contains": [
+        "Sheet1"
+      ]
+    },
+    {
+      "path": "assets/masters/contract.xlsx",
+      "sha256": "5d029e7214e23f232cb511f2eb2445f174f12ede4f738fd19f738b2abdb343de",
+      "contains": [
+        "Tata _ERW-Q4 FY26",
+        "Tata_CEW - Q1 FY27"
+      ]
+    }
+  ],
+  "notes": [
+    "zmat.xlsx carries the 30 July material-mapping extract merged in: 20 rows for TUB-O-N-AUT-AN-FC-70.00X3.200X6.00 HST (code 3499608) at 20 plants. Merge future extracts with scripts/merge_material_mapping.py and update this checksum; never keep an extract beside zmat as a second source.",
+    "rm_tracker_model.xlsx is the owner's aug0826 rm tracker v1 as corrected on 5 August (v16), which fills in Rajsriya Automotive at both plants \u2014 62 lines, 450.129 MT \u2014 against the 10 lines and 71.433 MT v15 carried."
+  ]
+}

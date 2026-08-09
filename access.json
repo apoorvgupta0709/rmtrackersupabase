@@ -1,0 +1,68 @@
+{
+  "admin": "apoorv",
+  "salt": "tvsm-dashboard-2026",
+  "accounts": {
+    "apoorv": "daf2a19c4e93f27aac9ceb2cee9e2ace0d2af32217586f8103e0a0d34f059c8f",
+    "mes": "a24047ee73ae673a5da593daa388a540505dc00e02d8c55a64f966f72f871d6c",
+    "groupbuy": "e951fedf5234914009aa690f1d9040abbbd58017af5df96512ef6f5f0a580304"
+  },
+  "tabs": [
+    {
+      "view": "customerView",
+      "label": "Customer tracker"
+    },
+    {
+      "view": "meghView",
+      "label": "Megh Steel sales"
+    },
+    {
+      "view": "llView",
+      "label": "Long-length tracker"
+    },
+    {
+      "view": "mappingView",
+      "label": "Missing mappings"
+    },
+    {
+      "view": "salesView",
+      "label": "Sales summary"
+    },
+    {
+      "view": "trendView",
+      "label": "Past sales trend"
+    },
+    {
+      "view": "pricingView",
+      "label": "SKU pricing"
+    },
+    {
+      "view": "stockView",
+      "label": "Stock analysis"
+    },
+    {
+      "view": "strView",
+      "label": "STR to 8406"
+    },
+    {
+      "view": "transferView",
+      "label": "Transfers"
+    },
+    {
+      "view": "overdueView",
+      "label": "Ancillary overdue"
+    }
+  ],
+  "visible": {
+    "mes": [
+      "meghView"
+    ],
+    "groupbuy": [
+      "customerView",
+      "llView",
+      "salesView",
+      "trendView",
+      "pricingView",
+      "stockView"
+    ]
+  }
+}

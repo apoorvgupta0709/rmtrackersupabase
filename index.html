@@ -1,0 +1,3188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TVSM Operations Dashboard</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #65718a;
+      --line: #e2e8f1;
+      --navy: #0c2849;
+      --blue: #176bba;
+      --critical: #b42318;
+      --low: #d97706;
+      --watch: #846300;
+      --good: #10704a;
+      --shadow: 0 10px 28px rgba(19, 39, 68, .08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      overflow-x: hidden;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      padding: 28px clamp(18px, 4vw, 56px);
+      color: white;
+      background:
+        radial-gradient(circle at 86% 18%, rgba(50, 154, 255, .32), transparent 25%),
+        linear-gradient(128deg, #071a31, var(--navy) 58%, #154d80);
+    }
+    .eyebrow {
+      margin: 0 0 7px;
+      color: #a9cef4;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+    h1 { margin: 0; font-size: clamp(24px, 4vw, 38px); line-height: 1.1; }
+    .subtitle { margin: 10px 0 0; color: #d5e6f8; font-size: 14px; }
+    main { padding: 22px clamp(14px, 4vw, 52px) 56px; }
+    .status {
+      display: none;
+      margin-bottom: 16px;
+      padding: 12px 15px;
+      border: 1px solid;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .status.warn { display: block; color: #7a4b00; background: #fff8e8; border-color: #f2d18e; }
+    .status.fail { display: block; color: #851d17; background: #fff0ee; border-color: #efb3ad; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(135px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .card, .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+    }
+    .card { padding: 16px; }
+    .card-label { color: var(--muted); font-size: 12px; font-weight: 700; }
+    .card-value { margin-top: 8px; font-size: 25px; font-weight: 800; letter-spacing: -.03em; }
+    .card-unit { margin-left: 3px; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .card-drill {
+      padding: 0;
+      border: 0;
+      background: none;
+      color: var(--blue);
+      font: inherit;
+      text-decoration: underline dotted;
+      text-underline-offset: 4px;
+      cursor: pointer;
+    }
+    .card-drill:hover { text-decoration-style: solid; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px; }
+    .tab {
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: white;
+      color: var(--muted);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 750;
+      cursor: pointer;
+    }
+    .tab.active { color: white; background: var(--blue); border-color: var(--blue); }
+    .panel { overflow: hidden; }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 15px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel-title { margin: 0; font-size: 16px; }
+    .panel-note { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    .filters { display: flex; gap: 8px; flex-wrap: wrap; }
+    input, select {
+      min-height: 38px;
+      padding: 8px 10px;
+      border: 1px solid #ccd5e2;
+      border-radius: 8px;
+      background: white;
+      color: var(--ink);
+      font: inherit;
+      font-size: 13px;
+    }
+    .table-wrap { max-height: 66vh; overflow: auto; }
+    .subhead {
+      margin: 0;
+      padding: 13px 16px 9px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      cursor: pointer;
+      user-select: none;
+      padding: 10px 11px;
+      border-bottom: 1px solid var(--line);
+      background: #edf3f9;
+      color: #415069;
+      text-align: left;
+      white-space: nowrap;
+    }
+    td {
+      padding: 9px 11px;
+      border-bottom: 1px solid #edf0f5;
+      vertical-align: top;
+    }
+    tr:hover td { background: #f8fbff; }
+    .total-row td { font-weight: 800; background: #f2f7fc; border-top: 2px solid var(--line); }
+    thead tr:first-child th::after {
+      content: "";
+      margin-left: 5px;
+      color: var(--blue);
+      font-size: 10px;
+    }
+    thead tr:first-child th[data-sorted="asc"]::after { content: "\25B2"; }
+    thead tr:first-child th[data-sorted="desc"]::after { content: "\25BC"; }
+    #signIn.hidden { display: none; }
+    #signIn {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: linear-gradient(160deg, #0d2744, #123a63);
+    }
+    .sign-in-card {
+      width: min(360px, 100%);
+      padding: 26px 26px 22px;
+      background: white;
+      border-radius: 15px;
+      box-shadow: 0 26px 70px rgba(0, 0, 0, .34);
+    }
+    .sign-in-card h2 { margin: 0 0 4px; font-size: 19px; }
+    .sign-in-card p { margin: 0 0 18px; color: var(--muted); font-size: 12.5px; }
+    .sign-in-card label {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .sign-in-card input {
+      width: 100%;
+      margin-bottom: 14px;
+      padding: 9px 11px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font: inherit;
+      font-size: 14px;
+    }
+    .sign-in-card button {
+      width: 100%;
+      padding: 10px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--blue);
+      color: white;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .sign-in-card button:hover { background: #0f5ea8; }
+    .sign-in-error {
+      min-height: 17px;
+      margin: 10px 0 0;
+      color: var(--bad);
+      font-size: 12.5px;
+    }
+    body:not(.is-admin) .admin-only { display: none; }
+    .admin-cell { text-align: center; }
+    .admin-cell input { width: 16px; height: 16px; cursor: pointer; }
+    .admin-locked { color: var(--muted); font-size: 12px; }
+    body.locked main, body.locked .session { display: none; }
+    .session {
+      position: absolute;
+      top: 18px;
+      right: 22px;
+      color: #b9d3ec;
+      font-size: 12px;
+    }
+    .session button {
+      margin-left: 9px;
+      padding: 3px 10px;
+      border: 1px solid rgba(255, 255, 255, .35);
+      border-radius: 7px;
+      background: transparent;
+      color: #eaf3fb;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .session button:hover { background: rgba(255, 255, 255, .12); }
+    .th-filter {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 0 3px;
+      border-radius: 4px;
+      color: #8aa3bd;
+      font-size: 10px;
+      cursor: pointer;
+    }
+    .th-filter:hover { color: var(--blue); background: #e6f0fa; }
+    thead tr:first-child th[data-filtered="1"] { background: #e6f0fa; }
+    thead tr:first-child th[data-filtered="1"] .th-filter { color: var(--blue); }
+    .filter-pop {
+      position: fixed;
+      z-index: 40;
+      width: 268px;
+      max-height: 340px;
+      display: flex;
+      flex-direction: column;
+      /* Keep the list inside the rounded border once it is taller than the box. */
+      overflow: hidden;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      box-shadow: 0 14px 40px rgba(6, 22, 40, .22);
+      font-weight: 400;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    .filter-pop input[type="search"] {
+      margin: 9px 9px 6px;
+      padding: 6px 8px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      font: inherit;
+      font-size: 12px;
+    }
+    .filter-pop-actions {
+      display: flex;
+      gap: 8px;
+      padding: 0 9px 6px;
+      font-size: 11px;
+    }
+    .filter-pop-actions button {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: white;
+      color: var(--blue);
+      padding: 3px 8px;
+      font: inherit;
+      cursor: pointer;
+    }
+    .filter-pop-list {
+      overflow: auto;
+      /* A flex item defaults to min-height:auto and so refuses to shrink below its
+         content: without this the list grows past the popup instead of scrolling, and
+         a column with many distinct values — SAP vs RFD carries a sentence per material
+         — has no scrollbar to drag at all. */
+      min-height: 0;
+      flex: 1 1 auto;
+      overscroll-behavior: contain;
+      padding: 2px 9px 9px;
+      font-size: 12px;
+      color: var(--ink);
+    }
+    .filter-pop-list label {
+      display: flex;
+      gap: 7px;
+      align-items: flex-start;
+      padding: 3px 2px;
+      cursor: pointer;
+    }
+    .filter-pop-list label:hover { background: #f4faff; }
+    .filter-pop-empty { padding: 10px 2px; color: var(--muted); }
+    .totals-row th {
+      z-index: 3;
+      cursor: default;
+      padding-top: 7px;
+      padding-bottom: 7px;
+      background: #dfeaf5;
+      color: var(--navy);
+      font-weight: 800;
+      border-bottom: 2px solid #c3d5e6;
+    }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .critical { color: var(--critical); background: #feeceb; }
+    .low { color: #9a4b00; background: #fff1db; }
+    .watch { color: var(--watch); background: #fff8cf; }
+    .adequate { color: var(--good); background: #e8f7f0; }
+    .no-demand { color: var(--muted); background: #edf0f4; }
+    .muted-cell { color: var(--muted); font-style: italic; }
+    /* Pieces under the tonnage on a cut-length row. A second line rather than a second
+       column: eight months already run across the table, and doubling them would push
+       the totals off the screen the figures are read against. */
+    .in-pieces { display: block; color: var(--muted); font-size: 11px; font-weight: 400; }
+    /* A lookup that found nothing is something to fix, not an empty cell to skim past,
+       so it is coloured like a failure rather than greyed out like an absence. */
+    .lookup-error { color: var(--bad); font-style: italic; }
+    /* Consolidated totals above the trend tables. Its own strip rather than the header
+       card row, because those cards report the current month and these report a window. */
+    .trend-summary {
+      display: flex; flex-wrap: wrap; gap: 10px; padding: 0 16px 14px;
+    }
+    .trend-figure {
+      border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px;
+      min-width: 150px; background: var(--panel);
+    }
+    .trend-figure .trend-label {
+      font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em;
+      color: var(--muted);
+    }
+    .trend-figure .trend-value { font-size: 19px; font-weight: 620; margin-top: 3px; }
+    .trend-figure.is-total { border-color: var(--blue); box-shadow: var(--shadow); }
+    /* Card positions a view does not use. Two classes so this beats .card's own display,
+       whatever order the rules end up in. */
+    .card.is-empty { display: none; }
+    .cell-good { background: #e8f7f0 !important; }
+    .cell-alert { background: #feeceb !important; }
+    .cell-alert .stock-button { border-color: #e5a49e; background: #fff4f3; color: var(--critical); }
+    .stock-button {
+      min-width: 86px;
+      padding: 6px 9px;
+      border: 1px solid #9dc4e8;
+      border-radius: 8px;
+      background: #eef7ff;
+      color: #0b5a9f;
+      font: inherit;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .stock-button:hover { background: #dceeff; border-color: #6ca9dd; }
+    .copy-button {
+      padding: 9px 13px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: white;
+      color: var(--muted);
+      font: inherit;
+      font-size: 12px;
+      font-weight: 750;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .copy-button:hover { color: var(--blue); border-color: #9dc4e8; background: #f4faff; }
+    .copy-button.done { color: var(--good); border-color: #9ad3ba; background: #ecfaf3; }
+    .modal {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+      background: rgba(6, 22, 40, .62);
+    }
+    .modal-card {
+      width: min(1180px, 96vw);
+      max-height: 82vh;
+      overflow: hidden;
+      background: white;
+      border-radius: 15px;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, .3);
+    }
+    .modal-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    .modal-title { margin: 0; font-size: 17px; }
+    .modal-note { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+    .modal-close {
+      width: 34px;
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: white;
+      color: var(--ink);
+      font-size: 21px;
+      cursor: pointer;
+    }
+    .modal-body { max-height: 65vh; overflow: auto; }
+    .hidden { display: none; }
+    .empty { padding: 34px; color: var(--muted); text-align: center; }
+    footer { padding: 12px 2px 0; color: var(--muted); font-size: 11px; }
+    @media (max-width: 1050px) { .cards { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 700px) {
+      .cards { grid-template-columns: repeat(2, 1fr); }
+      .panel-head { align-items: flex-start; flex-direction: column; }
+      .filters { width: 100%; }
+      input, select { flex: 1; min-width: 0; }
+    }
+  </style>
+</head>
+<body class="locked">
+  <div id="signIn">
+    <form class="sign-in-card" id="signInForm" autocomplete="off">
+      <h2>TVSM Operations</h2>
+      <p>Schedule, stock and long-length coverage. Sign in to continue.</p>
+      <label for="signInUser">Username</label>
+      <input id="signInUser" name="username" autocomplete="username" required>
+      <label for="signInPass">Password</label>
+      <input id="signInPass" name="password" type="password" autocomplete="current-password" required>
+      <button type="submit">Sign in</button>
+      <p class="sign-in-error" id="signInError"></p>
+    </form>
+  </div>
+  <header>
+    <p class="eyebrow">Tubes Operations · TVSM</p>
+    <h1>Schedule, Stock & Long-Length Coverage</h1>
+    <p class="subtitle" id="refreshMeta">Loading refresh metadata…</p>
+    <p class="session hidden" id="sessionBar"><span id="sessionUser"></span><button type="button" class="hidden" id="exitPreview">Exit preview</button><button type="button" id="signOut">Sign out</button></p>
+  </header>
+  <main>
+    <div id="statusBanner" class="status"></div>
+    <section class="cards" id="cardRow">
+      <article class="card"><div class="card-label" id="card1Label">Schedule</div><div class="card-value" id="card1Value">–</div></article>
+      <article class="card"><div class="card-label" id="card2Label">Sales</div><div class="card-value" id="card2Value">–</div></article>
+      <article class="card"><div class="card-label" id="card3Label">Open balance</div><div class="card-value" id="card3Value">–</div></article>
+      <article class="card"><div class="card-label" id="card4Label">Active lines</div><div class="card-value" id="card4Value">–</div></article>
+      <article class="card"><div class="card-label" id="card5Label">Critical LL buckets</div><div class="card-value" id="card5Value">–</div></article>
+      <article class="card"><div class="card-label" id="card6Label">Low LL buckets</div><div class="card-value" id="card6Value">–</div></article>
+      <article class="card"><div class="card-label" id="card7Label">Low LL buckets</div><div class="card-value" id="card7Value">–</div></article>
+    </section>
+
+    <nav class="tabs" aria-label="Dashboard views">
+      <button class="tab active" data-view="customerView">Customer tracker</button>
+      <button class="tab" data-view="meghView">Megh Steel sales</button>
+      <button class="tab" data-view="llView">Long-length tracker</button>
+      <button class="tab" data-view="mappingView">Missing mappings</button>
+      <button class="tab" data-view="salesView">Sales summary</button>
+      <button class="tab" data-view="trendView">Past sales trend</button>
+      <button class="tab" data-view="pricingView">SKU pricing</button>
+      <button class="tab" data-view="stockView">Stock analysis</button>
+      <button class="tab" data-view="strView">STR to 8406</button>
+      <button class="tab" data-view="transferView">Transfers</button>
+      <button class="tab" data-view="overdueView">Ancillary overdue</button>
+      <button class="tab admin-only" data-view="adminView">Admin</button>
+    </nav>
+
+    <section id="customerView" class="panel">
+      <div class="panel-head">
+        <div>
+          <h2 class="panel-title">Customer schedule tracker</h2>
+          <p class="panel-note">Select a customer to see every SKU with schedule or dispatch. Click stock totals for plant and material details.</p>
+        </div>
+        <div class="filters">
+          <button class="copy-button" data-copy-target="customerTable">Copy table</button>
+          <button class="copy-button" id="copyDispatch">Copy dispatch plan</button>
+          <button class="copy-button" id="copyClearance">Copy clearance list</button>
+          <select id="customerSelect"><option value="">Select customer…</option></select>
+          <input id="skuSearch" type="search" placeholder="Filter SKU">
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="customerTable">
+          <thead><tr><th>OEM</th><th>Customer</th><th>SKU / CTL bucket</th><th>Plant</th><th data-sum="0" class="num">Schedule Qty</th><th data-sum="0" class="num">Dispatch Qty</th><th data-sum="0" class="num">Balance Qty</th><th data-sum="3" class="num">Schedule MT</th><th data-sum="3" class="num">Dispatch MT</th><th data-sum="3" class="num">Balance MT</th><th class="num">CTL stock NOS</th><th class="num">LL stock MT</th><th class="num">Avg month sales</th></tr><tr class="totals-row"><th>Total</th><th></th><th></th><th></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th><th></th><th></th><th></th></tr></thead>
+          <tbody id="customerBody"></tbody>
+        </table>
+        <div id="customerEmpty" class="empty">Select a customer to view its SKUs.</div>
+        <div id="customerCrfhBlock" class="hidden">
+        <h3 class="subhead">CRFH line items</h3>
+        <table id="customerCrfhTable">
+          <thead><tr><th>OEM</th><th>Customer</th><th>SKU / CTL bucket</th><th>Plant</th><th data-sum="0" class="num">Schedule Qty</th><th data-sum="0" class="num">Dispatch Qty</th><th data-sum="0" class="num">Balance Qty</th><th data-sum="3" class="num">Schedule MT</th><th data-sum="3" class="num">Dispatch MT</th><th data-sum="3" class="num">Balance MT</th><th class="num">CTL stock NOS</th><th class="num">LL stock MT</th><th class="num">Avg month sales</th></tr><tr class="totals-row"><th>Total</th><th></th><th></th><th></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th><th></th><th></th><th></th></tr></thead>
+          <tbody id="customerCrfhBody"></tbody>
+        </table>
+        <div id="customerCrfhEmpty" class="empty">Select a customer to view its SKUs.</div>
+        </div>
+        <h3 class="subhead">Sales history — every SKU this customer has bought</h3>
+        <p class="panel-note" id="customerHistoryNote"></p>
+        <div class="filters">
+          <button class="copy-button" data-copy-target="customerHistoryTable">Copy history</button>
+          <input id="customerHistorySearch" type="search" placeholder="Filter SKU">
+          <select id="customerHistoryScope">
+            <option value="">Every SKU bought</option>
+            <option value="scheduled">On this month's schedule only</option>
+            <option value="dropped">Bought before, not scheduled now</option>
+          </select>
+        </div>
+        <table id="customerHistoryTable">
+          <thead id="customerHistoryHead"></thead>
+          <tbody id="customerHistoryBody"></tbody>
+        </table>
+        <div id="customerHistoryEmpty" class="empty">Select a customer to view its sales history.</div>
+      </div>
+    </section>
+
+    <section id="meghView" class="panel hidden">
+      <div class="panel-head">
+        <div>
+          <h2 class="panel-title">Megh Steel SKU tracker</h2>
+          <p class="panel-note">Every SKU in the RM tracker <code>vsm stock</code> plan carrying a schedule or stock, keyed on OD, ID, thickness, length, grade and cut type. Megh Steel runs a vendor service model: Tata Steel supplies it, and it supplies TVSM, Royal Enfield and HMSIL. <strong>Supplied to</strong> names which — the plan marks the RE and HMSIL sizes with a <code>Megh-</code> key prefix, and which of the two comes from the conversion-agent code that has bought the size (943210 HMSIL, 943211 RE). A size the prefix marks but no code has bought yet reads <em>RE or HMSIL</em> and answers to both filters. Schedule, stock and the OMS order figure come from that plan; sales from the sales dump; the sales-planning order column is the live order book from the three despatching plants, excluding lines marked <code>c</code> in the remarks column, opened plant by plant; the last two columns are long-length stock Tata Steel could still allocate. Click any figure for its breakup. <strong>BOP</strong> marks a bought-out part — a size Megh buys finished rather than converting, from the list supplied by the owner; hover the badge for the listed size, pieces and plant. An amber badge means the listed length was nominal and the SKU was matched on the nearest cut length, with the gap named. Cut type states what the plan's own <code>FC/NFC</code> column says — FC is fin cut, NFC is not — while the cut token inside the SKU key comes from the governed bucket so the plan and the stock frames match on it, so the two can differ on a SKU.</p>
+        </div>
+        <div class="filters">
+          <button class="copy-button" data-copy-target="meghTable">Copy table</button>
+          <button class="copy-button" data-copy-target="lengthBucketTable">Copy length-bucketing</button>
+          <select id="meghOem">
+            <option value="">All end OEMs</option>
+            <option value="TVSM">TVSM only</option>
+            <option value="RE">RE only</option>
+            <option value="HMSIL">HMSIL only</option>
+          </select>
+          <select id="meghBop">
+            <option value="">BOP and converted</option>
+            <option value="bop">Bought-out parts only</option>
+            <option value="own">Converted by Megh only</option>
+            <option value="offplan">BOP sizes not in the plan</option>
+          </select>
+          <select id="meghCut">
+            <option value="">Fin cut and non fin cut</option>
+            <option value="Fin cut">Fin cut only</option>
+            <option value="Non fin cut">Non fin cut only</option>
+          </select>
+          <input id="meghSearch" type="search" placeholder="Filter SKU or grade">
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="meghTable">
+          <thead><tr>
+            <th class="num">OD</th><th class="num">ID</th><th class="num">Thickness</th>
+            <th class="num">Length</th><th>Grade</th><th>Cut type</th><th>Supplied to</th><th>BOP</th>
+            <th data-sum="3" class="num">Schedule</th><th data-sum="3" class="num">Total stock</th>
+            <th data-sum="3" class="num">Orders logged as per OMS</th>
+            <th data-sum="3" class="num">Orders logged as per sales planning</th>
+            <th data-sum="3" class="num">Signed off</th>
+            <th data-sum="3" class="num">Not signed off</th>
+            <th data-sum="3" class="num">Sales to Megh</th>
+            <th data-sum="3" class="num">Stock at length</th>
+            <th data-sum="3" class="num">Other length stock</th>
+            <th class="num">Coverage days</th>
+          </tr><tr class="totals-row">
+            <th>Total</th><th></th><th></th><th></th><th></th><th></th><th></th><th></th>
+            <th class="num"></th><th class="num"></th><th class="num"></th>
+            <th class="num"></th><th class="num"></th><th class="num"></th><th></th>
+          <th class="num"></th><th class="num"></th><th class="num"></th></tr></thead>
+          <tbody id="meghBody"></tbody>
+        </table>
+        <div id="meghEmpty" class="empty hidden">No Megh Steel SKUs are available.</div>
+        <p class="panel-note hidden" id="meghBopUnmatched" style="padding: 8px 16px 0;"></p>
+        <h3 class="subhead">Megh Steel length-bucketing</h3>
+        <p class="panel-note" style="padding: 0 16px 10px;">Megh Steel buys length-specific sizes, so its governing mapping is the bucket <em>plus</em> the length — and <code>Bucketting</code> alone cannot supply it: the plan's own <code>056</code>/<code>0789</code>/<code>0788</code> columns name material codes <code>Bucketting</code> has never heard of. This is that mapping, built from the plan itself, and it is what lets an order for such a code reach a bucket. <strong>Codes not in Bucketting</strong> is the queue to clear — copy the table and paste it into the workbook as a length-bucketing sheet. A blank <strong>Bucket</strong> means the plan's own <code>key</code> column is empty for that size, so nothing governs it; a blank <strong>Material codes</strong> means the plan names none, and <strong>Plan note</strong> shows where it says a code is still to be created.</p>
+        <table id="lengthBucketTable">
+          <thead><tr>
+            <th>Length SKU key</th><th>Bucket</th>
+            <th class="num">OD</th><th class="num">Thickness</th><th class="num">Length</th>
+            <th>Grade</th><th>Cut type</th>
+            <th>Material codes</th><th>Plants</th>
+            <th>Codes not in Bucketting</th><th>Plan note</th><th>On Megh tab</th>
+            <th data-sum="3" class="num">Schedule</th>
+          </tr><tr class="totals-row">
+            <th>Total</th><th></th><th></th><th></th><th></th><th></th><th></th>
+            <th></th><th></th><th></th><th></th><th></th><th class="num"></th>
+          </tr></thead>
+          <tbody id="lengthBucketBody"></tbody>
+        </table>
+        <div id="lengthBucketEmpty" class="empty hidden">No Megh Steel sizes are available.</div>
+      </div>
+    </section>
+
+    <section id="llView" class="panel hidden">
+      <div class="panel-head">
+        <div>
+          <h2 class="panel-title">TVSM long-length coverage</h2>
+          <p class="panel-note">Buckets are in ascending order. Click any metric to see its source breakup and calculation. <strong>Order logged</strong> is the <em>live</em> open order book from the three despatching plants — lines marked <code>c</code> in the remarks column are excluded — Jamshedpur on balance to despatch, Hosur and Khopoli sales on balance for production, and the stock-yard transfers on actual booked to production — pooled to the bucket and opened line item by line item against the plant that owes it. The <strong>month-named sales column</strong> is what TSL billed on that bucket in the last <em>complete</em> month, so a month in progress is never set against a full one; it opens the whole billing window month by month, split between the ancillaries buying direct and Megh Steel converting for TVS. It is TSL's own billing and so does not carry Megh's dispatch to TVSM, which the current-month <strong>Total sales</strong> column beside it does — the two answer different questions and are not meant to tie.</p>
+        </div>
+        <div class="filters">
+          <button class="copy-button" data-copy-target="llTable">Copy table</button>
+          <input id="llSearch" type="search" placeholder="Search bucket">
+          <select id="riskFilter">
+            <option value="">All risks</option>
+            <option>Critical</option><option>Low</option><option>Watch</option>
+            <option>Adequate</option><option>No demand</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="llTable">
+          <thead><tr><th>Risk</th><th>Bucket</th><th data-sum="2" class="num">Total schedule</th><th data-sum="2" class="num">Total sales</th><th data-sum="2" class="num" id="llLastMonthHead">Last month sales</th><th data-sum="2" class="num">Total stock</th><th data-sum="2" class="num">Order logged</th><th data-sum="3" class="num">Signed off</th><th data-sum="3" class="num">Not signed off</th><th class="num">Coverage days</th><th data-sum="2" class="num">Balance</th><th data-sum="2" class="num">Gap to 45 days</th></tr><tr class="totals-row"><th>Total</th><th></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th><th></th><th class="num"></th><th class="num"></th></tr></thead>
+          <tbody id="llBody"></tbody>
+        </table>
+        <div id="llEmpty" class="empty hidden">No matching long-length rows.</div>
+      </div>
+    </section>
+
+    <section id="mappingView" class="panel hidden">
+      <div class="panel-head">
+        <div>
+          <h2 class="panel-title">Missing material and customer mappings</h2>
+          <p class="panel-note">Materials: unresolved TVS OEM sales plus customer 943209. Customers: every sales customer absent from OEM key 1 rev. Schedule: sizes on this month's customer schedules that no governed bucket covers — listed again in their own table below. Order sign-off: material codes in <code>signoff.xlsx</code> that reach neither a bucket nor a plan SKU, so their tonnage sits on no tracker row.</p>
+        </div>
+        <div class="filters">
+          <button class="copy-button" data-copy-target="mappingTable">Copy table</button>
+          <button class="copy-button" data-copy-target="schedMapTable">Copy schedule gaps</button>
+          <button class="copy-button" data-copy-target="meghMapTable">Copy Megh assignments</button>
+          <button class="copy-button" data-copy-target="wipMapTable">Copy WIP assignments</button>
+          <button class="copy-button" data-copy-target="stockMapTable">Copy stock assignments</button>
+          <button class="copy-button" data-copy-target="rfdMapTable">Copy RFD gaps</button>
+          <button class="copy-button" data-copy-target="orderMapTable">Copy order gaps</button>
+          <input id="mappingSearch" type="search" placeholder="Search code, customer or material">
+          <select id="mappingType">
+            <option value="">All mapping types</option>
+            <option>Material</option><option>Customer</option><option>Schedule</option><option>Order sign-off</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="mappingTable">
+          <thead><tr><th>Type</th><th>Source</th><th>Customer code</th><th>Customer</th><th>Material code</th><th>Description</th><th>Reason</th><th data-sum="3" class="num">Affected MT</th></tr><tr class="totals-row"><th>Total</th><th></th><th></th><th></th><th></th><th></th><th></th><th class="num"></th></tr></thead>
+          <tbody id="mappingBody"></tbody>
+        </table>
+        <div id="mappingEmpty" class="empty hidden">No missing mappings match the filters.</div>
+        <h3 class="subhead">Schedule sizes with no governed bucket</h3>
+        <p class="panel-note" style="padding: 0 16px 10px;">Sizes a customer has scheduled this month that <code>Bucketting</code> does not govern, or governs under more than one bucket. Their demand reaches no coverage view until a bucket exists, so each needs a <code>Bucketting</code> entry at source. Sizes that arrived on a schedule the master workbook does not carry name the mail they came from.</p>
+        <table id="schedMapTable">
+          <thead><tr>
+            <th>Customer</th><th>Customer code</th><th>Size as scheduled</th>
+            <th>Material code</th><th>Source</th><th data-sum="3" class="num">Schedule MT</th>
+          </tr><tr class="totals-row">
+            <th>Total</th><th></th><th></th><th></th><th></th><th class="num"></th>
+          </tr></thead>
+          <tbody id="schedMapBody"></tbody>
+        </table>
+        <div id="schedMapEmpty" class="empty hidden">Every scheduled size resolves to a governed bucket.</div>
+        <h3 class="subhead">Megh Steel sales not matching any VSM SKU</h3>
+        <p class="panel-note" style="padding: 0 16px 10px;">Assign each material to a SKU from the Megh Steel tab, then copy the table to update the mapping at source. Assignments live in this browser session only and are not saved back to the dump.</p>
+        <table id="meghMapTable">
+          <thead><tr>
+            <th>Material code</th><th>Description</th><th>Customer</th>
+            <th data-sum="3" class="num">Sales MT</th><th>Key derived from material</th>
+            <th>Assign to SKU</th>
+          </tr><tr class="totals-row">
+            <th>Total</th><th></th><th></th><th class="num"></th><th></th><th></th>
+          </tr></thead>
+          <tbody id="meghMapBody"></tbody>
+        </table>
+        <div id="meghMapEmpty" class="empty hidden">Every Megh sale matches a VSM SKU.</div>
+        <h3 class="subhead">WIP not mapped to any bucket</h3>
+        <p class="panel-note" style="padding: 0 16px 10px;">Unresolved WIP is excluded from long-length stock. Assign each material to a governed bucket, then copy the table to update <code>Bucketting</code> at source. Assignments live in this browser session only.</p>
+        <table id="wipMapTable">
+          <thead><tr>
+            <th>Material code</th><th>Description</th><th>Plant</th>
+            <th data-sum="3" class="num">WIP MT</th><th data-sum="0" class="num">Batches</th>
+            <th>Why unmapped</th><th>Bucket from code</th><th>Assign to bucket</th>
+          </tr><tr class="totals-row">
+            <th>Total</th><th></th><th></th><th class="num"></th><th class="num"></th>
+            <th></th><th></th><th></th>
+          </tr></thead>
+          <tbody id="wipMapBody"></tbody>
+        </table>
+        <div id="wipMapEmpty" class="empty hidden">All WIP resolves to a bucket.</div>
+        <h3 class="subhead">Plant stock not mapped to any bucket</h3>
+        <p class="panel-note" style="padding: 0 16px 10px;">Unmapped plant stock is invisible to every coverage view. Assign each material to a governed bucket, then copy the table to update <code>Bucketting</code> at source. Assignments live in this browser session only.</p>
+        <table id="stockMapTable">
+          <thead><tr>
+            <th>Material code</th><th>Description</th><th>Plant</th><th>Held for</th><th>Type</th>
+            <th data-sum="3" class="num">Stock MT</th><th data-sum="0" class="num">Batches</th>
+            <th>Assign to bucket</th>
+          </tr><tr class="totals-row">
+            <th>Total</th><th></th><th></th><th></th><th></th>
+            <th class="num"></th><th class="num"></th><th></th>
+          </tr></thead>
+          <tbody id="stockMapBody"></tbody>
+        </table>
+        <div id="stockMapEmpty" class="empty hidden">All plant stock resolves to a bucket.</div>
+        <h3 class="subhead">RFD 4731 not mapped to any bucket</h3>
+        <p class="panel-note" style="padding: 0 16px 10px;">RFD quantity that reaches no governed bucket is excluded from cut-length stock. A row with no <code>CTL Code</code> is matched to a 4731 material by OD, ID, thickness and length; these are the rows that even that cannot place. Fix them by filling <code>CTL Code</code> at source or governing the size in <code>Bucketting</code>.</p>
+        <table id="rfdMapTable">
+          <thead><tr>
+            <th>Size OD x ID x thk x length</th><th>Listed CTL Code</th><th>Matched by size</th>
+            <th data-sum="0" class="num">RFD NOS</th><th data-sum="3" class="num">RFD MT</th><th>Why unmapped</th>
+          </tr><tr class="totals-row">
+            <th>Total</th><th></th><th></th><th class="num"></th><th class="num"></th><th></th>
+          </tr></thead>
+          <tbody id="rfdMapBody"></tbody>
+        </table>
+        <div id="rfdMapEmpty" class="empty hidden">All RFD 4731 quantity resolves to a bucket.</div>
+        <h3 class="subhead">Order book lines missing from a tracker view</h3>
+        <p class="panel-note" style="padding: 0 16px 10px;"><strong>Not all of these are unmapped materials.</strong> Lines the planners marked <code>c</code> in the order book's remarks column are excluded from both trackers by instruction; they are listed here so every line in the book is accounted for, labelled <em>Excluded on purpose</em>, and sorted last — they need nothing done to them. Filter <em>Shown on</em> to hide them. Everything above them is a line absent from a view that should carry it, and <em>Shown on</em> says where it does appear — a Megh order on an unscheduled bucket shows on the Megh Steel tab with its full tonnage and is absent only from the long-length tracker, so read that column before treating a row as a mapping failure. <em>Shown on: Nowhere</em> marks the tonnage that reaches no <strong>Order logged</strong> column anywhere; those rows lead the table. The <em>Cause</em> column names the fix: <em>No governed bucket</em> — govern the size in <code>Bucketting</code> (the Hosur/Khopoli transfer sheet carries no material number, so those are matched on description alone). <em>Bucket not scheduled</em> — the long-length tracker's rows are the buckets carrying a schedule, so nothing is wrong with the order. <em>SKU not in plan</em> or <em>Length not governed</em> — add the SKU to <code>vsm stock</code>, or govern the length. One row per line, so the tonnage total double counts nothing.</p>
+        <table id="orderMapTable">
+          <thead><tr>
+            <th>Missing from</th><th>Shown on</th><th>Cause</th>
+            <th>Origin</th><th>Plant</th><th>Type</th><th>Order</th>
+            <th>Customer</th><th>Material code</th><th>Code from</th><th>Description</th>
+            <th>Bucket</th><th>Megh SKU</th>
+            <th class="num">Order age (days)</th><th data-sum="3" class="num">Order MT</th>
+          </tr><tr class="totals-row">
+            <th>Total</th><th></th><th></th><th></th><th></th><th></th><th></th><th></th>
+            <th></th><th></th><th></th><th></th><th></th><th></th><th class="num"></th>
+          </tr></thead>
+          <tbody id="orderMapBody"></tbody>
+        </table>
+        <div id="orderMapEmpty" class="empty hidden">Every open order reaches both tracker views.</div>
+      </div>
+    </section>
+
+    <section id="salesView" class="panel hidden">
+      <div class="panel-head">
+        <div>
+          <h2 class="panel-title">Sales by OEM</h2>
+          <p class="panel-note">Sales are classified through OEM_key_1_rev codes. Click sales MT to see the customer breakup.</p>
+        </div>
+        <div class="filters"><button class="copy-button" data-copy-target="salesTable">Copy table</button></div>
+      </div>
+      <div class="table-wrap">
+        <table id="salesTable">
+          <thead><tr><th>OEM</th><th data-sum="3" class="num">Sales MT</th><th data-sum="0" class="num">Sales NOS</th><th data-sum="0" class="num">Sales metres</th><th data-sum="0" class="num">Customers</th><th data-sum="0" class="num">Transactions</th></tr><tr class="totals-row"><th>Total</th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th></tr></thead>
+          <tbody id="salesBody"></tbody>
+        </table>
+        <div id="salesEmpty" class="empty hidden">No classified sales are available.</div>
+      </div>
+    </section>
+
+    <section id="trendView" class="panel hidden">
+      <div class="panel-head">
+        <div>
+          <h2 class="panel-title">Past sales trend</h2>
+          <p class="panel-note" id="trendNote"></p>
+        </div>
+        <div class="filters">
+          <select id="trendUnit">
+            <option value="mt">Tonnes</option>
+            <option value="nos">Pieces</option>
+          </select>
+          <button class="copy-button" data-copy-target="trendBucketTable">Copy bucket trend</button>
+          <button class="copy-button" data-copy-target="trendCustomerTable">Copy SKU trend</button>
+          <button class="copy-button" data-copy-target="trendPlantTable">Copy plant summary</button>
+        </div>
+      </div>
+      <div class="trend-summary" id="trendSummary"></div>
+      <div class="table-wrap">
+        <h3 class="subhead">Bucket by month</h3>
+        <p class="panel-note" style="padding: 0 16px 10px;">Both parties consolidated. Click any month's tonnage for the split between the ancillaries TSL bills directly and Megh Steel under 943209. A line whose material reaches no governed bucket cannot appear here; its tonnage is in the totals above and in the plant summary below.</p>
+        <table id="trendBucketTable">
+          <thead id="trendBucketHead"></thead>
+          <tbody id="trendBucketBody"></tbody>
+        </table>
+        <div id="trendBucketEmpty" class="empty hidden">No bucketed sales in the window.</div>
+
+        <h3 class="subhead">SKU trend by customer</h3>
+        <div class="filters" style="padding: 0 16px 10px;">
+          <select id="trendCustomer"></select>
+          <input id="trendSkuSearch" type="search" placeholder="Filter SKU or code">
+        </div>
+        <table id="trendCustomerTable">
+          <thead id="trendCustomerHead"></thead>
+          <tbody id="trendCustomerBody"></tbody>
+        </table>
+        <div id="trendCustomerEmpty" class="empty hidden">Select a customer to see its SKUs.</div>
+
+        <h3 class="subhead">Despatch plant summary</h3>
+        <p class="panel-note" style="padding: 0 16px 10px;">Every despatching plant, month by month. Angle cut and chamferring are properties of the SKU as scheduled, and <code>Schedule July</code> is the only sheet that states them, so a historical line inherits the flags of its own material code and one never scheduled in July carries neither.</p>
+        <div class="filters" style="padding: 0 16px 10px;">
+          <select id="trendLengthType">
+            <option value="">Cut length and long length</option>
+            <option value="CTL">Cut length only</option>
+            <option value="LL">Long length only</option>
+          </select>
+          <select id="trendAngleCut">
+            <option value="">Angle cut: any</option>
+            <option value="yes">Angle cut only</option>
+            <option value="no">No angle cut</option>
+          </select>
+          <select id="trendChamfer">
+            <option value="">Chamferring: any</option>
+            <option value="yes">Chamferred only</option>
+            <option value="no">Not chamferred</option>
+          </select>
+        </div>
+        <table id="trendPlantTable">
+          <thead id="trendPlantHead"></thead>
+          <tbody id="trendPlantBody"></tbody>
+        </table>
+        <div id="trendPlantEmpty" class="empty hidden">No sales match these filters.</div>
+      </div>
+    </section>
+    <section id="adminView" class="panel hidden">
+      <div class="panel-head">
+        <div>
+          <h2 class="panel-title">Admin · tab access</h2>
+          <p class="panel-note">Which tabs each account sees. <strong id="adminUser">apoorv</strong> is the admin account: it always sees every tab, including this one, and cannot be restricted. Tick a tab to grant it. Changes apply to this browser at once, so you can check them with “View as” below, but they only reach other people once <code>access.json</code> is published — use “Copy access.json” and hand the file over, or ask for it to be committed.</p>
+          <p class="panel-note"><strong>This hides tabs; it does not withhold data.</strong> The page is static, so <code>data.json</code> holds every tab's figures and can be fetched directly whatever is ticked here. Use it to keep a screen focused, not to keep information from someone.</p>
+          <p class="panel-note" id="adminDirty"></p>
+        </div>
+        <div class="filters">
+          <button class="copy-button" id="copyAccess">Copy access.json</button>
+          <button class="copy-button" id="adminReset">Discard local changes</button>
+          <select id="adminPreview"><option value="">View as admin (all tabs)</option></select>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="adminTable">
+          <thead><tr id="adminHead"><th>Tab</th></tr></thead>
+          <tbody id="adminBody"></tbody>
+        </table>
+      </div>
+    </section>
+    <section id="pricingView" class="panel hidden">
+      <div class="panel-head">
+        <div>
+          <h2 class="panel-title">SKU pricing</h2>
+          <p class="panel-note" id="pricingNote"></p>
+          <p class="panel-note" id="pricingGap"></p>
+        </div>
+        <div class="filters">
+          <button class="copy-button" data-copy-target="pricingTable">Copy table</button>
+          <button class="copy-button" id="raisePcr">Raise PCR</button>
+          <select id="pricingQuarter"></select>
+          <select id="pricingCustomer"><option value="">All customers</option></select>
+          <select id="pricingKind">
+            <option value="">Long and cut length</option>
+            <option value="LL">Long length only</option>
+            <option value="CTL">Cut length only</option>
+          </select>
+          <select id="pricingValueAdd">
+            <option value="">With and without value adds</option>
+            <option value="yes">With value adds</option>
+            <option value="no">Without value adds</option>
+          </select>
+          <input id="pricingSearch" type="search" placeholder="Filter code, description, bucket or key">
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="pricingTable">
+          <thead><tr><th>Customer</th><th>Material code</th><th>Description</th><th>Bucket</th><th>Contract key</th><th>Type</th><th class="num">Length (mm)</th><th class="num">kg/m</th><th class="num">Value adds INR/m</th><th class="num" id="pricingQ1Head"></th><th class="num" id="pricingQ2Head"></th><th class="num" id="pricingQ3Head"></th><th>Unit</th><th data-sum="3" class="num">Schedule MT</th></tr><tr class="totals-row"><th>Total</th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th class="num"></th></tr></thead>
+          <tbody id="pricingBody"></tbody>
+        </table>
+        <div id="pricingEmpty" class="empty hidden">No priced SKUs are available.</div>
+        <div id="pricingRepoBlock">
+          <h3 class="subhead">Material codes billed by customer, ship-to and plant</h3>
+          <p class="panel-note" style="padding: 0 16px 10px;" id="pricingRepoNote"></p>
+          <table id="pricingRepoTable" data-copy-heading="Material codes billed by customer, ship-to and plant">
+            <thead><tr><th>Bill to</th><th>Bill to name</th><th>Ship to</th><th>Ship to name</th><th>Plant</th><th>Material code</th><th>Description</th><th>SKU (CTL bucket)</th><th class="num">Length (mm)</th><th data-sum="0" class="num">Invoices</th><th data-sum="3" class="num">Billed MT</th><th>Last billed</th></tr><tr class="totals-row"><th>Total</th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th class="num"></th><th class="num"></th><th></th></tr></thead>
+            <tbody id="pricingRepoBody"></tbody>
+          </table>
+          <div id="pricingRepoEmpty" class="empty hidden">No billed material codes are available.</div>
+        </div>
+        <div id="pricingUnpricedBlock" class="hidden">
+          <h3 class="subhead">SKUs with no contract price</h3>
+          <table id="pricingUnpricedTable" data-copy-heading="SKUs with no contract price">
+            <thead><tr><th>Customer</th><th>Bucket</th><th>Reason</th><th data-sum="0" class="num">Lines</th><th data-sum="3" class="num">Schedule MT</th></tr><tr class="totals-row"><th>Total</th><th></th><th></th><th class="num"></th><th class="num"></th></tr></thead>
+            <tbody id="pricingUnpricedBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+    <section id="stockView" class="panel hidden">
+      <div class="panel-head">
+        <div>
+          <h2 class="panel-title">Stock analysis</h2>
+          <p class="panel-note">Physical plant stock from PLANT STOCKS as material line items, split by cut length and long length and ordered oldest first. High age is stock ageing beyond 60 days at month end. Plant 4731 cut length is reconciled against RFD 4731 on weight, split into the tonnage RFD matches and the tonnage it does not — the two always add back to Stock MT, so both columns total — with a verdict and a sentence saying what the difference is. The columns are blank wherever the reconciliation does not reach: every plant but 4731, and long length everywhere. SAP holds 4731 and 8406 in kilograms only, so those rows carry no piece count. Click any figure to list its batches with ageing dates.</p>
+        </div>
+        <div class="filters">
+          <button class="copy-button" id="copyStock">Copy table</button>
+          <button class="copy-button" data-copy-target="stockSourceTable">Copy source coverage</button>
+          <select id="stockPlant"><option value="">All plants</option></select>
+          <select id="stockType">
+            <option value="">Cut length and long length</option>
+            <option value="ctl">Cut length only</option>
+            <option value="ll">Long length only</option>
+          </select>
+          <input id="stockSearch" type="search" placeholder="Filter material, description or customer">
+        </div>
+      </div>
+      <div class="table-wrap">
+        <h3 class="subhead">Bucket mapping coverage by source</h3>
+        <p class="panel-note" style="padding: 0 16px 10px;">What each inventory source contributes and how much of it reaches no governed bucket. Unmapped stock is invisible to every coverage view, so this is the size of the blind spot. <code>Bucketting</code> governs the TVS range, so material held for other customers maps at a lower rate by design — open a tonnage to see who each line is held for. The same rows are queued for assignment in Missing mappings.</p>
+        <table id="stockSourceTable" data-copy-heading="Bucket mapping coverage by source">
+          <thead><tr><th>Source</th><th>File</th><th data-sum="0" class="num">Rows</th><th data-sum="3" class="num">Total MT</th><th data-sum="3" class="num">Mapped MT</th><th data-sum="3" class="num">Unmapped MT</th><th class="num">% unmapped</th><th data-sum="0" class="num">Unmapped rows</th></tr><tr class="totals-row"><th>Total</th><th></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th><th></th><th class="num"></th></tr></thead>
+          <tbody id="stockSourceBody"></tbody>
+        </table>
+        <div id="stockCtlBlock">
+        <h3 class="subhead">Cut length (CTL)</h3>
+        <table id="stockCtlTable" data-copy-heading="Cut length (CTL)">
+          <thead><tr><th>Plant</th><th>Material code</th><th>Description</th><th>Held for</th><th class="num">Age (days)</th><th data-sum="3" class="num">Stock MT</th><th data-sum="3" class="num">High age MT</th><th data-sum="0" class="num">Stock NOS</th><th data-sum="0" class="num">Batches</th><th>SAP vs RFD (4731)</th><th data-sum="3" class="num">RFD matches</th><th data-sum="3" class="num">RFD does not match</th><th>What the difference is</th></tr><tr class="totals-row"><th>Total</th><th></th><th></th><th></th><th></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th><th></th><th class="num"></th><th class="num"></th><th></th></tr></thead>
+          <tbody id="stockCtlBody"></tbody>
+        </table>
+        <div id="stockCtlEmpty" class="empty hidden">No cut-length stock is available.</div>
+        </div>
+        <div id="stockLlBlock">
+        <h3 class="subhead">Long length (LL)</h3>
+        <table id="stockLlTable" data-copy-heading="Long length (LL)">
+          <thead><tr><th>Plant</th><th>Material code</th><th>Description</th><th>Held for</th><th class="num">Age (days)</th><th data-sum="3" class="num">Stock MT</th><th data-sum="3" class="num">High age MT</th><th data-sum="0" class="num">Stock NOS</th><th data-sum="0" class="num">Batches</th></tr><tr class="totals-row"><th>Total</th><th></th><th></th><th></th><th></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th></tr></thead>
+          <tbody id="stockLlBody"></tbody>
+        </table>
+        <div id="stockLlEmpty" class="empty hidden">No long-length stock is available.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="strView" class="panel hidden">
+      <div class="panel-head">
+        <div>
+          <h2 class="panel-title">Stock transfer plan · Hosur EPA (8406)</h2>
+          <p class="panel-note" id="strNote">Stock transfers run from 0789, 0788 and 4731 into 8406. The plan holds 15 days of cover at 8406 for Neel Metal, Rajsriya, Sandhar Hosur and Sandhar Mysore, stated per bucket because one STR line serves whichever of them draws on it first. Cover counts ground stock earmarked to those customers at 8406 plus everything already on the road to it. 8406 cuts to order, so long lengths standing there count in full. Sending-plant stock is shown per plant, because an STR is raised on one plant. Click a tonnage to open it; “Copy STR list” gives the finished-goods codes, quantities, source and destination to place the transfer.</p>
+          <p class="panel-note" id="strGap"></p>
+          <p class="panel-note" id="strWipNote"></p>
+        </div>
+        <div class="filters">
+          <button class="copy-button" id="copyStrList">Copy STR list</button>
+          <button class="copy-button" data-copy-target="strTable">Copy table</button>
+          <select id="strRisk">
+            <option value="">All cover states</option>
+            <option value="Short">Short of 15 days</option>
+            <option value="Watch">Watch (15–30 days)</option>
+            <option value="Covered">Covered (30 days+)</option>
+            <option value="No schedule">No July schedule</option>
+          </select>
+          <input id="strSearch" type="search" placeholder="Filter bucket">
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="strTable">
+          <thead><tr><th>Bucket</th><th>Cut lengths (mm)</th><th data-sum="3" class="num">Schedule MT</th><th data-sum="3" class="num">Sales MT</th><th data-sum="3" class="num">15 days coverage req</th><th data-sum="3" class="num">8406 stock incl. in transit</th><th data-sum="3" class="num">Stock required for 15 days</th><th data-sum="3" class="num">At 0789</th><th data-sum="3" class="num">At 0788</th><th data-sum="3" class="num">At 4731</th></tr><tr class="totals-row"><th>Total</th><th></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th><th class="num"></th></tr></thead>
+          <tbody id="strBody"></tbody>
+        </table>
+        <div id="strEmpty" class="empty hidden">No stock transfer plan rows are available.</div>
+        <div id="strUnmappedBlock" class="hidden">
+          <h3 class="subhead">Stock at 8406 held for customers outside the plan</h3>
+          <table id="strUnmappedTable" data-copy-heading="Stock at 8406 outside the plan">
+            <thead><tr><th>Held for</th><th>Customer code</th><th data-sum="3" class="num">Stock MT</th></tr><tr class="totals-row"><th>Total</th><th></th><th class="num"></th></tr></thead>
+            <tbody id="strUnmappedBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="transferView" class="panel hidden">
+      <div class="panel-head">
+        <div>
+          <h2 class="panel-title">Inter-plant transfers</h2>
+          <p class="panel-note" id="transferNote">Every transfer line in the transfer dump, from the despatching plant to the receiving plant. A line stays in transit until the receiving plant posts a goods receipt, so a line with no GRN date is still on the road. Click a tonnage to list its batches.</p>
+        </div>
+        <div class="filters">
+          <button class="copy-button" data-copy-target="transferTable">Copy table</button>
+          <select id="transferSource"><option value="">All source plants</option></select>
+          <select id="transferDest"><option value="">All destination plants</option></select>
+          <select id="transferStatus">
+            <option value="">In transit and received</option>
+            <option value="transit">In transit only</option>
+            <option value="received">Received only</option>
+          </select>
+          <input id="transferSearch" type="search" placeholder="Filter material, invoice or bucket">
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="transferTable">
+          <thead><tr><th>From</th><th>To</th><th>Invoice</th><th>STO</th><th>Despatched</th><th>GRN date</th><th class="num">Days</th><th>Status</th><th>Material code</th><th>Description</th><th>Bucket</th><th>CTL/LL</th><th>Marked for</th><th data-sum="3" class="num">Quantity MT</th><th data-sum="0" class="num">NOS</th><th data-sum="0" class="num">Batches</th></tr><tr class="totals-row"><th>Total</th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th class="num"></th><th class="num"></th><th class="num"></th></tr></thead>
+          <tbody id="transferBody"></tbody>
+        </table>
+        <div id="transferEmpty" class="empty hidden">No transfer lines are available.</div>
+      </div>
+    </section>
+
+    <section id="overdueView" class="panel hidden">
+      <div class="panel-head">
+        <div>
+          <h2 class="panel-title">TVS ancillary overdue</h2>
+          <p class="panel-note">Overdue receivables from yf65 for ancillaries mapped to OEM TVS. An item is overdue once it is unpaid 47 days after its invoice date; open credits net against it. Click an amount to list its documents.</p>
+        </div>
+        <div class="filters">
+          <button class="copy-button" data-copy-target="overdueBodyTable">Copy table</button>
+          <input id="overdueSearch" type="search" placeholder="Filter ancillary">
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="overdueBodyTable">
+          <thead><tr><th>Ancillary</th><th>Customer code</th><th data-sum="2" class="num">Overdue</th><th data-sum="0" class="num">Documents</th><th class="num">Overdue since (days)</th><th data-sum="2" class="num">Over 90 days</th><th data-sum="2" class="num">Open payments and credit notes</th></tr><tr class="totals-row"><th>Total</th><th></th><th class="num"></th><th class="num"></th><th></th><th class="num"></th><th class="num"></th></tr></thead>
+          <tbody id="overdueBody"></tbody>
+        </table>
+        <div id="overdueEmpty" class="empty hidden">No overdue receivables are available. The yf65 file may be missing from this dump set.</div>
+      </div>
+    </section>
+    <footer id="qualityMeta"></footer>
+  </main>
+  <div id="stockModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="stockModalTitle">
+    <section class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h2 id="stockModalTitle" class="modal-title">Stock details</h2>
+          <p id="stockModalNote" class="modal-note"></p>
+        </div>
+        <div class="filters">
+          <button class="copy-button" data-copy-target="stockModalTable">Copy table</button>
+          <button id="stockModalClose" class="modal-close" aria-label="Close">×</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <table id="stockModalTable">
+          <thead><tr id="stockModalHead"></tr></thead>
+          <tbody id="stockModalBody"></tbody>
+        </table>
+        <div id="stockModalEmpty" class="empty hidden">No stock detail is available for this pool.</div>
+      </div>
+    </section>
+  </div>
+  <script>
+    const fmt = (value, digits = 1) =>
+      value === null || value === undefined || Number.isNaN(Number(value))
+        ? "–" : Number(value).toLocaleString("en-IN", { maximumFractionDigits: digits });
+    const esc = value => String(value ?? "").replace(/[&<>"']/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
+    // Only a real shortfall is a failure. RFD holding more than SAP is worth seeing but
+    // is not tonnage to write off, so it is amber rather than red.
+    const rfdVerdictClass = verdict => ({
+      "Match": "adequate",
+      "Short in RFD": "critical",
+      "Not in RFD": "critical",
+      "RFD holds more": "watch",
+    }[verdict] || "no-demand");
+
+    const riskClass = risk => String(risk || "").toLowerCase().replace(/\s+/g, "-");
+
+    let data;
+    async function boot() {
+      const response = await fetch("data.json", { cache: "no-store" });
+      if (!response.ok) throw new Error(`Unable to load data.json (${response.status})`);
+      data = await response.json();
+      const meta = data.metadata;
+      document.getElementById("refreshMeta").textContent =
+        `As of ${meta.as_of} · Refreshed ${new Date(meta.refreshed_at_utc).toLocaleString("en-IN")}`;
+      const banner = document.getElementById("statusBanner");
+      if (meta.status !== "PASS") {
+        banner.className = `status ${meta.status === "FAIL" ? "fail" : "warn"}`;
+        banner.textContent = [...(meta.failures || []), ...(meta.warnings || [])].join(" ");
+      }
+      renderGlobalCards();
+      updateCardVisibility();
+      document.getElementById("qualityMeta").textContent =
+        `Mapping: TVS sales ${fmt(data.mapping_quality.tvs_sales * 100)}% · ` +
+        `TVS stock ${fmt(data.mapping_quality.tvs_stock * 100)}% · WIP ${fmt(data.mapping_quality.wip * 100)}%`;
+
+      const customers = [...new Map(
+        data.customer_lines
+          .filter(r => r.customer_display)
+          .map(r => [r.customer_display, r.OEM])
+      ).entries()].sort((a, b) => a[0].localeCompare(b[0], "en", { numeric: true }));
+      const select = document.getElementById("customerSelect");
+      customers.forEach(([customer, oem]) =>
+        select.add(new Option(`${customer}${oem ? ` · ${oem}` : ""}`, customer)));
+      renderCustomers();
+      renderLL();
+      renderMappings();
+      renderSales();
+      renderTrend();
+      populateStockPlants();
+      renderStockAnalysis();
+      renderMegh();
+      renderMeghMappings();
+      renderWipMappings();
+      renderStockMappings();
+      renderRfdMappings();
+      renderOrderMappings();
+      populatePricingCustomers();
+      renderPricing();
+      renderPricingRepository();
+      renderStr();
+      populateTransferPlants();
+      renderTransfers();
+      renderOverdue();
+      installColumnFilters();
+    }
+
+    // A price is read to the paisa and its unit is already stated in its own column,
+    // so it is rendered plainly rather than through the tonnage button format.
+    const priceButton = (key, value, label) =>
+      key
+        ? `<button class="stock-button" data-stock-key="${esc(key)}" data-stock-label="${esc(label)}">${fmt(value, 2)}</button>`
+        : fmt(value, 2);
+
+    const stockButton = (key, value, unit, label) =>
+      `<button class="stock-button" data-stock-key="${esc(key)}" data-stock-label="${esc(label)}">` +
+      `${fmt(value, unit === "NOS" ? 0 : 2)} ${unit}</button>`;
+
+    // Most buckets and SKUs carry no open order, and a button that opens an empty modal
+    // reads as a defect, so the order columns only offer a drill-down where there is one.
+    const orderCell = (key, value, label) =>
+      key ? stockButton(key, value, "MT", label) : `${fmt(value || 0, 2)} MT`;
+
+    // A value the pipeline looked up and could not resolve. An empty cell reads as
+    // "nothing to report" and gets skimmed past; this says the lookup failed and the
+    // row needs a mapping. It copies as the words "lookup error" too, so a pasted
+    // sheet carries the same signal.
+    const lookedUp = value =>
+      value === null || value === undefined || value === ""
+        ? '<span class="lookup-error">lookup error</span>'
+        : esc(value);
+
+    // Views use different numbers of cards, so a position left over from the previous
+    // view would sit there showing a figure from another context.
+    function hideCardsFrom(position) {
+      for (let i = position; i <= 7; i += 1) {
+        const label = document.getElementById(`card${i}Label`);
+        if (label) label.closest(".card").classList.add("is-empty");
+      }
+    }
+
+    function setCard(position, label, value, unit = "", digits = 0, detailKey = null) {
+      const labelEl = document.getElementById(`card${position}Label`);
+      labelEl.closest(".card").classList.remove("is-empty");
+      labelEl.textContent = label;
+      const body = `${fmt(value, digits)}${unit ? `<span class="card-unit">${esc(unit)}</span>` : ""}`;
+      document.getElementById(`card${position}Value`).innerHTML = detailKey
+        ? `<button class="card-drill" data-stock-key="${esc(detailKey)}" data-stock-label="${esc(label)}">${body}</button>`
+        : body;
+    }
+
+    const CARD_VIEWS = new Set(["customerView", "llView"]);
+
+    function activeView() {
+      const tab = document.querySelector(".tab.active");
+      return tab ? tab.dataset.view : "customerView";
+    }
+
+    function updateCardVisibility() {
+      document.getElementById("cardRow").classList.toggle("hidden", !CARD_VIEWS.has(activeView()));
+    }
+
+    function renderGlobalCards() {
+      if (!data) return;
+      setCard(1, "TVS total schedule (TSL + TVSM)", data.summary.schedule_mt, "MT", 1, "SCHEDULE|TVS_TOTAL");
+      // Two sales cards, not one. What TVSM received is TSL's direct ancillary billing
+      // plus what Megh converted and sold on; what TSL billed is that same direct
+      // figure plus its own sales to Megh. They share a term and differ on the second,
+      // so neither is a subtotal of the other and a single number answers neither.
+      setCard(2, "Sales to TVSM (TSL + Megh)", data.summary.tvsm_received_sales_mt, "MT", 1, "SALES|TVSM_RECEIVED");
+      setCard(3, "TSL billed (TVSM + Megh)", data.summary.tsl_billed_sales_mt, "MT", 1, "SALES|TSL_BILLED");
+      setCard(4, "TVS open balance", data.summary.open_balance_mt, "MT", 1, "BALANCE|TVS_TOTAL");
+      setCard(5, "TVS active lines", data.summary.active_schedule_rows);
+      setCard(6, "Critical LL buckets", data.summary.critical_buckets);
+      setCard(7, "Low LL buckets", data.summary.low_buckets);
+      hideCardsFrom(8);
+    }
+
+    function renderCustomerCards(customer, rows) {
+      if (!customer) {
+        renderGlobalCards();
+        return;
+      }
+      const activeRows = rows.filter(r =>
+        Number(r.schedule_qty || 0) !== 0 || Number(r.sales_qty || 0) !== 0);
+      const sum = field => activeRows.reduce((total, row) => total + Number(row[field] || 0), 0);
+      const activeSkus = new Set(activeRows.map(r => r.ctl_bucket).filter(Boolean));
+      const llCoveredSkus = new Set(
+        activeRows
+          .filter(r => Number(r.open_balance_mt || 0) > 0 && Number(r.ll_stock_pool_mt || 0) > 0)
+          .map(r => r.ctl_bucket)
+          .filter(Boolean)
+      );
+      const llUncoveredSkus = new Set(
+        activeRows
+          .filter(r => Number(r.open_balance_mt || 0) > 0 && Number(r.ll_stock_pool_mt || 0) <= 0)
+          .map(r => r.ctl_bucket)
+          .filter(Boolean)
+      );
+      setCard(1, "Customer schedule", sum("schedule_mt"), "MT", 2);
+      setCard(2, "Customer sales", sum("sales_mt"), "MT", 2);
+      setCard(3, "Customer open balance", sum("open_balance_mt"), "MT", 2);
+      setCard(4, "Active SKUs", activeSkus.size);
+      setCard(5, "LL uncovered SKUs", llUncoveredSkus.size);
+      setCard(6, "LL covered SKUs", llCoveredSkus.size);
+      hideCardsFrom(7);
+    }
+
+    // These two customers buy a large CRFH range alongside their tube SKUs, and want
+    // it read as its own book rather than mixed into the tube lines.
+    const CRFH_SPLIT_CUSTOMERS = new Set(["Marathwada", "Sri Balaji Gear"]);
+
+    const customerRowHtml = r => `<tr>
+      <td>${esc(r.OEM)}</td><td>${esc(r.customer_display)}</td><td>${esc(r.ctl_bucket)}</td><td>${esc(r.Plant)}</td>
+      <td class="num" data-value="${r.schedule_qty}">${fmt(r.schedule_qty, 0)}</td><td class="num" data-value="${r.sales_qty}">${fmt(r.sales_qty, 0)}</td>
+      <td class="num" data-value="${r.balance_qty}">${fmt(r.balance_qty, 0)}</td><td class="num" data-value="${r.schedule_mt}">${fmt(r.schedule_mt, 2)}</td>
+      <td class="num" data-value="${r.sales_mt}">${fmt(r.sales_mt, 2)}</td><td class="num" data-value="${r.balance_mt}">${fmt(r.balance_mt, 2)}</td>
+      <td class="num">${stockButton(r.ctl_stock_detail_key, r.ctl_stock_pool_nos, "NOS", `${r.customer_display} · ${r.ctl_bucket} · CTL stock`)}</td>
+      <td class="num">${stockButton(r.ll_stock_detail_key, r.ll_stock_pool_mt, "MT", `${r.customer_display} · ${r.bucket} · LL stock`)}</td>
+      <td class="num"${r.history_months_active ? ` title="Averaged over the ${r.history_months_active} month${r.history_months_active === 1 ? "" : "s"} this SKU moved in"` : ""}>${stockButton(r.history_detail_key, r.history_avg_month_mt, "MT", `${r.customer_display} · ${r.ctl_bucket} · sales month by month`)}</td>
+    </tr>`;
+    const isCrfh = row => String(row.bucket || "").toUpperCase().includes("CRFH");
+
+    function renderCustomerCrfh(customer, rows) {
+      const split = CRFH_SPLIT_CUSTOMERS.has(customer);
+      document.getElementById("customerCrfhBlock").classList.toggle("hidden", !split);
+      if (!split) { document.getElementById("customerCrfhBody").innerHTML = ""; return; }
+      const crfh = rows.filter(isCrfh);
+      document.getElementById("customerCrfhBody").innerHTML = crfh.map(customerRowHtml).join("");
+      document.getElementById("customerCrfhEmpty").classList.toggle("hidden", crfh.length !== 0);
+      refreshAllTotals();
+    }
+
+    function renderCustomers() {
+      const customer = document.getElementById("customerSelect").value;
+      const query = document.getElementById("skuSearch").value.trim().toLowerCase();
+      const customerRows = data.customer_lines.filter(r => {
+        const hasActivity = Number(r.schedule_qty || 0) !== 0 || Number(r.sales_qty || 0) !== 0;
+        return customer && r.customer_display === customer && hasActivity;
+      });
+      const rows = customerRows.filter(r => {
+        const haystack = `${r.bucket} ${r.ctl_bucket}`.toLowerCase();
+        return !query || haystack.includes(query);
+      });
+      renderCustomerCards(customer, customerRows);
+      renderCustomerCrfh(customer, rows);
+      // CRFH lines move to their own table for the customers that ask for it.
+      const split = CRFH_SPLIT_CUSTOMERS.has(customer);
+      const mainRows = split ? rows.filter(r => !isCrfh(r)) : rows;
+      document.getElementById("customerBody").innerHTML = mainRows.map(customerRowHtml).join("");
+      const empty = document.getElementById("customerEmpty");
+      empty.textContent = customer ? "No SKU with non-zero schedule or dispatch." : "Select a customer to view its SKUs.";
+      empty.classList.toggle("hidden", mainRows.length !== 0);
+      renderCustomerHistory(customer, customerRows);
+          refreshAllTotals();
+    }
+
+    // A cut length is ordered in pieces — the customer's own schedule is written that way
+    // — so a CTL history read only in tonnage is read in the wrong unit: 12.197 MT of a
+    // 2.59 m piece is a figure nobody plans against, and 4,710 pieces is. Both are shown
+    // on CTL rows, pieces under the tonnage. A long length is bought by weight and its
+    // row stays as it was, because a piece count there says nothing a buyer acts on.
+    const inPieces = (r, nos) =>
+      r.length_type === "CTL" && Number(nos) ? `<span class="in-pieces">${fmt(nos, 0)} nos</span>` : "";
+    // The pieces ride on the cell as their own attribute so the totals row can add them
+    // without parsing the two numbers back out of the text.
+    const nosAttr = (r, nos, copyAs) =>
+      r.length_type === "CTL" && Number(nos)
+        ? ` data-nos="${Number(nos)}" data-copy="${copyAs === undefined ? "" : copyAs}"` : "";
+
+    function monthCell(r, month, asPieces) {
+      const mt = r.months[month];
+      const nos = (r.months_nos || {})[month];
+      if (mt === undefined) return '<td class="num" data-value="0"></td>';
+      if (asPieces) {
+        return `<td class="num" data-value="${nos || 0}">${fmt(nos || 0, 0)}</td>`;
+      }
+      return `<td class="num" data-value="${mt || 0}"${nosAttr(r, nos, mt || 0)}>${
+        fmt(mt, 3)} MT${inPieces(r, nos)}</td>`;
+    }
+
+    // What this customer has actually bought, month by month, over the whole history the
+    // trend files carry. The table above it is one month's schedule against one month's
+    // dispatch; this is the question a buying meeting asks next — is that normal, and
+    // what has quietly stopped being ordered.
+    function renderCustomerHistory(customer, customerRows) {
+      trendHead("customerHistoryHead",
+        [{ label: "SKU" }, { label: "Bucket" }, { label: "Length m", num: true },
+         { label: "Type" }, { label: "On schedule" }],
+        [{ label: "Total MT" }, { label: "Total nos", digits: 0 },
+         { label: "Months", digits: 0, agg: "months" },
+         { label: "Avg active month MT", agg: "avg", over: "Total MT",
+           overNos: "Total nos" }]);
+      const months = trendMonths();
+      const query = document.getElementById("customerHistorySearch").value.trim().toLowerCase();
+      const scope = document.getElementById("customerHistoryScope").value;
+      // A SKU counts as scheduled when this month's tracker carries it with movement,
+      // which is the same test the table above applies.
+      const scheduled = new Set(customerRows.map(r => r.ctl_bucket));
+      const all = (trendData().customer_sku_history || []).filter(r => r.customer === customer);
+      const rows = all.filter(r => {
+        if (scope === "scheduled" && !scheduled.has(r.sku)) return false;
+        if (scope === "dropped" && scheduled.has(r.sku)) return false;
+        return !query || `${r.sku} ${r.bucket} ${r.material_codes}`.toLowerCase().includes(query);
+      });
+      // An empty table has two very different causes and states neither, so name them.
+      const meta = (trendData().customer_history_notes || {})[customer] || {};
+      const note = document.getElementById("customerHistoryNote");
+      const window_ = months.length
+        ? `${monthLabel(months[0])} to ${monthLabel(months[months.length - 1])}` : "the history window";
+      if (!customer) {
+        note.textContent = "";
+      } else if (!all.length) {
+        note.innerHTML = `<strong>No sales history over ${esc(window_)}</strong>`
+          + (meta.reason ? ` — ${esc(meta.reason)}.` : ".");
+      } else {
+        const dropped = all.filter(r => !scheduled.has(r.sku));
+        const droppedMt = dropped.reduce((sum, r) => sum + Number(r.total_mt || 0), 0);
+        const shared = meta.shared_codes_with || [];
+        note.innerHTML = `${all.length} SKU${all.length === 1 ? "" : "s"} bought over ${esc(window_)}. `
+          + (dropped.length
+            ? `<strong>${dropped.length}</strong> of them (${fmt(droppedMt, 3)} MT) carry no schedule or dispatch this month.`
+            : "All of them are on this month's schedule.")
+          + (shared.length
+            ? ` <strong>Shares a customer code with ${esc(shared.join(", "))}</strong>, so this history is the code's, not this name's alone.`
+            : "");
+      }
+      document.getElementById("customerHistoryBody").innerHTML = rows.map(r => `<tr>
+        <td>${esc(r.sku)}</td><td>${lookedUp(r.bucket)}</td>
+        <td class="num">${r.length_m === null ? "" : fmt(r.length_m, 3)}</td>
+        <td>${esc(r.length_type)}</td>
+        <td data-value="${scheduled.has(r.sku) ? "Yes" : "No"}">${scheduled.has(r.sku)
+          ? '<span class="badge adequate">Yes</span>'
+          : '<span class="badge watch">Not this month</span>'}</td>
+        ${months.map(m => monthCell(r, m)).join("")}
+        <td class="num" data-value="${r.total_mt}">${stockButton(r.detail_key, r.total_mt, "MT", `${customer} · ${r.sku} · sales month by month`)}</td>
+        <td class="num" data-value="${r.total_nos}">${fmt(r.total_nos, 0)}</td>
+        <td class="num" data-value="${r.months_active}">${fmt(r.months_active, 0)}</td>
+        <td class="num" data-value="${r.avg_active_month_mt || 0}"${nosAttr(r, r.avg_active_month_nos, r.avg_active_month_mt || 0)}>${r.avg_active_month_mt === null ? "" : `${fmt(r.avg_active_month_mt, 3)} MT`}${inPieces(r, r.avg_active_month_nos)}</td>
+      </tr>`).join("");
+      const emptyHistory = document.getElementById("customerHistoryEmpty");
+      emptyHistory.textContent = customer
+        ? "No sales history for this customer in the trend files."
+        : "Select a customer to view its sales history.";
+      emptyHistory.classList.toggle("hidden", rows.length !== 0);
+    }
+
+    function renderLL() {
+      // Name the month rather than saying "last month": the tracker is read beside a
+      // schedule for the month in progress, and two different months in adjacent columns
+      // both labelled by their position invite exactly one mistake.
+      const lastFull = (data.sales_trend || {}).last_full_month;
+      document.getElementById("llLastMonthHead").textContent =
+        lastFull ? `${monthLabel(lastFull)} sales` : "Last month sales";
+      const query = document.getElementById("llSearch").value.trim().toLowerCase();
+      const risk = document.getElementById("riskFilter").value;
+      const rows = data.ll_tracker.filter(r =>
+        (!query || String(r.bucket).toLowerCase().includes(query)) && (!risk || r.risk === risk));
+      document.getElementById("llBody").innerHTML = rows.map(r => `<tr>
+        <td><span class="badge ${riskClass(r.risk)}">${esc(r.risk)}</span></td><td>${esc(r.bucket)}</td>
+        <td class="num" data-value="${r.total_schedule_mt}">${stockButton(`LLSCHEDULE|${r.bucket}`, r.total_schedule_mt, "MT", `${r.bucket} · total schedule breakup`)}</td>
+        <td class="num" data-value="${r.total_sales_mt}">${stockButton(`LLSALES|${r.bucket}`, r.total_sales_mt, "MT", `${r.bucket} · total sales breakup`)}</td>
+        <td class="num" data-value="${r.last_month_sales_mt || 0}">${r.history_detail_key
+          ? stockButton(r.history_detail_key, r.last_month_sales_mt, "MT", `${r.bucket} · billed month by month`)
+          : ""}</td>
+        <td class="num" data-value="${r.available_ll_stock_mt}">${stockButton(r.stock_detail_key, r.available_ll_stock_mt, "MT", `${r.bucket} · consolidated LL stock`)}</td>
+        <td class="num" data-value="${r.order_logged_mt || 0}">${orderCell(r.order_detail_key, r.order_logged_mt, `${r.bucket} · orders logged, plant by plant`)}</td>
+        ${signoffCells(r, r.signoff_detail_key, r.bucket)}
+        <td class="num">${stockButton(`LLCOVERAGE|${r.bucket}`, r.coverage_days, "DAYS", `${r.bucket} · coverage calculation`)}</td>
+        <td class="num" data-value="${r.total_gap_mt}">${stockButton(`LLGAP|${r.bucket}`, r.total_gap_mt, "MT", `${r.bucket} · balance (schedule less sales)`)}</td>
+        <td class="num" data-value="${r.gap_to_45_days_mt}">${stockButton(`LLGAP45|${r.bucket}`, r.gap_to_45_days_mt, "MT", `${r.bucket} · gap to 45 days`)}</td>
+      </tr>`).join("");
+      document.getElementById("llEmpty").classList.toggle("hidden", rows.length !== 0);
+          refreshAllTotals();
+    }
+
+    // Past sales trend. Months run across the columns and are read from the data rather
+    // than hard-coded, so a new month needs no template change.
+    const trendData = () => data.sales_trend || {};
+    const trendMonths = () => trendData().months || [];
+    const monthLabel = month => {
+        const [y, m] = String(month).split("-");
+        return `${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+m - 1] || month} ${String(y).slice(2)}`;
+    };
+
+    function trendHead(id, leading, trailing, monthDigits = 3) {
+      const months = trendMonths();
+      const head = leading.map(h => `<th${h.num ? ' class="num"' : ""}>${esc(h.label)}</th>`).join("")
+        + months.map(m => `<th data-sum="${monthDigits}" data-month="1" class="num">${esc(monthLabel(m))}</th>`).join("")
+        + trailing.map(h => `<th data-sum="${h.digits ?? 3}"${
+            h.agg ? ` data-agg="${h.agg}"` : ""}${
+            h.over ? ` data-agg-over="${esc(h.over)}"` : ""}${
+            h.overNos ? ` data-agg-over-nos="${esc(h.overNos)}"` : ""} class="num">${esc(h.label)}</th>`).join("");
+      const blanks = leading.map(() => "<th></th>").join("")
+        + months.map(() => '<th class="num"></th>').join("")
+        + trailing.map(() => '<th class="num"></th>').join("");
+      // Say which it is when the row carries both, so a cell that averages is not read
+      // as one more thing that was added up.
+      const label = trailing.some(h => h.agg) ? "Total · avg" : "Total";
+      document.getElementById(id).innerHTML =
+        `<tr>${head}</tr><tr class="totals-row">${
+          blanks.replace("<th></th>", `<th>${label}</th>`)}</tr>`;
+    }
+
+    // Which unit the whole tab is being read in. One switch, not one per table: two
+    // that can disagree is worse than none.
+    const trendUnit = () => document.getElementById("trendUnit").value;
+    const inPieces_ = () => trendUnit() === "nos";
+    // A figure in the tab's current unit, with its suffix. Pieces are whole numbers and
+    // take no unit word; tonnes carry MT, because a bare 2,100 beside a bare 3,140,000
+    // is the one thing this switch exists to stop being ambiguous.
+    const trendFigure = (mt, nos) => inPieces_()
+      ? `${fmt(nos || 0, 0)} NOS`
+      : `${fmt(mt || 0, 3)} MT`;
+
+    function renderTrendSummary() {
+      const t = trendData();
+      const totals = (inPieces_() ? t.segment_totals_nos : t.segment_totals) || {};
+      const direct = totals["TVSM ancillaries"] || 0;
+      const megh = totals["Megh Steel 943209"] || 0;
+      document.getElementById("trendNote").innerHTML = t.available
+        ? `What TSL has billed to the TVSM chain, ${esc(monthLabel(t.months[0]))} to ${esc(monthLabel(t.months[t.months.length - 1]))}, from ${esc((t.sources || []).map(s => s.file).join(", "))}. Two parties are tracked and never merged: the ancillaries TSL bills directly, and Megh Steel under 943209, which converts for TVS.`
+        : esc(t.note || "No sales history was supplied.");
+      const figure = (label, value, cls = "") =>
+        `<div class="trend-figure ${cls}"><div class="trend-label">${esc(label)}</div>
+         <div class="trend-value">${inPieces_() ? `${fmt(value, 0)} NOS` : `${fmt(value, 3)} MT`}</div></div>`;
+      document.getElementById("trendSummary").innerHTML =
+        figure("Total sold to both", direct + megh, "is-total")
+        + figure("TVSM ancillaries", direct)
+        + figure("Megh Steel 943209", megh)
+        // Named so the bucket table's subtotal reconciles to the total above it rather
+        // than looking short by an unexplained amount.
+        + (t.unbucketed_mt && !inPieces_() ? figure("Not bucketed", t.unbucketed_mt) : "")
+        + (t.months || []).map(m => {
+            const totals = (t.month_totals || {})[m] || {};
+            const value = inPieces_() ? totals.total_nos : totals.total_mt;
+            return `<div class="trend-figure"><div class="trend-label">${esc(monthLabel(m))}</div>
+              <div class="trend-value">${stockButton(`TRENDMONTH|${m}`, value,
+                inPieces_() ? "NOS" : "MT", `${monthLabel(m)} · split by party`)}</div></div>`;
+          }).join("");
+    }
+
+    function renderTrendBuckets() {
+      const pieces = inPieces_();
+      trendHead("trendBucketHead", [{ label: "Bucket" }],
+                [{ label: "Total", digits: pieces ? 0 : 3 },
+                 { label: "Direct", digits: pieces ? 0 : 3 },
+                 { label: "Megh", digits: pieces ? 0 : 3 }], pieces ? 0 : 3);
+      const months = trendMonths();
+      const rows = trendData().buckets || [];
+      document.getElementById("trendBucketBody").innerHTML = rows.map(r => `<tr>
+        <td>${esc(r.bucket)}</td>
+        ${months.map(m => {
+          const v = pieces ? (r.months_nos || {})[m] : r.months[m];
+          return `<td class="num" data-value="${v || 0}">${v === undefined ? "" :
+            stockButton(`TRENDBUCKET|${r.bucket}|${m}`, v, pieces ? "NOS" : "MT",
+              `${r.bucket} · ${monthLabel(m)} · split by party`)}</td>`;
+        }).join("")}
+        <td class="num" data-value="${pieces ? r.total_nos : r.total_mt}">${trendFigure(r.total_mt, r.total_nos)}</td>
+        <td class="num" data-value="${pieces ? r.direct_nos : r.direct_mt}">${trendFigure(r.direct_mt, r.direct_nos)}</td>
+        <td class="num" data-value="${pieces ? r.megh_nos : r.megh_mt}">${trendFigure(r.megh_mt, r.megh_nos)}</td>
+      </tr>`).join("");
+      document.getElementById("trendBucketEmpty").classList.toggle("hidden", rows.length !== 0);
+    }
+
+    function populateTrendCustomers() {
+      const select = document.getElementById("trendCustomer");
+      if (select.options.length) return;
+      select.add(new Option("Select a customer", ""));
+      (trendData().customers || []).forEach(c => select.add(new Option(c, c)));
+    }
+
+    function renderTrendCustomerSkus() {
+      const pieces = inPieces_();
+      trendHead("trendCustomerHead",
+        [{ label: "SKU" }, { label: "Bucket" }, { label: "Length m", num: true },
+         { label: "Type" }, { label: "Material codes" }],
+        [{ label: "Total MT" }, { label: "Total nos", digits: 0 }], pieces ? 0 : 3);
+      const customer = document.getElementById("trendCustomer").value;
+      const query = document.getElementById("trendSkuSearch").value.trim().toLowerCase();
+      const months = trendMonths();
+      const rows = (trendData().customer_skus || []).filter(r =>
+        r.customer === customer
+        && (!query || `${r.sku} ${r.bucket} ${r.material_codes}`.toLowerCase().includes(query)));
+      document.getElementById("trendCustomerBody").innerHTML = rows.map(r => `<tr>
+        <td>${esc(r.sku)}</td><td>${lookedUp(r.bucket)}</td>
+        <td class="num">${r.length_m === null ? "" : fmt(r.length_m, 3)}</td>
+        <td>${esc(r.length_type)}</td><td>${lookedUp(r.material_codes)}</td>
+        ${months.map(m => monthCell(r, m, pieces)).join("")}
+        <td class="num" data-value="${r.total_mt}">${fmt(r.total_mt, 3)} MT</td>
+        <td class="num" data-value="${r.total_nos}">${fmt(r.total_nos, 0)}</td>
+      </tr>`).join("");
+      const empty = document.getElementById("trendCustomerEmpty");
+      empty.textContent = customer
+        ? "No SKU matches the filter." : "Select a customer to see its SKUs.";
+      empty.classList.toggle("hidden", rows.length !== 0);
+      refreshAllTotals();
+    }
+
+    function renderTrendPlants() {
+      const unit = trendUnit();
+      const digits = unit === "nos" ? 0 : 3;
+      const suffix = unit === "nos" ? " NOS" : " MT";
+      trendHead("trendPlantHead", [{ label: "Despatch plant" }],
+                [{ label: unit === "nos" ? "Total nos" : "Total MT", digits }], digits);
+      const lengthType = document.getElementById("trendLengthType").value;
+      const angle = document.getElementById("trendAngleCut").value;
+      const chamfer = document.getElementById("trendChamfer").value;
+      const flag = (value, want) => !want || (want === "yes") === Boolean(value);
+      const months = trendMonths();
+      const field = unit === "nos" ? "sales_nos" : "sales_mt";
+      const byPlant = new Map();
+      (trendData().plants || []).forEach(r => {
+        if (lengthType && r.length_type !== lengthType) return;
+        if (!flag(r.angle_cut, angle) || !flag(r.chamfer, chamfer)) return;
+        const key = r.plant || "";
+        if (!byPlant.has(key)) byPlant.set(key, {});
+        const row = byPlant.get(key);
+        row[r.month] = (row[r.month] || 0) + r[field];
+      });
+      const rows = [...byPlant.entries()]
+        .map(([plant, monthly]) => ({
+          plant, monthly,
+          total: Object.values(monthly).reduce((a, b) => a + b, 0),
+        }))
+        .sort((a, b) => b.total - a.total);
+      document.getElementById("trendPlantBody").innerHTML = rows.map(r => `<tr>
+        <td>${r.plant ? esc(displayPlant(r.plant)) : '<span class="lookup-error">lookup error</span>'}</td>
+        ${months.map(m => `<td class="num" data-value="${r.monthly[m] || 0}">${
+          r.monthly[m] === undefined ? "" : `${fmt(r.monthly[m], digits)}${suffix}`}</td>`).join("")}
+        <td class="num" data-value="${r.total}">${fmt(r.total, digits)}${suffix}</td>
+      </tr>`).join("");
+      document.getElementById("trendPlantEmpty").classList.toggle("hidden", rows.length !== 0);
+    }
+
+    function renderTrend() {
+      if (!trendData().available) {
+        document.getElementById("trendNote").textContent =
+          trendData().note || "No sales history was supplied.";
+        return;
+      }
+      renderTrendSummary();
+      renderTrendBuckets();
+      populateTrendCustomers();
+      renderTrendCustomerSkus();
+      renderTrendPlants();
+      refreshAllTotals();
+    }
+
+    function renderMappings() {
+      const query = document.getElementById("mappingSearch").value.trim().toLowerCase();
+      const type = document.getElementById("mappingType").value;
+      const rows = (data.missing_mappings || []).filter(r => {
+        const haystack = `${r.source} ${r.customer_code} ${r.customer} ${r.material_code} ${r.description} ${r.reason}`.toLowerCase();
+        return (!type || r.mapping_type === type) && (!query || haystack.includes(query));
+      });
+      document.getElementById("mappingBody").innerHTML = rows.map(r => `<tr>
+        <td>${esc(r.mapping_type)}</td><td>${esc(r.source)}</td><td>${esc(r.customer_code)}</td>
+        <td>${esc(r.customer)}</td><td>${esc(r.material_code)}</td><td>${esc(r.description)}</td>
+        <td>${esc(r.reason)}</td><td class="num" data-value="${r.affected_mt}">${fmt(r.affected_mt, 3)}</td>
+      </tr>`).join("");
+      document.getElementById("mappingEmpty").classList.toggle("hidden", rows.length !== 0);
+      renderScheduleMappings(query);
+          refreshAllTotals();
+    }
+
+    // The schedule gaps also sit in the table above, but that table is a mixed list and
+    // reads as being about materials and customers. A size a customer has ordered and
+    // nothing governs is a different job from an unmapped sales line, so it gets its own
+    // queue — findable, countable, and copyable on its own.
+    function renderScheduleMappings(query) {
+      const rows = (data.missing_mappings || []).filter(r => {
+        if (r.mapping_type !== "Schedule") return false;
+        const haystack = `${r.source} ${r.customer_code} ${r.customer} ${r.material_code} ${r.description} ${r.reason}`.toLowerCase();
+        return !query || haystack.includes(query);
+      });
+      document.getElementById("schedMapBody").innerHTML = rows.map(r => `<tr>
+        <td>${esc(r.customer)}</td><td>${esc(r.customer_code)}</td>
+        <td>${lookedUp(r.description)}</td><td>${lookedUp(r.material_code)}</td>
+        <td>${esc(r.source)}</td>
+        <td class="num" data-value="${r.affected_mt}">${fmt(r.affected_mt, 3)} MT</td>
+      </tr>`).join("");
+      document.getElementById("schedMapEmpty").classList.toggle("hidden", rows.length !== 0);
+    }
+
+    function renderSales() {
+      const rows = data.sales_summary || [];
+      document.getElementById("salesBody").innerHTML = rows.map(r => `<tr>
+        <td>${esc(r.OEM)}</td>
+        <td class="num" data-value="${r.sales_mt}">${stockButton(r.detail_key, r.sales_mt, "MT", `${r.OEM} · sales by customer`)}</td>
+        <td class="num" data-value="${r.sales_nos}">${fmt(r.sales_nos, 0)}</td><td class="num" data-value="${r.sales_m}">${fmt(r.sales_m, 0)}</td>
+        <td class="num" data-value="${r.customers}">${fmt(r.customers, 0)}</td><td class="num" data-value="${r.transactions}">${fmt(r.transactions, 0)}</td>
+      </tr>`).join("");
+      document.getElementById("salesEmpty").classList.toggle("hidden", rows.length !== 0);
+          refreshAllTotals();
+    }
+
+    const displayPlant = plant => {
+      const value = String(plant ?? "");
+      return ["789", "788", "56"].includes(value) ? value.padStart(4, "0") : value;
+    };
+
+    function renderStockAnalysis() {
+      const query = document.getElementById("stockSearch").value.trim().toLowerCase();
+      const plant = document.getElementById("stockPlant").value;
+      const analysis = data.stock_analysis || { ctl: [], ll: [] };
+      // Coverage by source is a property of the whole dump, not of the plant or
+      // length-type filters, so it is rendered once and left alone by them.
+      document.getElementById("stockSourceBody").innerHTML =
+        (analysis.source_coverage || []).map(r => `<tr>
+        <td>${esc(r.source)}</td>
+        <td><code>${esc(r.file)}</code></td>
+        <td class="num" data-value="${r.rows}">${fmt(r.rows, 0)}</td>
+        <td class="num" data-value="${r.total_mt}">${fmt(r.total_mt, 3)}</td>
+        <td class="num" data-value="${r.mapped_mt}">${fmt(r.mapped_mt, 3)}</td>
+        <td class="num" data-value="${r.unmapped_mt}">${stockButton(r.detail_key, r.unmapped_mt, "MT",
+          `${r.source} · stock that reaches no governed bucket`)}</td>
+        <td class="num"><span class="badge ${r.unmapped_pct >= 20 ? "critical" : r.unmapped_pct >= 10 ? "low" : "adequate"}">${fmt(r.unmapped_pct, 2)}%</span></td>
+        <td class="num" data-value="${r.unmapped_rows}">${fmt(r.unmapped_rows, 0)}</td>
+      </tr>`).join("");
+      [["ctl", "stockCtlBody", "stockCtlEmpty"], ["ll", "stockLlBody", "stockLlEmpty"]]
+        .forEach(([kind, bodyId, emptyId]) => {
+          const label = kind === "ctl" ? "Cut length" : "Long length";
+          const rows = (analysis[kind] || []).filter(r => {
+            if (plant && String(r.plant) !== plant) return false;
+            const haystack =
+              `${r.material_code} ${r.description || ""} ${r.holder || ""}`.toLowerCase();
+            return !query || haystack.includes(query);
+          });
+          document.getElementById(bodyId).innerHTML = rows.map(r => `<tr>
+            <td>${esc(displayPlant(r.plant))}</td>
+            <td>${esc(r.material_code)}</td>
+            <td>${esc(r.description)}</td>
+            <td>${esc(r.holder)}</td>
+            <td class="num">${fmt(r.oldest_age_days, 0)}</td>
+            <td class="num" data-value="${r.stock_mt}">${stockButton(r.detail_key, r.stock_mt, "MT",
+              `${label} · ${r.material_code} · plant ${displayPlant(r.plant)}`)}</td>
+            <td class="num" data-value="${r.high_age_mt}">${Number(r.high_age_mt) > 0
+              ? stockButton(r.high_age_detail_key, r.high_age_mt, "MT",
+                  `High age · ${r.material_code} · plant ${displayPlant(r.plant)}`)
+              : fmt(0, 2) + " MT"}</td>
+            <td class="num"${r.stock_nos === null ? ' title="SAP holds this plant in kilograms only; it carries no piece count"' : ` data-value="${r.stock_nos}"`}>${
+              r.stock_nos === null ? '<span class="muted-cell">kg only</span>' : fmt(r.stock_nos, 0)}</td>
+            <td class="num" data-value="${r.batches}">${fmt(r.batches, 0)}</td>
+            ${kind === "ctl" ? `<td>${r.rfd_verdict
+              ? `<span class="badge ${rfdVerdictClass(r.rfd_verdict)}">${esc(r.rfd_verdict)}</span>`
+              : ""}</td>
+            <td class="num" data-value="${r.rfd_matched_mt ?? ""}">${
+              r.rfd_matched_mt === null || r.rfd_matched_mt === undefined ? "" : `${fmt(r.rfd_matched_mt, 3)} MT`}</td>
+            <td class="num ${r.rfd_unmatched_mt ? "cell-alert" : ""}" data-value="${r.rfd_unmatched_mt ?? ""}">${
+              r.rfd_unmatched_mt === null || r.rfd_unmatched_mt === undefined ? "" : `${fmt(r.rfd_unmatched_mt, 3)} MT`}</td>
+            <td>${esc(r.rfd_explanation || "")}</td>` : ""}
+          </tr>`).join("");
+          document.getElementById(emptyId).classList.toggle("hidden", rows.length !== 0);
+        });
+      const type = document.getElementById("stockType").value;
+      document.getElementById("stockCtlBlock").classList.toggle("hidden", type === "ll");
+      document.getElementById("stockLlBlock").classList.toggle("hidden", type === "ctl");
+          refreshAllTotals();
+    }
+
+    function populateStockPlants() {
+      const analysis = data.stock_analysis || { ctl: [], ll: [] };
+      const plants = [...new Set([...(analysis.ctl || []), ...(analysis.ll || [])]
+        .map(r => String(r.plant)))].sort();
+      const select = document.getElementById("stockPlant");
+      plants.forEach(p => select.add(new Option(displayPlant(p), p)));
+    }
+
+    // Material codes Megh bought that reach no VSM SKU. The assignment is a working
+    // aid: it is held in this page only, for copying back into the source mapping.
+    const meghAssignments = {};
+
+    function renderMeghMappings() {
+      const rows = data.megh_unmapped || [];
+      const options = (data.megh_tracker || [])
+        .map(r => `<option value="${esc(r.sku)}">${esc(r.sku)}</option>`).join("");
+      document.getElementById("meghMapBody").innerHTML = rows.map(r => `<tr>
+        <td>${esc(r.material_code)}</td>
+        <td>${esc(r.description)}</td>
+        <td>${esc(r.customer)}</td>
+        <td class="num" data-value="${r.sales_mt}">${fmt(r.sales_mt, 3)} MT</td>
+        <td>${lookedUp(r.derived_key)}</td>
+        <td><select class="megh-assign" data-material="${esc(r.material_code)}">
+          <option value="">Not assigned</option>${options}
+        </select></td>
+      </tr>`).join("");
+      document.getElementById("meghMapEmpty").classList.toggle("hidden", rows.length !== 0);
+      document.querySelectorAll(".megh-assign").forEach(select => {
+        const material = select.dataset.material;
+        if (meghAssignments[material]) select.value = meghAssignments[material];
+        select.addEventListener("change", () => {
+          meghAssignments[material] = select.value;
+        });
+      });
+      refreshAllTotals();
+    }
+
+    // Plant stock and RFD quantity that reach no bucket are excluded from coverage the
+    // same way unresolved WIP is, so both get the same queue treatment.
+    const stockAssignments = {};
+
+    function renderStockMappings() {
+      const rows = data.stock_unmapped || [];
+      const options = (data.governed_buckets || [])
+        .map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join("");
+      document.getElementById("stockMapBody").innerHTML = rows.map(r => `<tr>
+        <td>${esc(r.material_code)}</td>
+        <td>${esc(r.description)}</td>
+        <td>${esc(displayPlant(r.plant))}</td>
+        <td>${esc(r.holder || "")}</td>
+        <td>${esc(r.length_type)}</td>
+        <td class="num" data-value="${r.stock_mt}">${fmt(r.stock_mt, 3)} MT</td>
+        <td class="num" data-value="${r.batches}">${fmt(r.batches, 0)}</td>
+        <td><select class="stock-assign" data-material="${esc(r.material_code)}">
+          <option value="">Not assigned</option>${options}
+        </select></td>
+      </tr>`).join("");
+      document.getElementById("stockMapEmpty").classList.toggle("hidden", rows.length !== 0);
+      document.querySelectorAll(".stock-assign").forEach(select => {
+        const material = select.dataset.material;
+        if (stockAssignments[material]) select.value = stockAssignments[material];
+        select.addEventListener("change", () => {
+          stockAssignments[material] = select.value;
+        });
+      });
+      refreshAllTotals();
+    }
+
+    function renderRfdMappings() {
+      const rows = data.rfd_unmapped || [];
+      document.getElementById("rfdMapBody").innerHTML = rows.map(r => `<tr>
+        <td>${esc(r.size)}</td>
+        <td>${r.listed_code ? esc(r.listed_code) : '<span class="muted-cell">blank</span>'}</td>
+        <td>${esc(r.matched_materials || "")}</td>
+        <td class="num" data-value="${r.stock_nos}">${fmt(r.stock_nos, 0)}</td>
+        <td class="num" data-value="${r.stock_mt}">${fmt(r.stock_mt, 3)} MT</td>
+        <td>${esc(r.reason)}</td>
+      </tr>`).join("");
+      document.getElementById("rfdMapEmpty").classList.toggle("hidden", rows.length !== 0);
+      refreshAllTotals();
+    }
+
+    // Open orders that reach no tracker row. Their tonnage is real and committed, so it
+    // is listed here rather than left to go missing from the order columns.
+    function renderOrderMappings() {
+      const rows = ((data.orders || {}).unmapped) || [];
+      document.getElementById("orderMapBody").innerHTML = rows.map(r => `<tr>
+        <td>${esc(r.missing_from)}</td>
+        <td class="${r.shown_on === "Nowhere" ? "cell-alert" : ""}">${esc(r.shown_on)}</td>
+        <td>${esc(r.cause)}</td><td>${esc(r.origin)}</td>
+        <td>${esc(displayPlant(r.plant))}</td><td>${esc(r.kind)}</td>
+        <td>${esc(r.order_no || "")}</td><td>${esc(r.customer || "")}</td>
+        <td>${lookedUp(r.material_code)}</td>
+        <td>${lookedUp(r.code_source)}</td>
+        <td>${esc(r.description || "")}</td>
+        <td>${lookedUp(r.bucket)}</td>
+        <td>${esc(r.sku || "")}</td>
+        <td class="num" data-value="${r.age_days === null ? "" : r.age_days}">${r.age_days === null ? "" : fmt(r.age_days, 0)}</td>
+        <td class="num" data-value="${r.order_mt}">${fmt(r.order_mt, 3)} MT</td>
+      </tr>`).join("");
+      document.getElementById("orderMapEmpty").classList.toggle("hidden", rows.length !== 0);
+      refreshAllTotals();
+    }
+
+    // WIP that reaches no bucket is excluded from long-length stock, so this queue is
+    // the list to clear in Bucketting. Assignments are a session-local working aid.
+    const wipAssignments = {};
+
+    function renderWipMappings() {
+      const rows = data.wip_unmapped || [];
+      const options = (data.governed_buckets || [])
+        .map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join("");
+      document.getElementById("wipMapBody").innerHTML = rows.map(r => `<tr>
+        <td>${esc(r.material_code)}</td>
+        <td>${esc(r.description)}</td>
+        <td>${esc(displayPlant(r.plant))}</td>
+        <td class="num" data-value="${r.wip_mt}">${fmt(r.wip_mt, 3)} MT</td>
+        <td class="num" data-value="${r.batches}">${fmt(r.batches, 0)}</td>
+        <td>${esc(r.reason)}</td>
+        <td>${r.code_bucket
+          ? `<span class="badge critical">${esc(r.code_bucket)}</span>`
+          : '<span class="muted-cell">none</span>'}</td>
+        <td><select class="wip-assign" data-material="${esc(r.material_code)}">
+          <option value="">Not assigned</option>${options}
+        </select></td>
+      </tr>`).join("");
+      document.getElementById("wipMapEmpty").classList.toggle("hidden", rows.length !== 0);
+      document.querySelectorAll(".wip-assign").forEach(select => {
+        const material = select.dataset.material;
+        if (wipAssignments[material]) select.value = wipAssignments[material];
+        select.addEventListener("change", () => {
+          wipAssignments[material] = select.value;
+        });
+      });
+      refreshAllTotals();
+    }
+
+    // Under 30 days of cover but long length is sitting at this or another size, so
+    // the shortfall is coverable from stock rather than needing a new order.
+    const coverGain = r =>
+      r.coverage_days !== null && r.coverage_days < 30 &&
+      (Number(r.stock_at_length_mt) > 0 || Number(r.other_length_stock_mt) > 0);
+    // Orders on the table will still not reach the 45-day target.
+    const orderShort = r =>
+      r.coverage_days_post_order !== null && r.coverage_days_post_order < 45;
+
+    // Orders split by whether they have been signed off. Two columns rather than one
+    // total: a signed-off order is firm demand a SKU has to be covered against, and the
+    // rest is not yet. The three plants each state the split differently and the
+    // pipeline reduces them to these two numbers — see SIGNOFF_SHEETS.
+    const signoffCells = (r, detailKey, label) => {
+      const signed = Number(r.signoff_mt || 0);
+      const rest = Number(r.non_signoff_mt || 0);
+      const cell = (value, kind) => value
+        ? `<td class="num" data-value="${value}">${stockButton(detailKey, value, "MT", `${label} · ${kind}`)}</td>`
+        : `<td class="num" data-value="0"></td>`;
+      return cell(signed, "signed off") + cell(rest, "not signed off");
+    };
+
+    // A bought-out part: Megh buys the finished tube rather than converting it. The
+    // list states a nominal length against the plan's exact cut length, so a match made
+    // on the nearest length rather than an equal one says so instead of reading clean.
+    // A row added from the BOP list because the plan has no line for the size says so:
+    // its schedule, stock and order columns are zero because nothing was found, not
+    // because nothing is happening.
+    const bopCell = r => {
+      if (!r.bop) return "";
+      const gap = Number(r.bop_length_gap_mm) > 0
+        ? ` · matched on nearest length, ${fmt(r.bop_length_gap_mm, 0)} mm off` : "";
+      const title = `Listed as ${r.bop_stated_size}, ${fmt(r.bop_nos, 0)} nos, plant ${r.bop_plant}${gap}`;
+      const badge = `<span class="badge adequate" title="${esc(title)}">BOP</span>`;
+      if (r.in_plan !== false) return badge;
+      return `${badge} <span class="badge watch" title="${esc(r.plan_note || "")}">off plan</span>`;
+    };
+
+    // "RE or HMSIL" means the plan marks the size as neither TVSM's nor sold onward yet,
+    // so it answers to both filters rather than to neither.
+    const endOems = r => String(r.end_oem || "").split(/ and | or /).map(s => s.trim());
+
+    function renderMegh() {
+      const query = document.getElementById("meghSearch").value.trim().toLowerCase();
+      const cut = document.getElementById("meghCut").value;
+      const bop = document.getElementById("meghBop").value;
+      const oem = document.getElementById("meghOem").value;
+      const rows = (data.megh_tracker || []).filter(r => {
+        // A size with no onward sales yet reads "RE or HMSIL", so it belongs to both.
+        if (oem && !endOems(r).includes(oem)) return false;
+        if (cut && r.cut_type !== cut) return false;
+        if (bop === "bop" && !r.bop) return false;
+        if (bop === "own" && r.bop) return false;
+        if (bop === "offplan" && r.in_plan !== false) return false;
+        const haystack = `${r.sku} ${r.grade}`.toLowerCase();
+        return !query || haystack.includes(query);
+      });
+      document.getElementById("meghBody").innerHTML = rows.map(r => `<tr>
+        <td class="num">${esc(r.od)}</td><td class="num">${esc(r.inner_d)}</td>
+        <td class="num">${esc(r.thickness)}</td>
+        <td class="num">${r.length_m === null ? "" : fmt(r.length_m, 3)}</td>
+        <td>${esc(r.grade)}</td><td>${esc(r.cut_type)}</td>
+        <td>${esc(r.end_oem)}</td>
+        <td data-value="${r.bop ? "BOP" : ""}">${bopCell(r)}</td>
+        <td class="num" data-value="${r.schedule_mt}">${stockButton(`MEGHSCHEDULE|${r.sku}`, r.schedule_mt, "MT", `${r.sku} · schedule`)}</td>
+        <td class="num" data-value="${r.total_stock_mt}">${stockButton(r.stock_detail_key, r.total_stock_mt, "MT", `${r.sku} · ground plus in transit`)}</td>
+        <td class="num ${orderShort(r) ? "cell-alert" : ""}" data-value="${r.orders_logged_mt}">${stockButton(r.orders_detail_key, r.orders_logged_mt, "MT", `${r.sku} · orders logged as per OMS`)}</td>
+        <td class="num" data-value="${r.orders_planning_mt || 0}">${orderCell(r.orders_plan_detail_key, r.orders_planning_mt, `${r.sku} · orders logged as per sales planning, plant by plant`)}</td>
+        ${signoffCells(r, r.signoff_detail_key, r.sku)}
+        <td class="num" data-value="${r.sales_mt}">${stockButton(r.sales_detail_key, r.sales_mt, "MT", `${r.sku} · sales to Megh`)}</td>
+        <td class="num ${coverGain(r) ? "cell-good" : ""}" data-value="${r.stock_at_length_mt}">${stockButton(r.at_length_detail_key, r.stock_at_length_mt, "MT", `${r.sku} · long length at required size`)}</td>
+        <td class="num ${coverGain(r) ? "cell-good" : ""}" data-value="${r.other_length_stock_mt}">${stockButton(r.other_length_detail_key, r.other_length_stock_mt, "MT", `${r.sku} · long length, other sizes`)}</td>
+        <td class="num">${r.coverage_days === null ? "" : fmt(r.coverage_days, 1)}</td>
+      </tr>`).join("");
+      document.getElementById("meghEmpty").classList.toggle("hidden", rows.length !== 0);
+      // A listed BOP size the plan does not carry now has its own row rather than being
+      // dropped, so the note says which rows those are and what the plan is still short
+      // of — the queue is the vsm stock sheet, not this table.
+      const added = data.megh_bop_added || [];
+      const missedNote = document.getElementById("meghBopUnmatched");
+      missedNote.innerHTML = added.length
+        ? `<strong>${added.length} BOP size${added.length > 1 ? "s are" : " is"} not in the vsm stock plan`
+          + ` and ${added.length > 1 ? "have" : "has"} been added here as ${added.length > 1 ? "line items" : "a line item"}:</strong> `
+          + added.map(m => `${esc(m.stated_size)} (${fmt(m.nos, 0)} nos, plant ${esc(m.plant)})`).join("; ")
+          + " — schedule, stock and order columns read zero until the plan carries the size."
+        : "";
+      missedNote.classList.toggle("hidden", added.length === 0);
+      renderLengthBucketing();
+      refreshAllTotals();
+    }
+
+    // The plan's own length-specific mapping, and where Bucketting is short of it. The
+    // Megh tab's own cut and search filters apply so the two tables stay in step.
+    function renderLengthBucketing() {
+      const query = document.getElementById("meghSearch").value.trim().toLowerCase();
+      const cut = document.getElementById("meghCut").value;
+      const rows = (data.megh_length_bucketing || []).filter(r => {
+        if (cut && r.cut_type !== cut) return false;
+        const haystack = `${r.vsm_key} ${r.bucket} ${r.grade} ${r.material_codes}`.toLowerCase();
+        return !query || haystack.includes(query);
+      });
+      document.getElementById("lengthBucketBody").innerHTML = rows.map(r => `<tr>
+        <td>${esc(r.vsm_key)}</td>
+        <td>${r.megh_only ? `<span class="muted-cell">${esc(r.end_oem)} size</span>` : lookedUp(r.bucket)}</td>
+        <td class="num">${esc(r.od)}</td><td class="num">${esc(r.thickness)}</td>
+        <td class="num">${r.length_m === null ? "" : fmt(r.length_m, 3)}</td>
+        <td>${esc(r.grade)}</td><td>${esc(r.cut_type || "")}</td>
+        <td>${lookedUp(r.material_codes)}</td>
+        <td>${esc(r.plants || "")}</td>
+        <td class="${r.codes_missing_from_bucketting ? "cell-alert" : ""}">${esc(r.codes_missing_from_bucketting || "")}</td>
+        <td>${esc(r.plan_note || "")}</td>
+        <td>${r.tracked_on_megh_tab ? "Yes" : "No"}</td>
+        <td class="num" data-value="${r.schedule_mt}">${fmt(r.schedule_mt, 3)} MT</td>
+      </tr>`).join("");
+      document.getElementById("lengthBucketEmpty").classList.toggle("hidden", rows.length !== 0);
+    }
+
+    // SKU pricing. Prices are quoted in two different units on the same table — a long
+    // length by the metre, a cut piece by the piece — so the quarter columns are never
+    // summed; only schedule tonnage carries a subtotal.
+    function populatePricingCustomers() {
+      const rows = (data.sku_pricing || {}).rows || [];
+      const select = document.getElementById("pricingCustomer");
+      [...new Set(rows.map(r => r.customer))].sort((a, b) =>
+        a.localeCompare(b, "en", { numeric: true })).forEach(c => select.add(new Option(c, c)));
+      const quarters = (data.sku_pricing || {}).quarters || [];
+      ["pricingQ1Head", "pricingQ2Head", "pricingQ3Head"].forEach((id, i) => {
+        document.getElementById(id).textContent = quarters[i] || "";
+      });
+      const quarterSelect = document.getElementById("pricingQuarter");
+      quarters.forEach(q => quarterSelect.add(new Option(`PCR for ${q}`, q)));
+      quarterSelect.value = quarters[quarters.length - 1] || "";
+    }
+
+    // The repository is every ship-to, bill-to, plant and material code combination
+    // that has actually been billed. A price change has to be raised against each of
+    // them, which is what the PCR copy emits.
+    function renderPricingRepository() {
+      const repo = data.code_repository || { rows: [], window: {} };
+      const customer = document.getElementById("pricingCustomer").value;
+      const query = document.getElementById("pricingSearch").value.trim().toLowerCase();
+      const rows = (repo.rows || []).filter(r => {
+        const haystack = `${r.material_code || ""} ${r.description || ""} ${r.bucket || ""} ${r.ctl_bucket || ""} ${r.bill_to_name || ""} ${r.ship_to_name || ""}`.toLowerCase();
+        return !query || haystack.includes(query);
+      });
+      const window_ = repo.window || {};
+      document.getElementById("pricingRepoNote").textContent =
+        `${window_.rows || 0} billed combinations of bill-to, ship-to, plant and material code across ${window_.customers || 0} customers and ${window_.materials || 0} codes, from ${window_.source || "the sales dump"} covering ${window_.from || "?"} to ${window_.to || "?"}. One SKU is often billed under several codes, so “Raise PCR” copies every combination with the selected quarter’s price. The customer filter above does not narrow this table because a PCR is raised on the code, not on the schedule line.`;
+      document.getElementById("pricingRepoBody").innerHTML = rows.map(r => `<tr>
+        <td>${esc(r.bill_to_code || "")}</td>
+        <td>${esc(r.bill_to_name || "")}</td>
+        <td>${esc(r.ship_to_code || "")}</td>
+        <td>${esc(r.ship_to_name || "")}</td>
+        <td>${esc(displayPlant(r.plant))}</td>
+        <td>${esc(r.material_code || "")}</td>
+        <td>${esc(r.description || "")}</td>
+        <td>${esc(r.ctl_bucket || r.bucket || "")}</td>
+        <td class="num">${fmt(r.length_mm, 0)}</td>
+        <td class="num" data-value="${r.invoices}">${fmt(r.invoices, 0)}</td>
+        <td class="num" data-value="${r.qty_mt}">${fmt(r.qty_mt, 3)}</td>
+        <td>${esc(r.last_billed || "")}</td>
+      </tr>`).join("");
+      document.getElementById("pricingRepoEmpty").classList.toggle("hidden", rows.length !== 0);
+    }
+
+    // Prices are calculated per SKU, the repository is keyed by material code, so the
+    // two meet on the code. Where a code has never been scheduled it carries no price
+    // and the line still goes out, blank, rather than being dropped from the request.
+    function copyPcr(button) {
+      const quarter = document.getElementById("pricingQuarter").value;
+      const priced = (data.sku_pricing || {}).rows || [];
+      const byCode = new Map();
+      priced.forEach(r => {
+        if (r.material_code && !byCode.has(r.material_code)) byCode.set(r.material_code, r);
+      });
+      const rows = (data.code_repository || {}).rows || [];
+      const lines = [
+        `PRICE CHANGE REQUEST\tas of ${data.metadata.as_of}\t${quarter}`,
+        ["BILL TO CODE", "BILL TO NAME", "SHIP TO CODE", "SHIP TO NAME", "PLANT",
+         "MATERIAL CODE", "DESCRIPTION", "SKU", "LENGTH MM", `${quarter} PRICE`,
+         "UNIT", "BASIS"].join("\t"),
+      ];
+      rows.forEach(r => {
+        const match = byCode.get(r.material_code);
+        const price = match ? match[quarter] : null;
+        lines.push([
+          r.bill_to_code || "", r.bill_to_name || "", r.ship_to_code || "",
+          r.ship_to_name || "", r.plant || "", r.material_code || "",
+          r.description || "", r.ctl_bucket || r.bucket || "",
+          r.length_mm === null || r.length_mm === undefined ? "" : Number(r.length_mm).toFixed(0),
+          price === null || price === undefined ? "" : Number(price).toFixed(2),
+          match ? match.unit : "",
+          match ? `${match.contract_key} + ${(match.operations || []).join(", ") || "no value adds"}` : "not scheduled, no contract price",
+        ].join("\t"));
+      });
+      copyText(lines.join("\n"), button);
+    }
+
+    function renderPricing() {
+      const pricing = data.sku_pricing || { rows: [], unpriced: [] };
+      const quarters = pricing.quarters || [];
+      const rates = pricing.operation_rates_inr_per_ton || {};
+      document.getElementById("pricingNote").textContent = pricing.available
+        ? `Every scheduled SKU priced off the customer contract: the base price for its size plus the value-added operations it carries, for ${quarters.join(", ")}. Value adds are charged per tonne (${Object.entries(rates).map(([k, v]) => `${k} ${v}`).join(", ")} INR/MT) and converted to INR per metre by the contract weight. A long length is quoted in INR/m, a cut length in INR per piece at its own length. Click a value-add figure to see the build-up.`
+        : (pricing.note || "No contract price sheet was supplied.");
+      const query = document.getElementById("pricingSearch").value.trim().toLowerCase();
+      const customer = document.getElementById("pricingCustomer").value;
+      const kind = document.getElementById("pricingKind").value;
+      const valueAdd = document.getElementById("pricingValueAdd").value;
+      const rows = (pricing.rows || []).filter(r => {
+        if (customer && r.customer !== customer) return false;
+        if (kind && r.kind !== kind) return false;
+        if (valueAdd === "yes" && !(r.operations || []).length) return false;
+        if (valueAdd === "no" && (r.operations || []).length) return false;
+        const haystack = `${r.material_code || ""} ${r.description || ""} ${r.bucket} ${r.contract_key}`.toLowerCase();
+        return !query || haystack.includes(query);
+      });
+      document.getElementById("pricingBody").innerHTML = rows.map(r => {
+        const adds = (r.operations || []).join(", ");
+        const addCell = r.operations_per_m
+          ? stockButton(r.detail_key, r.operations_per_m, "INR/m", `${r.bucket} · ${adds} · price build-up`)
+          : "";
+        return `<tr>
+        <td>${esc(r.customer)}</td>
+        <td>${esc(r.material_code || "")}</td>
+        <td title="${esc(r.description || "")}">${esc(r.description || "")}</td>
+        <td>${esc(r.bucket)}</td>
+        <td title="${esc(r.contract_type || "")}">${esc(r.contract_key)}</td>
+        <td>${esc(r.kind)}</td>
+        <td class="num">${fmt(r.length_mm, 0)}</td>
+        <td class="num">${fmt(r.kg_per_m, 4)}</td>
+        <td class="num" title="${esc(adds)}">${addCell}</td>
+        ${quarters.map(q => `<td class="num" data-value="${r[q] === null || r[q] === undefined ? "" : r[q]}">${
+          r[q] === null || r[q] === undefined ? ""
+            : priceButton((r.detail_keys || {})[q], r[q],
+                `${r.material_code || r.bucket} · ${q} · price build-up`)}</td>`).join("")}
+        <td>${esc(r.unit)}</td>
+        <td class="num" data-value="${r.schedule_mt}">${fmt(r.schedule_mt, 3)}</td>
+      </tr>`;
+      }).join("");
+      document.getElementById("pricingEmpty").classList.toggle("hidden", rows.length !== 0);
+      const unpriced = (pricing.unpriced || []).filter(r =>
+        !customer || r.customer === customer);
+      document.getElementById("pricingUnpricedBlock").classList.toggle("hidden", unpriced.length === 0);
+      document.getElementById("pricingUnpricedBody").innerHTML = unpriced.map(r => `<tr>
+        <td>${esc(r.customer)}</td>
+        <td>${esc(r.bucket || "")}</td>
+        <td>${esc(r.reason)}</td>
+        <td class="num" data-value="${r.lines}">${fmt(r.lines, 0)}</td>
+        <td class="num" data-value="${r.schedule_mt}">${fmt(r.schedule_mt, 3)}</td>
+      </tr>`).join("");
+      const gapMt = unpriced.reduce((sum, r) => sum + Number(r.schedule_mt || 0), 0);
+      const notes = [];
+      if (unpriced.length) {
+        notes.push(`${fmt(gapMt, 3)} MT of schedule carries no contract price — either the line reaches no governed bucket or its size is absent from the price sheet.`);
+      }
+      if ((pricing.rows || []).length && !(pricing.rows || []).some(r => r.kind === "LL")) {
+        notes.push("Every active SKU this month is a cut length, so every price reads INR per piece; the long-length filter is empty because the schedule's long-length lines all carry zero quantity.");
+      }
+      document.getElementById("pricingGap").textContent = notes.join(" ");
+      refreshAllTotals();
+    }
+
+    // Cut lengths come from the schedule in millimetres and a bucket can carry many of
+    // them, so show the first few and hold the rest in the tooltip.
+    function strCutLengths(lengths) {
+      const list = (lengths || []).map(v => fmt(v, 0));
+      if (list.length === 0) return { text: "", title: "" };
+      const text = list.length <= 4
+        ? list.join(", ") : `${list.slice(0, 4).join(", ")} +${list.length - 4}`;
+      return { text, title: list.join(", ") };
+    }
+
+    function strFilteredRows() {
+      const plan = data.str_plan || { rows: [] };
+      const query = document.getElementById("strSearch").value.trim().toLowerCase();
+      const risk = document.getElementById("strRisk").value;
+      return (plan.rows || []).filter(r => {
+        if (risk && r.risk !== risk) return false;
+        return !query || String(r.bucket || "").toLowerCase().includes(query);
+      });
+    }
+
+    function renderStr() {
+      const plan = data.str_plan || { rows: [] };
+      const rows = strFilteredRows();
+      document.getElementById("strBody").innerHTML = rows.map(r => {
+        const lengths = strCutLengths(r.cut_lengths);
+        return `<tr>
+        <td>${esc(r.bucket)}</td>
+        <td title="${esc(lengths.title)}">${esc(lengths.text)}</td>
+        <td class="num" data-value="${r.schedule_mt}">${fmt(r.schedule_mt, 3)}</td>
+        <td class="num" data-value="${r.sales_mt}">${fmt(r.sales_mt, 3)}</td>
+        <td class="num" data-value="${r.requirement_mt}">${fmt(r.requirement_mt, 3)}</td>
+        <td class="num" data-value="${r.stock_8406_mt}">${stockButton(r.stock_detail_key, r.stock_8406_mt, "MT",
+          `${r.bucket} · stock at 8406 including in transit`)}</td>
+        <td class="num ${r.str_required_mt > 0 ? "cell-alert" : ""}" data-value="${r.str_required_mt}">${fmt(r.str_required_mt, 3)}</td>
+        ${(r.source_plants || []).map(plant => {
+          const at = (r.source_by_plant || {})[plant] || { stock_mt: 0 };
+          return `<td class="num" data-value="${at.stock_mt}">${stockButton(at.detail_key, at.stock_mt, "MT",
+            `${r.bucket} · stock at ${displayPlant(plant)}`)}</td>`;
+        }).join("")}
+      </tr>`;
+      }).join("");
+      document.getElementById("strEmpty").classList.toggle("hidden", rows.length !== 0);
+      const orphaned = plan.wip_without_fg_code || [];
+      const orphanedMt = orphaned.reduce((sum, r) => sum + Number(r.wip_mt || 0), 0);
+      document.getElementById("strWipNote").textContent = orphaned.length === 0 ? "" :
+        `${orphaned.length} mother-tube descriptions at the sending plants (${fmt(orphanedMt, 3)} MT of WIP) have no finished-goods code in zmat under the same description, so no STR line can be raised against them.`;
+      const unbucketed = plan.unbucketed_schedule || [];
+      document.getElementById("strGap").textContent = unbucketed.length === 0 ? "" :
+        "Outside the plan: " + unbucketed.map(u =>
+          `${u.customer} ${fmt(u.schedule_mt, 3)} MT`
+        ).join(", ") + " — these lines carry no Bucket in Schedule July, so no transfer requirement can be raised against them.";
+      const outside = plan.unmapped_destination_stock || [];
+      document.getElementById("strUnmappedBlock").classList.toggle("hidden", outside.length === 0);
+      document.getElementById("strUnmappedBody").innerHTML = outside.map(r => `<tr>
+        <td>${esc(r.customer_name)}</td>
+        <td>${esc(r.customer_code || "")}</td>
+        <td class="num" data-value="${r.stock_mt}">${fmt(r.stock_mt, 3)}</td>
+      </tr>`).join("");
+      refreshAllTotals();
+    }
+
+    function populateTransferPlants() {
+      const plants = (data.transfers || {}).plants || { source: [], destination: [] };
+      [["transferSource", plants.source], ["transferDest", plants.destination]]
+        .forEach(([id, list]) => {
+          const select = document.getElementById(id);
+          (list || []).forEach(p => select.add(new Option(p.label, p.code)));
+        });
+    }
+
+    function renderTransfers() {
+      const transfers = data.transfers || { rows: [], available: false };
+      const note = document.getElementById("transferNote");
+      if (transfers.available === false && transfers.note) {
+        note.textContent = transfers.note;
+      }
+      const query = document.getElementById("transferSearch").value.trim().toLowerCase();
+      const source = document.getElementById("transferSource").value;
+      const dest = document.getElementById("transferDest").value;
+      const status = document.getElementById("transferStatus").value;
+      const rows = (transfers.rows || []).filter(r => {
+        if (source && String(r.source_plant) !== source) return false;
+        if (dest && String(r.dest_plant) !== dest) return false;
+        if (status === "transit" && !r.in_transit) return false;
+        if (status === "received" && r.in_transit) return false;
+        const haystack =
+          `${r.material_code} ${r.description || ""} ${r.bucket || ""} ${r.document || ""} ${r.sto_no || ""} ${r.mark_customer || ""}`.toLowerCase();
+        return !query || haystack.includes(query);
+      });
+      document.getElementById("transferBody").innerHTML = rows.map(r => `<tr>
+        <td>${esc(r.source_plant_label)}</td>
+        <td>${esc(r.dest_plant_label)}</td>
+        <td>${esc(r.document)}</td>
+        <td>${esc(r.sto_no || "")}</td>
+        <td>${esc(r.billing_date || "")}</td>
+        <td>${esc(r.grn_date || "")}</td>
+        <td class="num">${r.transit_days === null ? "" : fmt(r.transit_days, 0)}</td>
+        <td><span class="badge ${r.in_transit ? "low" : "adequate"}">${esc(r.status)}</span></td>
+        <td>${esc(r.material_code)}</td>
+        <td>${esc(r.description)}</td>
+        <td>${esc(r.bucket || "")}</td>
+        <td>${esc(r.length_type)}</td>
+        <td>${esc(r.mark_customer || "")}</td>
+        <td class="num" data-value="${r.qty_mt}">${stockButton(r.detail_key, r.qty_mt, "MT",
+          `${r.source_plant_label} → ${r.dest_plant_label} · ${r.material_code}`)}</td>
+        <td class="num" data-value="${r.qty_nos}">${fmt(r.qty_nos, 0)}</td>
+        <td class="num" data-value="${r.batches}">${fmt(r.batches, 0)}</td>
+      </tr>`).join("");
+      document.getElementById("transferEmpty").classList.toggle("hidden", rows.length !== 0);
+      refreshAllTotals();
+    }
+
+    function renderOverdue() {
+      const query = document.getElementById("overdueSearch").value.trim().toLowerCase();
+      const rows = (data.overdue_analysis || []).filter(r =>
+        !query || String(r.ancillary).toLowerCase().includes(query));
+      document.getElementById("overdueBody").innerHTML = rows.map(r => `<tr>
+        <td>${esc(r.ancillary)}</td>
+        <td>${esc(r.customer_code || "")}</td>
+        <td class="num" data-value="${r.overdue_amount}">${stockButton(r.detail_key, r.overdue_amount, "INR",
+          `Overdue · ${r.ancillary}`)}</td>
+        <td class="num" data-value="${r.documents}">${fmt(r.documents, 0)}</td>
+        <td class="num">${fmt(r.oldest_days, 0)}</td>
+        <td class="num" data-value="${r.over_90_days_amount}">${fmt(r.over_90_days_amount, 0)}</td>
+        <td class="num" data-value="${r.offsets_amount}">${Number(r.offsets_documents) > 0
+          ? stockButton(r.offsets_detail_key, r.offsets_amount, "INR", `Open payments and credit notes · ${r.ancillary}`)
+          : fmt(0, 2) + " INR"}</td>
+      </tr>`).join("");
+      document.getElementById("overdueEmpty").classList.toggle("hidden", rows.length !== 0);
+          refreshAllTotals();
+    }
+
+    // Copied cells must paste into a spreadsheet as numbers, so strip the display
+    // grouping separators and unit suffix from anything that is purely numeric.
+    // Dates and codes contain no separators to strip and pass through untouched.
+    const COPY_NUMERIC = /^(-?[\d,]+(?:\.\d+)?)\s*(MT|NOS|INR|DAYS)?$/i;
+
+    // The figure a cell is primarily about, with any pieces sub-line left out. Reading
+    // `textContent` straight gives "12.197 MT4,710 nos", which matches no unit and made
+    // the month totals lose their "MT" on every column that had a cut-length row in it.
+    function primaryText(cell) {
+      const pieces = cell.querySelector(".in-pieces");
+      const text = pieces
+        ? [...cell.childNodes].filter(n => n !== pieces).map(n => n.textContent).join("")
+        : cell.textContent;
+      return text.replace(/\s+/g, " ").trim();
+    }
+
+    function copyCellText(cell) {
+      const select = cell.querySelector("select");
+      if (select) return select.value;
+      // A cell holding two figures — tonnage with its piece count beneath — reads back
+      // as one run of text, "12.197 MT4,710 nos", which parses as neither. Such cells
+      // state what they paste as. The pieces are not lost from the clipboard: they are
+      // their own column in both tables, and the drill-down lists them month by month.
+      if (cell.dataset.copy !== undefined) return cell.dataset.copy;
+      const text = primaryText(cell);
+      const match = text.match(COPY_NUMERIC);
+      return match ? match[1].replace(/,/g, "") : text;
+    }
+
+    // Subtotals of whatever is currently on screen, shown under the header so the
+    // figure reflects the active filters. Only columns carrying data-sum are added:
+    // shared CTL/LL pools and day counts are deliberately not summable.
+    // A totals cell marked `data-agg` describes a rate, so it is derived rather than
+    // added down its own column. `months` counts the months the visible rows sold in at
+    // all; `avg` divides by that count. An empty month — a size not bought since April, a
+    // customer who stopped — is not counted, so the figure answers "in a month they buy,
+    // how much" rather than being diluted by the width of the window.
+    //
+    // The numerator is the column named by `data-agg-over`, not the month columns added
+    // up: `data.json` rounds each month to three decimals and the total once, so the two
+    // differ in the last place, and a totals row whose own arithmetic does not check out
+    // against the cells beside it invites exactly the doubt it exists to remove.
+    function applyAverages(headers, totalsRow, sums, units, visibleRows) {
+      const monthColumns = headers.reduce(
+        (keep, header, index) => header.dataset.month ? keep.concat(index) : keep, []);
+      const active = monthColumns.filter(index => (sums[index] || 0) > 0);
+      const named = label => headers.findIndex(h => h.textContent.trim() === label);
+      headers.forEach((header, index) => {
+        const how = header.dataset.agg;
+        if (!how) return;
+        const cell = totalsRow.children[index];
+        if (!cell) return;
+        if (!visibleRows || !active.length) {
+          cell.textContent = "";
+          return;
+        }
+        const digits = Number(header.dataset.sum ?? 3);
+        if (how === "months") {
+          cell.textContent = fmt(active.length, digits);
+          return;
+        }
+        const over = named(header.dataset.aggOver || "");
+        const tonnage = over >= 0
+          ? (sums[over] || 0)
+          : active.reduce((total, i) => total + sums[i], 0);
+        const unit = over >= 0
+          ? (units[over] || "")
+          : (active.map(i => units[i]).find(Boolean) || "");
+        // The pieces alongside are averaged the same way — over the months that moved —
+        // rather than added, for the same reason the tonnage is.
+        const overNos = named(header.dataset.aggOverNos || "");
+        const pieces = overNos >= 0 ? (sums[overNos] || 0) / active.length : 0;
+        const average = tonnage / active.length;
+        cell.innerHTML = `${fmt(average, digits)}${unit ? " " + unit : ""}${
+          pieces ? `<span class="in-pieces">${fmt(pieces, 0)} nos</span>` : ""}`;
+        if (pieces) cell.dataset.copy = fmt(average, digits).replace(/,/g, "");
+        else delete cell.dataset.copy;
+      });
+    }
+
+    function refreshTotals(table) {
+      if (!table) return;
+      const totalsRow = table.querySelector("thead tr.totals-row");
+      if (!totalsRow) return;
+      const headers = [...table.querySelectorAll("thead tr:first-child th")];
+      const bodyRows = [...table.querySelectorAll("tbody tr")].filter(row => !row.hidden);
+      const sums = [];
+      const units = [];
+      const nos = [];
+      headers.forEach((header, index) => {
+        const digits = header.dataset.sum;
+        if (digits === undefined) return;
+        let sum = 0;
+        let unit = "";
+        bodyRows.forEach(row => {
+          const cell = row.children[index];
+          if (!cell) return;
+          const match = primaryText(cell).match(COPY_NUMERIC);
+          if (match && match[2]) unit = match[2].toUpperCase();
+          // Sum the unrounded value where the renderer supplied one; summing the
+          // displayed text would accumulate rounding error across hundreds of rows.
+          if (cell.dataset.value !== undefined) {
+            sum += Number(cell.dataset.value) || 0;
+          } else if (match) {
+            sum += Number(match[1].replace(/,/g, "")) || 0;
+          }
+        });
+        sums[index] = sum;
+        units[index] = unit;
+        // Pieces ride alongside the tonnage on cut-length cells, so the column total has
+        // to carry both or the sub-line reads as detail the total contradicts.
+        let pieces = 0;
+        bodyRows.forEach(row => {
+          const cell = row.children[index];
+          if (cell && cell.dataset.nos !== undefined) pieces += Number(cell.dataset.nos) || 0;
+        });
+        nos[index] = pieces;
+        const totalCell = totalsRow.children[index];
+        totalCell.innerHTML = bodyRows.length
+          ? `${fmt(sum, Number(digits))}${unit ? " " + unit : ""}${
+              pieces ? `<span class="in-pieces">${fmt(pieces, 0)} nos</span>` : ""}`
+          : "";
+        // Paste what is displayed, not the accumulator: String(260.225) off a
+        // running float is 260.22499999999997.
+        if (pieces) totalCell.dataset.copy = fmt(sum, Number(digits)).replace(/,/g, "");
+        else delete totalCell.dataset.copy;
+      });
+      // Columns that average rather than add. A per-row average added down its column is
+      // not an average of anything: the customer history's "Avg active month MT" summed
+      // to 214.291 MT for a customer whose busiest month was 260 and whose quiet ones
+      // were 129, because SKUs that sold in three months and SKUs that sold in eight
+      // contributed one figure each. A month count added the same way reached 197 months
+      // over an eight-month window. Both are read off the month columns beside them
+      // instead: the months the customer actually sold in, and the tonnage over them.
+      applyAverages(headers, totalsRow, sums, units, bodyRows.length);
+      // Keep the subtotal row pinned directly beneath the header row. A hidden panel
+      // measures zero, so only apply a real measurement and redo it on tab switch.
+      const headerHeight = headers.length ? headers[0].getBoundingClientRect().height : 0;
+      if (headerHeight > 0) {
+        [...totalsRow.children].forEach(cell => { cell.style.top = `${headerHeight}px`; });
+      }
+    }
+
+    // Excel-style column filters. Every header carries a filter control that lists the
+    // distinct values currently in that column, searchable and multi-selectable, and
+    // they compose: the list a header offers is drawn from the rows the other headers
+    // still allow, so narrowing one column narrows the choices in the next. They sit
+    // on top of each panel's own filters rather than replacing them, and because those
+    // panels rebuild their tbody on every render, the selections are re-applied from
+    // this state each time rather than living on the rows.
+    const columnFilters = {};
+
+    function filterState(table) {
+      return (columnFilters[table.id] ||= {});
+    }
+
+    function rowCellText(row, index) {
+      const cell = row.children[index];
+      if (!cell) return "";
+      const select = cell.querySelector("select");
+      if (select) return select.value;
+      return cell.textContent.replace(/\s+/g, " ").trim();
+    }
+
+    // A row passes when every column filter except the one being edited accepts it.
+    function rowPasses(row, state, skipIndex) {
+      return Object.entries(state).every(([index, allowed]) => {
+        if (Number(index) === skipIndex) return true;
+        return allowed.has(rowCellText(row, Number(index)));
+      });
+    }
+
+    function applyColumnFilters(table) {
+      const state = filterState(table);
+      const active = Object.keys(state).length > 0;
+      [...table.querySelectorAll("tbody tr")].forEach(row => {
+        const visible = !active || rowPasses(row, state, -1);
+        row.hidden = !visible;
+      });
+      [...table.querySelectorAll("thead tr:first-child th")].forEach((header, index) => {
+        if (state[index]) header.dataset.filtered = "1";
+        else delete header.dataset.filtered;
+      });
+    }
+
+    function closeFilterPop() {
+      document.querySelectorAll(".filter-pop").forEach(pop => pop.remove());
+    }
+
+    function openFilterPop(header) {
+      closeFilterPop();
+      const table = header.closest("table");
+      const headers = [...table.querySelectorAll("thead tr:first-child th")];
+      const index = headers.indexOf(header);
+      if (index < 0) return;
+      const state = filterState(table);
+      const rows = [...table.querySelectorAll("tbody tr")];
+      const values = [...new Set(
+        rows.filter(row => rowPasses(row, state, index))
+          .map(row => rowCellText(row, index))
+      )].sort((a, b) => a.localeCompare(b, "en", { numeric: true, sensitivity: "base" }));
+      const selected = state[index];
+
+      const pop = document.createElement("div");
+      pop.className = "filter-pop";
+      pop.innerHTML = `
+        <input type="search" placeholder="Search values" aria-label="Search values">
+        <div class="filter-pop-actions">
+          <button type="button" data-act="all">Select all</button>
+          <button type="button" data-act="none">Clear</button>
+          <button type="button" data-act="reset">Remove filter</button>
+        </div>
+        <div class="filter-pop-list"></div>`;
+      document.body.appendChild(pop);
+      // Place it against the header, then keep it wholly on screen: clamp both edges,
+      // and drop it above the header rather than off the bottom when there is no room
+      // below. Clamping only the right edge left the last column's popup hanging off
+      // the viewport with its list unreachable.
+      const box = header.getBoundingClientRect();
+      const margin = 8;
+      const width = pop.offsetWidth || 268;
+      pop.style.left = `${Math.max(margin, Math.min(box.left, window.innerWidth - width - margin))}px`;
+      const height = Math.min(pop.offsetHeight || 340, 340);
+      const below = box.bottom + 4;
+      pop.style.top = `${below + height + margin <= window.innerHeight
+        ? below
+        : Math.max(margin, Math.min(box.top - height - 4, window.innerHeight - height - margin))}px`;
+      pop.style.maxHeight = `${Math.min(340, window.innerHeight - 2 * margin)}px`;
+
+      const list = pop.querySelector(".filter-pop-list");
+      const search = pop.querySelector("input");
+      function paint() {
+        const query = search.value.trim().toLowerCase();
+        const shown = values.filter(v => !query || v.toLowerCase().includes(query));
+        list.innerHTML = shown.length === 0
+          ? '<div class="filter-pop-empty">No matching values.</div>'
+          : shown.map(v => {
+              const on = !selected || selected.has(v);
+              return `<label><input type="checkbox" value="${esc(v)}"${on ? " checked" : ""}>` +
+                `<span>${v === "" ? "<em>(blank)</em>" : esc(v)}</span></label>`;
+            }).join("");
+      }
+      function commit(chosen) {
+        if (chosen === null || chosen.size === values.length) delete state[index];
+        else state[index] = chosen;
+        applyColumnFilters(table);
+        refreshTotals(table);
+      }
+      function currentChosen() {
+        // Values filtered out of view by the search box keep whatever state they had,
+        // so searching narrows what you can tick without silently dropping the rest.
+        const visible = new Set([...list.querySelectorAll("input:checked")]
+          .map(box => box.value));
+        const hidden = values.filter(v =>
+          ![...list.querySelectorAll("input")].some(box => box.value === v));
+        hidden.forEach(v => { if (!selected || selected.has(v)) visible.add(v); });
+        return visible;
+      }
+      paint();
+      search.addEventListener("input", paint);
+      list.addEventListener("change", () => commit(currentChosen()));
+      pop.addEventListener("click", event => {
+        const act = event.target.closest("button")?.dataset.act;
+        if (!act) return;
+        if (act === "reset") { delete state[index]; applyColumnFilters(table); refreshTotals(table); closeFilterPop(); return; }
+        list.querySelectorAll("input").forEach(box => { box.checked = act === "all"; });
+        commit(act === "all" ? null : currentChosen());
+      });
+      search.focus();
+    }
+
+    // Headers are built by the renderers as plain text, so the control is added once
+    // per header here rather than in every table's markup.
+    function installColumnFilters() {
+      document.querySelectorAll("table thead tr:first-child th").forEach(header => {
+        if (header.querySelector(".th-filter")) return;
+        const icon = document.createElement("span");
+        icon.className = "th-filter";
+        icon.textContent = "\u2261";
+        icon.title = "Filter this column";
+        header.appendChild(icon);
+      });
+    }
+
+    function refreshAllTotals() {
+      document.querySelectorAll("table").forEach(table => {
+        applyColumnFilters(table);
+        refreshTotals(table);
+        applySort(table);
+      });
+    }
+
+    // Click-to-sort on any header. Numeric cells sort on their exact value, text
+    // cells naturally, so "0789" and "12.7" order sensibly rather than as strings.
+    function cellSortValue(cell) {
+      if (!cell) return "";
+      if (cell.dataset.value !== undefined && cell.dataset.value !== "") {
+        const exact = Number(cell.dataset.value);
+        if (!Number.isNaN(exact)) return exact;
+      }
+      const text = primaryText(cell);
+      const match = text.match(COPY_NUMERIC);
+      return match ? Number(match[1].replace(/,/g, "")) : text.toLowerCase();
+    }
+
+    function applySort(table) {
+      const index = table.dataset.sortIndex;
+      if (index === undefined) return;
+      const column = Number(index);
+      const direction = table.dataset.sortDir === "desc" ? -1 : 1;
+      const tbody = table.querySelector("tbody");
+      if (!tbody) return;
+      [...tbody.rows]
+        .sort((a, b) => {
+          const left = cellSortValue(a.children[column]);
+          const right = cellSortValue(b.children[column]);
+          if (typeof left === "number" && typeof right === "number") {
+            return (left - right) * direction;
+          }
+          return String(left).localeCompare(String(right), "en", { numeric: true }) * direction;
+        })
+        .forEach(row => tbody.appendChild(row));
+    }
+
+    function sortByHeader(header) {
+      const table = header.closest("table");
+      const headers = [...table.querySelectorAll("thead tr:first-child th")];
+      const column = headers.indexOf(header);
+      if (column < 0) return;
+      const same = table.dataset.sortIndex === String(column);
+      table.dataset.sortIndex = String(column);
+      table.dataset.sortDir = same && table.dataset.sortDir === "asc" ? "desc" : "asc";
+      headers.forEach(cell => { cell.dataset.sorted = ""; });
+      header.dataset.sorted = table.dataset.sortDir;
+      applySort(table);
+    }
+
+    function tableToTsv(table) {
+      return [...table.querySelectorAll("tr")]
+        .filter(tr => !tr.hidden)
+        .map(tr => [...tr.querySelectorAll("th, td")].map(copyCellText).join("\t"))
+        .filter(line => line.replace(/\t/g, "").length)
+        .join("\n");
+    }
+
+    async function copyText(text, button) {
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          // Fallback for pages served over plain http, where the async clipboard
+          // API is unavailable.
+          const area = document.createElement("textarea");
+          area.value = text;
+          area.setAttribute("readonly", "");
+          area.style.position = "fixed";
+          area.style.opacity = "0";
+          document.body.appendChild(area);
+          area.select();
+          document.execCommand("copy");
+          document.body.removeChild(area);
+        }
+        const original = button.dataset.label || button.textContent;
+        button.dataset.label = original;
+        button.textContent = "Copied";
+        button.classList.add("done");
+        setTimeout(() => {
+          button.textContent = original;
+          button.classList.remove("done");
+        }, 1600);
+      } catch (error) {
+        button.textContent = "Copy failed";
+        setTimeout(() => { button.textContent = button.dataset.label || "Copy table"; }, 1600);
+      }
+    }
+
+    const DEFAULT_DETAIL_COLUMNS = [
+      { label: "Source / Plant", field: "__source_plant" },
+      { label: "SKU", field: "sku" },
+      { label: "Material code", field: "material_code" },
+      { label: "Quantity", field: "qty", kind: "qty" },
+    ];
+
+    function detailColumns(key) {
+      const prefix = String(key || "").split("|")[0];
+      return (data.detail_columns || {})[prefix] || DEFAULT_DETAIL_COLUMNS;
+    }
+
+    function detailCell(row, column) {
+      if (column.field === "__source_plant") {
+        return `${esc(row.source)} · ${esc(displayPlant(row.plant))}`;
+      }
+      const value = row[column.field];
+      if (column.kind === "qty") {
+        const digits = row.unit === "NOS" ? 0 : (row.unit === "INR" ? 2 : 3);
+        return `${fmt(value, digits)} ${esc(row.unit)}`;
+      }
+      if (column.kind === "num") return fmt(value, 0);
+      if (column.kind === "mt") return fmt(value, 3);
+      if (column.kind === "plant") return esc(displayPlant(value));
+      return esc(value);
+    }
+
+    // The stock tab shows two tables. Copy them as a single grid with a length-type
+    // column so the result pastes as one clean block rather than stacked headers.
+    function copyStockAnalysis(button) {
+      const plant = document.getElementById("stockPlant").value;
+      const type = document.getElementById("stockType").value;
+      const query = document.getElementById("stockSearch").value.trim().toLowerCase();
+      const analysis = data.stock_analysis || { ctl: [], ll: [] };
+      const lines = [[
+        "LENGTH TYPE", "PLANT", "MATERIAL CODE", "DESCRIPTION", "HELD FOR", "AGE DAYS",
+        "STOCK MT", "HIGH AGE MT", "STOCK NOS", "BATCHES", "SAP VS RFD",
+      ].join("\t")];
+      let total = 0;
+      [["ctl", "Cut length"], ["ll", "Long length"]].forEach(([kind, label]) => {
+        if (type && type !== kind) return;
+        (analysis[kind] || [])
+          .filter(r => {
+            if (plant && String(r.plant) !== plant) return false;
+            const haystack =
+              `${r.material_code} ${r.description || ""} ${r.holder || ""}`.toLowerCase();
+            return !query || haystack.includes(query);
+          })
+          .forEach(r => {
+            total += Number(r.stock_mt || 0);
+            lines.push([
+              label, displayPlant(r.plant), r.material_code, r.description || "",
+              r.holder || "", r.oldest_age_days, Number(r.stock_mt).toFixed(3),
+              Number(r.high_age_mt).toFixed(3),
+              r.stock_nos === null ? "" : Math.round(Number(r.stock_nos)),
+              r.batches, r.rfd_verdict || "",
+              r.rfd_matched_mt === null || r.rfd_matched_mt === undefined
+                ? "" : Number(r.rfd_matched_mt).toFixed(3),
+              r.rfd_unmatched_mt === null || r.rfd_unmatched_mt === undefined
+                ? "" : Number(r.rfd_unmatched_mt).toFixed(3),
+              r.rfd_explanation || "",
+            ].join("\t"));
+          });
+      });
+      lines.push(["Total", "", "", "", "", "", total.toFixed(3), "", "", "", "", "", "", ""].join("\t"));
+      copyText(lines.join("\n"), button);
+    }
+
+    // The STR list is what the planner places in SAP: one line per finished-goods code
+    // to move, with the quantity that closes the 15-day gap, the plant it comes from
+    // and 8406 as the destination. Mother tubes appear under the finished-goods code
+    // that shares their description, carrying a remark saying they are still WIP.
+    // A bucket whose gap the sending plants cannot cover gets a closing shortfall line
+    // rather than being silently dropped.
+    function copyStrList(button) {
+      const plan = data.str_plan || {};
+      const destination = plan.destination_plant || "8406";
+      const rows = strFilteredRows().filter(r => r.str_required_mt > 0);
+      const lines = [
+        `STOCK TRANSFER REQUEST\tas of ${data.metadata.as_of}\t${plan.target_days || 15} days cover at ${destination}`,
+        ["SOURCE PLANT", "DESTINATION PLANT", "FG MATERIAL CODE", "DESCRIPTION",
+         "BUCKET", "QTY MT", "REMARK"].join("\t"),
+      ];
+      let total = 0;
+      rows.forEach(r => {
+        (r.str_lines || []).forEach(l => {
+          total += Number(l.qty_mt || 0);
+          lines.push([
+            l.plant, destination, l.material_code || "", l.description || "",
+            r.bucket, Number(l.qty_mt).toFixed(3), l.remark || "",
+          ].join("\t"));
+        });
+        if (r.str_shortfall_mt > 0) {
+          lines.push([
+            "", destination, "", "", r.bucket, "",
+            `Short by ${fmt(r.str_shortfall_mt, 3)} MT — no stock at ${(plan.source_plants || []).join("/")}`,
+          ].join("\t"));
+        }
+      });
+      lines.push(["Total", "", "", "", "", total.toFixed(3), ""].join("\t"));
+      copyText(lines.join("\n"), button);
+    }
+
+    // Clearance list, written to be pasted straight into WhatsApp: no tabs, because a
+    // tab-separated grid collapses into an unreadable run of text there, and short
+    // lines so nothing wraps on a phone. WhatsApp renders *bold* and _italic_.
+    const CLEARANCE_MIN_NOS = 500;
+
+    // Dimensions are written without thousand separators: "1130 mm" is a length,
+    // "1,130 mm" reads as a quantity and invites a misread on a phone screen.
+    const plainNumber = value =>
+      value === null || value === undefined || Number.isNaN(Number(value))
+        ? "" : String(Number(Number(value).toFixed(2)));
+
+    function skuLabel(row) {
+      const parts = [plainNumber(row.od)];
+      if (Number(row.inner_d) > 0) parts.push(plainNumber(row.inner_d));
+      parts.push(plainNumber(row.thickness));
+      parts.push(plainNumber(row.ctl_length));
+      return `${parts.filter(Boolean).join(" x ")} mm`;
+    }
+
+    function copyClearance(button) {
+      const customer = document.getElementById("customerSelect").value;
+      if (!customer) {
+        button.textContent = "Select a customer";
+        setTimeout(() => { button.textContent = "Copy clearance list"; }, 1800);
+        return;
+      }
+      // CTL stock is a shared pool keyed by CTL bucket, and one customer can carry the
+      // same bucket on more than one row, so deduplicate before listing or the same
+      // pieces are offered twice and the total double counts.
+      const seen = new Set();
+      const rows = data.customer_lines
+        .filter(r => r.customer_display === customer)
+        .filter(r => Number(r.ctl_stock_pool_nos || 0) > CLEARANCE_MIN_NOS)
+        .filter(r => {
+          if (seen.has(r.ctl_bucket)) return false;
+          seen.add(r.ctl_bucket);
+          return true;
+        })
+        .sort((a, b) => Number(b.ctl_stock_pool_nos) - Number(a.ctl_stock_pool_nos));
+      const [year, month, day] = String(data.metadata.as_of).split("-");
+      const lines = [
+        `*CLEARANCE REQUEST - ${customer.toUpperCase()}*`,
+        `_Cut length stock as on ${day}.${month}.${year}_`,
+        "",
+      ];
+      if (rows.length === 0) {
+        lines.push(`No cut-length SKU has more than ${fmt(CLEARANCE_MIN_NOS, 0)} nos in stock.`);
+      } else {
+        rows.forEach((r, i) => {
+          // Schedule July writes a placeholder such as "NO MATERIAL CODE" where a code
+          // is missing; quoting that back to the customer would be worse than silence.
+          const code = /^\d+$/.test(String(r.material_key || "")) ? ` (${r.material_key})` : "";
+          lines.push(`${i + 1}. ${skuLabel(r)}${code} - ${fmt(Math.round(r.ctl_stock_pool_nos), 0)} nos`);
+        });
+        const total = rows.reduce((sum, r) => sum + Math.round(r.ctl_stock_pool_nos), 0);
+        lines.push("");
+        lines.push(`*${rows.length} SKU${rows.length === 1 ? "" : "s"}, ${fmt(total, 0)} nos*`);
+        lines.push("Please confirm clearance for despatch.");
+      }
+      copyText(lines.join("\n"), button);
+    }
+
+    // Dispatch plan in the format the dispatch team receives: one line per open SKU
+    // of the selected customer, with the sales order carried from that material's
+    // most recent earlier invoice, and a total tonnage row.
+    function copyDispatchPlan(button) {
+      const customer = document.getElementById("customerSelect").value;
+      if (!customer) {
+        button.textContent = "Select a customer";
+        setTimeout(() => { button.textContent = "Copy dispatch plan"; }, 1800);
+        return;
+      }
+      const plain = (value, digits) =>
+        value === null || value === undefined || Number.isNaN(Number(value))
+          ? "" : Number(value).toFixed(digits);
+      const rows = data.customer_lines
+        .filter(r => r.customer_display === customer && Number(r.balance_qty || 0) > 0)
+        .sort((a, b) => (a.od - b.od) || (a.thickness - b.thickness)
+          || (a.ctl_length - b.ctl_length));
+      const [year, month, day] = String(data.metadata.as_of).split("-");
+      const lines = [
+        `DATE : ${day}.${month}.${year}\t${customer.toUpperCase()}`,
+        ["PLANT", "ACTUAL OD", "OD", "ID", "THICKNESS", "CTL", "NOS", "MT", "SO"].join("\t"),
+      ];
+      let total = 0;
+      rows.forEach(r => {
+        total += Number(r.balance_mt || 0);
+        lines.push([
+          r.dispatch_plant ? displayPlant(r.dispatch_plant) : "",
+          plain(r.actual_od, 2),
+          plain(r.od, 2),
+          Number(r.inner_d) ? plain(r.inner_d, 2) : "",
+          plain(r.thickness, 2),
+          r.ctl_length === null || r.ctl_length === undefined ? "" : Math.round(r.ctl_length),
+          Math.round(Number(r.balance_qty || 0)),
+          plain(r.balance_mt, 2),
+          r.so_number || "",
+        ].join("\t"));
+      });
+      lines.push(["", "", "", "", "", "", "", total.toFixed(2), ""].join("\t"));
+      copyText(lines.join("\n"), button);
+    }
+
+    function showStock(key, label) {
+      const rows = data.stock_details?.[key] || [];
+      const columns = detailColumns(key);
+      document.getElementById("stockModalTitle").textContent = label || "Stock details";
+      document.getElementById("stockModalNote").textContent =
+        `${rows.length} line${rows.length === 1 ? "" : "s"}`;
+      document.getElementById("stockModalHead").innerHTML = columns.map(c =>
+        `<th${c.kind === "num" || c.kind === "qty" ? ' class="num"' : ""}>${esc(c.label)}</th>`).join("");
+      // Formula breakups list inputs and a result, so summing their rows is
+      // meaningless; only component lists get a total.
+      const NO_TOTAL = new Set(["LLCOVERAGE", "LLGAP45", "LLGAP", "BALANCE"]);
+      // Cards whose rows are months, one per month, and only months that moved.
+      const AVERAGE_BY_MONTH = new Set(["LLHISTORY", "SKUHISTORY"]);
+      const wantsTotal = !NO_TOTAL.has(String(key || "").split("|")[0]);
+      // A column totals when it holds a quantity, or when its schema says so outright:
+      // `kind: "mt"` is not enough, being also weight per metre and rupees per metre.
+      const summable = c => c.kind === "qty" || c.add === true;
+      const qtyColumns = wantsTotal ? columns.filter(summable) : [];
+      const body = rows.map(row => `<tr>${
+        columns.map(c =>
+          `<td${c.kind === "num" || c.kind === "qty" ? ' class="num"' : ""}>${detailCell(row, c)}</td>`
+        ).join("")
+      }</tr>`).join("");
+      let totalRow = "";
+      if (qtyColumns.length && rows.length) {
+        const unit = rows[0].unit;
+        const digits = unit === "NOS" ? 0 : (unit === "INR" ? 2 : 3);
+        // A card whose rows are months is a history, and adding a history gives the size
+        // of the window, not the size of a month. Those cards close on an average month
+        // instead, over the months that moved — the same denominator the tracker's own
+        // average uses, and the figure a schedule is actually read against.
+        const byMonth = AVERAGE_BY_MONTH.has(String(key || "").split("|")[0]);
+        const over = byMonth ? rows.length : 1;
+        // Each quantity column totals its own field. The sign-off breakup carries three
+        // of them — signed, not signed, order — and totalling `qty` for all of them put
+        // the order figure under every heading, so the split read as if nothing was
+        // outstanding.
+        totalRow = `<tr class="total-row">${columns.map((c, index) => {
+          if (!summable(c)) {
+            return `<td>${index === 0 ? (byMonth ? "Average month" : "Total") : ""}</td>`;
+          }
+          const total = rows.reduce((sum, row) => sum + Number(row[c.field] || 0), 0);
+          // A summable column is not necessarily in the row's own unit. The pieces
+          // column beside a tonnage is a count: it takes no "MT" and no decimals, and
+          // read 27,056.25 MT before this.
+          const counts = c.kind === "num";
+          const places = counts ? 0 : (c.kind === "qty" ? digits : 3);
+          const suffix = counts ? "" : ` ${esc(unit)}`;
+          return `<td class="num">${fmt(total / over, places)}${suffix}</td>`;
+        }).join("")}</tr>`;
+      }
+      document.getElementById("stockModalBody").innerHTML = body + totalRow;
+      document.getElementById("stockModalEmpty").classList.toggle("hidden", rows.length !== 0);
+      document.getElementById("stockModal").classList.remove("hidden");
+    }
+
+    function closeStock() {
+      document.getElementById("stockModal").classList.add("hidden");
+    }
+
+    document.querySelectorAll(".tab").forEach(tab => tab.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach(item => item.classList.remove("active"));
+      document.querySelectorAll(".panel").forEach(panel => panel.classList.add("hidden"));
+      tab.classList.add("active");
+      document.getElementById(tab.dataset.view).classList.remove("hidden");
+      updateCardVisibility();
+      refreshAllTotals();
+      if (tab.dataset.view === "customerView") {
+        renderCustomers();
+      } else if (tab.dataset.view === "llView") {
+        renderGlobalCards();
+      }
+    }));
+    document.getElementById("customerSelect").addEventListener("change", renderCustomers);
+    document.getElementById("skuSearch").addEventListener("input", renderCustomers);
+    document.getElementById("customerHistorySearch").addEventListener("input", renderCustomers);
+    document.getElementById("customerHistoryScope").addEventListener("change", renderCustomers);
+    document.getElementById("llSearch").addEventListener("input", renderLL);
+    document.getElementById("riskFilter").addEventListener("change", renderLL);
+    document.getElementById("trendCustomer").addEventListener("change", renderTrendCustomerSkus);
+    document.getElementById("trendSkuSearch").addEventListener("input", renderTrendCustomerSkus);
+    ["trendLengthType", "trendAngleCut", "trendChamfer"].forEach(id =>
+      document.getElementById(id).addEventListener("change", renderTrendPlants));
+    // One switch, every table on the tab.
+    document.getElementById("trendUnit").addEventListener("change", () => {
+      renderTrendSummary();
+      renderTrendBuckets();
+      renderTrendCustomerSkus();
+      renderTrendPlants();
+      refreshAllTotals();
+    });
+    document.getElementById("mappingSearch").addEventListener("input", renderMappings);
+    document.getElementById("mappingType").addEventListener("change", renderMappings);
+    document.getElementById("stockSearch").addEventListener("input", renderStockAnalysis);
+    document.getElementById("stockPlant").addEventListener("change", renderStockAnalysis);
+    document.getElementById("stockType").addEventListener("change", renderStockAnalysis);
+    ["pricingSearch"].forEach(id =>
+      document.getElementById(id).addEventListener("input", renderPricing));
+    ["pricingCustomer", "pricingKind", "pricingValueAdd"].forEach(id =>
+      document.getElementById(id).addEventListener("change", renderPricing));
+    document.getElementById("pricingSearch").addEventListener("input", renderPricingRepository);
+    document.getElementById("raisePcr").addEventListener("click", event =>
+      copyPcr(event.currentTarget));
+    document.getElementById("strSearch").addEventListener("input", renderStr);
+    document.getElementById("strRisk").addEventListener("change", renderStr);
+    document.getElementById("transferSearch").addEventListener("input", renderTransfers);
+    document.getElementById("transferSource").addEventListener("change", renderTransfers);
+    document.getElementById("transferDest").addEventListener("change", renderTransfers);
+    document.getElementById("transferStatus").addEventListener("change", renderTransfers);
+    document.getElementById("overdueSearch").addEventListener("input", renderOverdue);
+    document.getElementById("meghSearch").addEventListener("input", renderMegh);
+    document.getElementById("meghCut").addEventListener("change", renderMegh);
+    document.getElementById("meghBop").addEventListener("change", renderMegh);
+    document.getElementById("meghOem").addEventListener("change", renderMegh);
+    window.addEventListener("resize", refreshAllTotals);
+    document.getElementById("copyDispatch").addEventListener("click", event =>
+      copyDispatchPlan(event.currentTarget));
+    document.getElementById("copyClearance").addEventListener("click", event =>
+      copyClearance(event.currentTarget));
+    document.getElementById("copyStock").addEventListener("click", event =>
+      copyStockAnalysis(event.currentTarget));
+    document.getElementById("copyStrList").addEventListener("click", event =>
+      copyStrList(event.currentTarget));
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") closeFilterPop();
+    });
+    // Close the popup when the page or a table scrolls underneath it — it is fixed, so
+    // it would otherwise float away from its header. But a scroll *inside* the popup is
+    // the reader working through a long value list, and this listener is in the capture
+    // phase, so without the guard the list closes itself the instant it is dragged.
+    window.addEventListener("scroll", event => {
+      const target = event.target;
+      if (target instanceof Element && target.closest(".filter-pop")) return;
+      closeFilterPop();
+    }, true);
+    document.addEventListener("click", event => {
+      if (event.target.closest(".th-filter")) {
+        openFilterPop(event.target.closest("thead tr:first-child th"));
+        return;
+      }
+      if (!event.target.closest(".filter-pop")) closeFilterPop();
+      const header = event.target.closest("thead tr:first-child th");
+      if (header) { sortByHeader(header); return; }
+      const copy = event.target.closest("[data-copy-target]");
+      if (copy) {
+        const tables = copy.dataset.copyTarget.split(",")
+          .map(id => document.getElementById(id.trim()))
+          .filter(Boolean);
+        const text = tables.map(table => {
+          const heading = table.dataset.copyHeading;
+          return (heading ? heading + "\n" : "") + tableToTsv(table);
+        }).join("\n\n");
+        copyText(text, copy);
+        return;
+      }
+      const button = event.target.closest("[data-stock-key]");
+      if (button) showStock(button.dataset.stockKey, button.dataset.stockLabel);
+    });
+    document.getElementById("stockModalClose").addEventListener("click", closeStock);
+    document.getElementById("stockModal").addEventListener("click", event => {
+      if (event.target.id === "stockModal") closeStock();
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") closeStock();
+    });
+    // Tab access. access.json is the published grant; the admin can edit it here and the
+    // edit lives in localStorage so it takes effect on this browser at once, but the
+    // file has to be published for anyone else to see the change. That split is
+    // unavoidable on a static page and the panel says so rather than pretending the
+    // toggle reached the server.
+    const ACCESS_LOCAL_KEY = "tvsm.access";
+    let access = { admin: "apoorv", tabs: [], visible: {} };
+    let accessPublished = null;
+    let previewAs = "";
+
+    async function loadAccess() {
+      try {
+        const response = await fetch("access.json", { cache: "no-store" });
+        if (response.ok) accessPublished = await response.json();
+      } catch (error) {
+        accessPublished = null;
+      }
+      // A page served without access.json falls back to every tab for everyone, which
+      // is the safe failure for an operations screen: nobody is locked out of work.
+      access = accessPublished
+        ? JSON.parse(JSON.stringify(accessPublished))
+        : { admin: "apoorv", tabs: [], visible: {}, accounts: {} };
+      const local = localStorage.getItem(ACCESS_LOCAL_KEY);
+      if (local) {
+        try { access.visible = JSON.parse(local); } catch (error) { /* keep published */ }
+      }
+      access.visible = access.visible || {};
+    }
+
+    function isAdmin(username) {
+      return username === (access.admin || "apoorv");
+    }
+
+    function allowedViews(username) {
+      if (isAdmin(username) && !previewAs) return null;   // null means every tab
+      const who = previewAs || username;
+      if (isAdmin(who)) return null;
+      const granted = access.visible[who];
+      // An account with no entry at all sees everything; an account with an empty list
+      // has been deliberately restricted to nothing.
+      return Array.isArray(granted) ? new Set(granted) : null;
+    }
+
+    function applyTabAccess(username) {
+      const allowed = allowedViews(username);
+      document.getElementById("exitPreview").classList.toggle("hidden", !previewAs);
+      document.getElementById("sessionUser").textContent = previewAs
+        ? `Signed in as ${username} · previewing as ${previewAs}`
+        : `Signed in as ${username}`;
+      const tabs = [...document.querySelectorAll(".tab")];
+      tabs.forEach(tab => {
+        const isAdminTab = tab.classList.contains("admin-only");
+        const visible = isAdminTab
+          ? (isAdmin(username) && !previewAs)
+          : (allowed === null || allowed.has(tab.dataset.view));
+        tab.classList.toggle("hidden", !visible);
+      });
+      // If the open tab has just been hidden, move to the first one that is left.
+      const open = document.querySelector(".tab.active");
+      if (!open || open.classList.contains("hidden")) {
+        const first = tabs.find(tab => !tab.classList.contains("hidden"));
+        if (first) first.click();
+      }
+      // Granted nothing at all would otherwise be an empty page that reads as broken.
+      const none = !tabs.some(tab => !tab.classList.contains("hidden"));
+      const banner = document.getElementById("statusBanner");
+      if (none) {
+        banner.className = "status warn";
+        banner.textContent =
+          `No tabs are granted to ${previewAs || username}. Ask the admin to grant access.`;
+        document.querySelectorAll(".panel").forEach(panel => panel.classList.add("hidden"));
+      }
+    }
+
+    function accessDirty() {
+      if (!accessPublished) return false;
+      return JSON.stringify(access.visible) !== JSON.stringify(accessPublished.visible || {});
+    }
+
+    function renderAdmin(username) {
+      const accounts = Object.keys(access.visible || {});
+      const known = [...new Set(accounts.concat(
+        Object.keys(accountDigests()).filter(u => !isAdmin(u))
+      ))].sort();
+      document.getElementById("adminUser").textContent = access.admin || "apoorv";
+      const head = document.getElementById("adminHead");
+      head.innerHTML = "<th>Tab</th>" + known.map(u => `<th>${esc(u)}</th>`).join("");
+      document.getElementById("adminBody").innerHTML = (access.tabs || []).map(tab => `<tr>
+        <td>${esc(tab.label)}</td>
+        ${known.map(u => {
+          const granted = access.visible[u];
+          const on = !Array.isArray(granted) || granted.includes(tab.view);
+          return `<td class="admin-cell"><input type="checkbox" data-user="${esc(u)}" data-view="${esc(tab.view)}"${on ? " checked" : ""}></td>`;
+        }).join("")}
+      </tr>`).join("") + `<tr>
+        <td class="admin-locked">Admin</td>
+        ${known.map(() => '<td class="admin-cell admin-locked">—</td>').join("")}
+      </tr>`;
+      const select = document.getElementById("adminPreview");
+      select.innerHTML = '<option value="">View as admin (all tabs)</option>' +
+        known.map(u => `<option value="${esc(u)}"${previewAs === u ? " selected" : ""}>View as ${esc(u)}</option>`).join("");
+      document.getElementById("adminDirty").textContent = accessDirty()
+        ? "Local changes are not published yet — other accounts still see the published grant."
+        : "";
+      document.querySelectorAll("#adminBody input[type=checkbox]").forEach(box => {
+        box.addEventListener("change", () => {
+          const user = box.dataset.user;
+          const current = new Set(
+            Array.isArray(access.visible[user])
+              ? access.visible[user]
+              : (access.tabs || []).map(tab => tab.view)
+          );
+          if (box.checked) current.add(box.dataset.view);
+          else current.delete(box.dataset.view);
+          access.visible[user] = (access.tabs || [])
+            .map(tab => tab.view).filter(view => current.has(view));
+          localStorage.setItem(ACCESS_LOCAL_KEY, JSON.stringify(access.visible));
+          renderAdmin(username);
+          applyTabAccess(username);
+        });
+      });
+    }
+
+    function accessFileText() {
+      return JSON.stringify(
+        {
+          admin: access.admin, salt: access.salt, accounts: access.accounts,
+          tabs: access.tabs, visible: access.visible,
+        },
+        null, 2
+      ) + "\n";
+    }
+
+    // Sign-in gate. This keeps the dashboard off the screen until someone identifies
+    // themselves and holds who that is for the session; it is not access control. The
+    // page is served statically, so data.json can still be fetched directly and these
+    // digests travel to the browser like everything else. Real protection has to sit
+    // in front of the files, not inside them.
+    const SESSION_KEY = "tvsm.session";
+    // Fallback only, for a page served without access.json: the admin can still get in
+    // and see what is wrong, rather than everyone being locked out by a missing file.
+    const FALLBACK_SALT = "tvsm-dashboard-2026";
+    const FALLBACK_ACCOUNTS = {
+      apoorv: "daf2a19c4e93f27aac9ceb2cee9e2ace0d2af32217586f8103e0a0d34f059c8f",
+    };
+    const accountDigests = () =>
+      Object.keys(access.accounts || {}).length ? access.accounts : FALLBACK_ACCOUNTS;
+    const signInSalt = () => access.salt || FALLBACK_SALT;
+
+    async function digest(username, password) {
+      // Salted per user, so two people sharing a password do not share a digest and
+      // neither is a straight dictionary lookup of the password alone.
+      const bytes = new TextEncoder().encode(`${username}:${signInSalt()}:${password}`);
+      const hash = await crypto.subtle.digest("SHA-256", bytes);
+      return [...new Uint8Array(hash)]
+        .map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    function showDashboard(username) {
+      document.body.classList.toggle("is-admin", isAdmin(username));
+      document.body.classList.remove("locked");
+      document.getElementById("signIn").classList.add("hidden");
+      document.getElementById("sessionBar").classList.remove("hidden");
+      document.getElementById("sessionUser").textContent = `Signed in as ${username}`;
+    }
+
+    function startSession(username) {
+      sessionStorage.setItem(SESSION_KEY, username);
+      showDashboard(username);
+      // The data is only fetched once someone is through the gate, so a browser left
+      // on the sign-in screen holds nothing.
+      boot().then(() => {
+        if (isAdmin(username)) renderAdmin(username);
+        applyTabAccess(username);
+      }).catch(error => {
+        const banner = document.getElementById("statusBanner");
+        banner.className = "status fail";
+        banner.textContent = error.message;
+      });
+    }
+
+    document.getElementById("signInForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      const username = document.getElementById("signInUser").value.trim().toLowerCase();
+      const password = document.getElementById("signInPass").value;
+      const error = document.getElementById("signInError");
+      error.textContent = "";
+      const expected = accountDigests()[username];
+      // When access.json did not load, the page holds the admin fallback alone, so every
+      // other account fails as though its password were wrong. That message sends the
+      // holder off to re-check a password that was never the problem: name the real
+      // cause, which is a file that did not reach the browser.
+      if (!accessPublished && username !== (access.admin || "apoorv")) {
+        error.textContent =
+          "access.json did not load, so only the admin account can sign in here. "
+          + "Reload the page; if it keeps happening the file is not reaching this browser.";
+        document.getElementById("signInPass").value = "";
+        return;
+      }
+      if (!expected || (await digest(username, password)) !== expected) {
+        error.textContent = "Username or password is not recognised.";
+        document.getElementById("signInPass").value = "";
+        return;
+      }
+      startSession(username);
+    });
+
+    document.getElementById("copyAccess").addEventListener("click", event =>
+      copyText(accessFileText(), event.currentTarget));
+    document.getElementById("adminReset").addEventListener("click", () => {
+      localStorage.removeItem(ACCESS_LOCAL_KEY);
+      previewAs = "";
+      access.visible = accessPublished
+        ? JSON.parse(JSON.stringify(accessPublished.visible || {})) : {};
+      const who = sessionStorage.getItem(SESSION_KEY) || "";
+      renderAdmin(who);
+      applyTabAccess(who);
+    });
+    document.getElementById("exitPreview").addEventListener("click", () => {
+      previewAs = "";
+      const who = sessionStorage.getItem(SESSION_KEY) || "";
+      applyTabAccess(who);
+      renderAdmin(who);
+      document.querySelector('.tab[data-view="adminView"]').click();
+    });
+    document.getElementById("adminPreview").addEventListener("change", event => {
+      previewAs = event.target.value;
+      const who = sessionStorage.getItem(SESSION_KEY) || "";
+      applyTabAccess(who);
+      renderAdmin(who);
+    });
+    document.getElementById("signOut").addEventListener("click", () => {
+      sessionStorage.removeItem(SESSION_KEY);
+      location.reload();
+    });
+
+    loadAccess().then(() => {
+      const resumed = sessionStorage.getItem(SESSION_KEY);
+      if (resumed && accountDigests()[resumed]) startSession(resumed);
+      else document.getElementById("signInUser").focus();
+    });
+
+  </script>
+</body>
+</html>
