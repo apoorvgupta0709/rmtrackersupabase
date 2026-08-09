@@ -48,6 +48,17 @@ class SheetMissing(LookupError):
     """
 
 
+class SupabaseRowCountMismatch(RuntimeError):
+    """A stored dump came back with fewer rows than it was written with.
+
+    Worth its own error because the failure it guards against is silent. PostgREST caps
+    a response at 1,000 rows and says nothing about it, so a sheet reads short, the
+    pipeline computes over the part that arrived, and the only symptom is a number that
+    looks plausible. Every batch records the row count it was written with; a read that
+    does not match it stops the refresh rather than publishing a partial one.
+    """
+
+
 @dataclass(frozen=True)
 class ReadSpec:
     """One `pd.read_excel` call, stated rather than performed."""
@@ -306,7 +317,7 @@ def name_columns(header_cells: list, count: int) -> list[str]:
     return mangled
 
 
-class CellSources(Sources):
+class GridSources(Sources):
     """Frames rebuilt from a parsed cell grid rather than read from a workbook.
 
     This is the shape the uploaded dumps take: the browser parses the .xlsx and stores
@@ -319,31 +330,13 @@ class CellSources(Sources):
     basis for trusting an uploaded dump as much as a mailed file.
     """
 
-    def __init__(self, cell_dir: Path, extra_slots=None):
-        super().__init__(extra_slots)
-        self.cell_dir = Path(cell_dir)
-
-    def _path(self, slot: str) -> Path:
-        return self.cell_dir / f"{slot.replace(':', '__')}.json"
-
-    def available(self, slot: str) -> bool:
-        self.spec(slot)
-        return self._path(slot).exists()
-
-    def sheet_names(self, slot: str) -> list[str]:
-        # Only the schedule asks, and it asks which months are held. Each stored grid
-        # names the sheet it came from, so the answer is the sheets that were uploaded.
-        return sorted({
-            json.loads(path.read_text())["sheet"]
-            for path in self.cell_dir.glob(f"{slot.replace(':', '__')}*.json")
-        })
+    def grid(self, slot: str) -> dict:
+        """`{"sheet": str, "n_cols": int, "cells": [[...]]}` for a slot. Subclasses supply."""
+        raise NotImplementedError
 
     def frame(self, slot: str, *, sheet: str | None = None) -> pd.DataFrame:
         spec = self.spec(slot)
-        path = self._path(slot)
-        if not path.exists():
-            raise FileNotFoundError(f"No stored cells for slot {slot!r}")
-        stored = json.loads(path.read_text())
+        stored = self.grid(slot)
         if sheet is not None and stored["sheet"] != sheet:
             raise SheetMissing(f"stored cells for {slot!r} are sheet {stored['sheet']!r}")
 
@@ -429,3 +422,122 @@ class CellSources(Sources):
                 return numeric.astype("int64")
             return numeric.astype("float64")
         return series.astype(object)
+
+
+class CellSources(GridSources):
+    """Grids read from a directory of JSON files, as `tools/export_sheet_cells.mjs` writes.
+
+    The comparison harness runs against this, so it is the backend the fidelity claim is
+    actually about. It is also how a refresh can be reproduced offline from a saved
+    export, with no database in the loop.
+    """
+
+    def __init__(self, cell_dir, extra_slots=None):
+        super().__init__(extra_slots)
+        self.cell_dir = Path(cell_dir)
+
+    def _path(self, slot: str) -> Path:
+        return self.cell_dir / f"{slot.replace(':', '__')}.json"
+
+    def available(self, slot: str) -> bool:
+        self.spec(slot)
+        return self._path(slot).exists()
+
+    def sheet_names(self, slot: str) -> list[str]:
+        return sorted({
+            json.loads(path.read_text())["sheet"]
+            for path in self.cell_dir.glob(f"{slot.replace(':', '__')}*.json")
+        })
+
+    def grid(self, slot: str) -> dict:
+        path = self._path(slot)
+        if not path.exists():
+            raise FileNotFoundError(f"No stored cells for slot {slot!r}")
+        return json.loads(path.read_text())
+
+
+class PostgresSources(GridSources):
+    """Grids read from the uploads table — what the refresh runs on in production.
+
+    Same rebuild as `CellSources`, because it is the same grid: the uploader stores
+    exactly what the browser parsed, and the read spec is applied here rather than at
+    upload time. So the fidelity proved for one holds for the other, and a corrected
+    header row never means asking the owner to re-send a workbook.
+
+    Reads go through PostgREST with the service-role key rather than a Postgres
+    connection, which is what lets this run on a GitHub Actions runner with no database
+    port open. See .env.local.example for why that is not merely a convenience here.
+    """
+
+    def __init__(self, client, extra_slots=None):
+        super().__init__(extra_slots)
+        self.client = client
+        self._batches: dict[str, dict] | None = None
+        self._grids: dict[str, dict] = {}
+
+    @property
+    def batches(self) -> dict[str, dict]:
+        """The current batch per slot. One row each — superseding is what guarantees it."""
+        if self._batches is None:
+            rows = self.client.select(
+                "raw_batches",
+                "status=eq.current&select=id,slot,sheet,row_count,original_filename,content_sha256",
+            )
+            self._batches = {row["slot"]: row for row in rows}
+        return self._batches
+
+    def available(self, slot: str) -> bool:
+        self.spec(slot)
+        return slot in self.batches
+
+    def sheet_names(self, slot: str) -> list[str]:
+        # The schedule keeps one current batch per month sheet, so this is the list of
+        # months held — the same question `pd.ExcelFile(...).sheet_names` answered.
+        rows = self.client.select(
+            "raw_batches", f"status=eq.current&slot=eq.{slot}&select=sheet"
+        )
+        return sorted({row["sheet"] for row in rows if row["sheet"]})
+
+    def grid(self, slot: str) -> dict:
+        if slot in self._grids:
+            return self._grids[slot]
+        batch = self.batches.get(slot)
+        if batch is None:
+            raise FileNotFoundError(f"No current upload for slot {slot!r}")
+
+        cells: list[list] = []
+        # Paged, because PostgREST caps a response at 1,000 rows and zmat is 65,178.
+        # The cap is server-side and silent: asking for 5,000 returns 1,000 with no
+        # error, so a loop that stops when it gets fewer rows than it asked for stops
+        # after the first page and every sheet arrives truncated. It cost a refresh that
+        # read 998 rows of Bucketting and failed the bucket-resolution floor — which is
+        # the gate doing its job, but the cause was here. Page by what the server will
+        # actually give, and stop only on a short page.
+        page = 1000
+        offset = 0
+        while True:
+            rows = self.client.select(
+                "raw_rows",
+                f"batch_id=eq.{batch['id']}&select=seq,row&order=seq.asc"
+                f"&offset={offset}&limit={page}",
+            )
+            cells.extend(row["row"] for row in rows)
+            if len(rows) < page:
+                break
+            offset += len(rows)
+
+        if len(cells) != batch["row_count"]:
+            raise SupabaseRowCountMismatch(
+                f"slot {slot!r}: read {len(cells)} rows but the batch says "
+                f"{batch['row_count']}. A partial read must never reach the pipeline."
+            )
+
+        grid = {
+            "slot": slot,
+            "sheet": batch["sheet"],
+            "n_rows": len(cells),
+            "n_cols": max((len(r) for r in cells), default=0),
+            "cells": cells,
+        }
+        self._grids[slot] = grid
+        return grid
