@@ -1,0 +1,24 @@
+{
+  "name": "dashboard-supabase",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/apoorvgupta0709/rmtrackersupabase.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/apoorvgupta0709/rmtrackersupabase/issues"
+  },
+  "homepage": "https://github.com/apoorvgupta0709/rmtrackersupabase#readme",
+  "dependencies": {
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  }
+}

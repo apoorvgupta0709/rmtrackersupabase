@@ -18,6 +18,9 @@ somewhere in five thousand lines.
 
 from __future__ import annotations
 
+import json
+import re
+from datetime import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -250,3 +253,179 @@ class ExcelSources(Sources):
             if "Worksheet" in str(exc) or "sheet" in str(exc).lower():
                 raise SheetMissing(f"{path.name} has no sheet {spec.sheet!r}") from exc
             raise
+
+
+def excel_column_range(usecols: str | None, width: int) -> list[int]:
+    """The column positions a `usecols` window selects, e.g. "U:AF" -> 20..31.
+
+    Only the letter-range form is supported, because it is the only form the pipeline
+    uses. A name list would be a different thing and is deliberately not guessed at.
+    """
+    if usecols is None:
+        return list(range(width))
+    if not re.fullmatch(r"[A-Z]+:[A-Z]+", usecols):
+        raise ValueError(f"Unsupported usecols spec {usecols!r}")
+
+    def index_of(letters: str) -> int:
+        n = 0
+        for char in letters:
+            n = n * 26 + (ord(char) - ord("A") + 1)
+        return n - 1
+
+    first, last = usecols.split(":")
+    return list(range(index_of(first), index_of(last) + 1))
+
+
+def name_columns(header_cells: list, count: int) -> list[str]:
+    """Header names the way pandas makes them: blanks numbered, duplicates suffixed.
+
+    Reproduced rather than approximated, because a column named differently here is a
+    KeyError three thousand lines later — or worse, a silently absent column that a
+    `.get` turns into an empty series.
+    """
+    names: list[str] = []
+    for position in range(count):
+        value = header_cells[position] if position < len(header_cells) else None
+        if value is None or (isinstance(value, str) and value == ""):
+            names.append(f"Unnamed: {position}")
+        elif isinstance(value, float) and value.is_integer():
+            # A header cell holding a number reads as the number, not as "3.0".
+            names.append(str(int(value)))
+        else:
+            names.append(str(value))
+
+    seen: dict[str, int] = {}
+    mangled: list[str] = []
+    for name in names:
+        if name in seen:
+            seen[name] += 1
+            mangled.append(f"{name}.{seen[name]}")
+        else:
+            seen[name] = 0
+            mangled.append(name)
+    return mangled
+
+
+class CellSources(Sources):
+    """Frames rebuilt from a parsed cell grid rather than read from a workbook.
+
+    This is the shape the uploaded dumps take: the browser parses the .xlsx and stores
+    the sheet as cells, and the read spec — which row is the header, which column window,
+    which columns are pinned to text — is applied here, at read time. Keeping the spec on
+    this side means a corrected header row is a re-read, not a re-upload.
+
+    It is also the thing under test. `tools/compare_cell_sources.py` asserts that every
+    slot rebuilt this way equals the one `pd.read_excel` produces, which is the whole
+    basis for trusting an uploaded dump as much as a mailed file.
+    """
+
+    def __init__(self, cell_dir: Path, extra_slots=None):
+        super().__init__(extra_slots)
+        self.cell_dir = Path(cell_dir)
+
+    def _path(self, slot: str) -> Path:
+        return self.cell_dir / f"{slot.replace(':', '__')}.json"
+
+    def available(self, slot: str) -> bool:
+        self.spec(slot)
+        return self._path(slot).exists()
+
+    def sheet_names(self, slot: str) -> list[str]:
+        # Only the schedule asks, and it asks which months are held. Each stored grid
+        # names the sheet it came from, so the answer is the sheets that were uploaded.
+        return sorted({
+            json.loads(path.read_text())["sheet"]
+            for path in self.cell_dir.glob(f"{slot.replace(':', '__')}*.json")
+        })
+
+    def frame(self, slot: str, *, sheet: str | None = None) -> pd.DataFrame:
+        spec = self.spec(slot)
+        path = self._path(slot)
+        if not path.exists():
+            raise FileNotFoundError(f"No stored cells for slot {slot!r}")
+        stored = json.loads(path.read_text())
+        if sheet is not None and stored["sheet"] != sheet:
+            raise SheetMissing(f"stored cells for {slot!r} are sheet {stored['sheet']!r}")
+
+        grid = [
+            [self._decode(cell) for cell in row]
+            for row in stored["cells"]
+        ]
+
+        # Bound the sheet on its content before anything else, because openpyxl does:
+        # the declared range routinely runs past the last real row. Crucially this looks
+        # at the whole row, not the column window — Bucketting is read as U:AF, and 211
+        # of its rows are blank in that window while carrying data elsewhere. Trimming
+        # after the window dropped all 211.
+        last_row = None
+        for index, row in enumerate(grid):
+            if any(cell is not None for cell in row):
+                last_row = index
+        grid = grid[: 0 if last_row is None else last_row + 1]
+
+        width = stored["n_cols"]
+        keep = [c for c in excel_column_range(spec.usecols, width) if c < width]
+
+        if spec.header is None:
+            body = grid
+            names = list(range(len(keep)))
+        else:
+            header_row = grid[spec.header] if spec.header < len(grid) else []
+            names = name_columns([header_row[c] for c in keep], len(keep))
+            body = grid[spec.header + 1:]
+
+        rows = [[row[c] if c < len(row) else None for c in keep] for row in body]
+        frame = pd.DataFrame(rows, columns=names)
+
+        # A trailing column that is empty top to bottom, header included, is the same
+        # artefact one axis over. Only unnamed ones go: a named column that happens to be
+        # empty this week is part of the sheet's shape and pandas keeps it.
+        if spec.header is not None:
+            while len(frame.columns):
+                last = frame.columns[-1]
+                if str(last).startswith("Unnamed: ") and frame[last].isna().all():
+                    frame = frame.iloc[:, :-1]
+                else:
+                    break
+
+        for column in frame.columns:
+            frame[column] = self._as_pandas_dtype(frame[column], column, spec)
+        return frame.reset_index(drop=True)
+
+    @staticmethod
+    def _decode(cell):
+        if isinstance(cell, dict):
+            if "__excel_date" in cell:
+                return pd.Timestamp(cell["__excel_date"]).tz_localize(None)
+            if "__excel_time" in cell:
+                return time.fromisoformat(cell["__excel_time"])
+        return cell
+
+    @staticmethod
+    def _as_pandas_dtype(series: pd.Series, column, spec: ReadSpec) -> pd.Series:
+        """Give a rebuilt column the dtype `read_excel` would have given it.
+
+        A column built from a Python list is object dtype whatever it holds, so the
+        numeric and datetime columns have to be recovered. The pinned text columns are
+        left alone on purpose — pinning them is what stops a material code losing its
+        last digit to a float.
+        """
+        if spec.dtype and column in spec.dtype:
+            return series.astype(object).map(
+                lambda v: None if v is None or (isinstance(v, float) and pd.isna(v)) else str(v)
+            )
+
+        values = series.dropna()
+        if values.empty:
+            return series.astype(object)
+        if all(isinstance(v, pd.Timestamp) for v in values):
+            return pd.to_datetime(series)
+        if all(isinstance(v, bool) for v in values):
+            return series.astype(bool) if len(values) == len(series) else series
+        if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values):
+            numeric = pd.to_numeric(series, errors="coerce")
+            # pandas keeps an all-integer column as int64 only when nothing is missing.
+            if len(values) == len(series) and all(float(v).is_integer() for v in values):
+                return numeric.astype("int64")
+            return numeric.astype("float64")
+        return series.astype(object)
