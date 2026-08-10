@@ -249,6 +249,22 @@ have failed silently in this move.
   environment `env_0126Cef6Yq3SodXJjh2og7xr`) runs the refresh unattended. Its
   prompt carries the full procedure including the staleness checks; it must never
   overwrite the committed `access.json`.
+- **Two different workbooks are both called "RM tracker"; do not conflate them.**
+  `aug0826 rm tracker v1.xlsx` is the approved master — `Bucketting`, `OEM_key_1_rev
+  codes` and `Schedule <Month>`, canonical `rm_tracker_model.xlsx`, 58 sheets.
+  `RM Tracker_18092025.xlsx` is the TVSM workbook — `vsm req`, `vsm stock`, `TVSM`,
+  canonical `rm_tracker_tvsm.xlsx`, 4 sheets. Confirmed by the owner on 10 Aug after a
+  first pass assumed the dated name was the master.
+- **The uploader recognises a dump by name, then by its sheets, then by hand.** Real
+  files never arrive under the canonical name. Stem equality on the name, never a prefix
+  — `sales`, `sales_history`, `sales_jul`, `sales_q1`, `sales_q4` all begin "sales".
+  Then distinctive sheet names; `Sheet1` identifies nothing, and `wip`, `sales`,
+  `transfer`, `yf65` and `zmat` each hold only a `Sheet1`, so those can only be assigned
+  by hand — which is right, because a filename fragment is how the sales dump once
+  reached the transfer slot. **A `Schedule <Month>` sheet corroborates and never
+  identifies**: the master alone holds four sheets starting "Schedule", so a stray one
+  elsewhere would fill the schedule slot from the wrong workbook. It counts only beside
+  `Bucketting` or `OEM_key_1_rev codes`.
 - **Compare dump content, not size.** On 7 August `rfd_4731.xlsx` arrived at exactly
   yesterday's 57,435 bytes with a different sha256: a size check alone would have called
   a genuinely new extract stale and skipped it.
