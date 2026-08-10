@@ -77,13 +77,14 @@ export default async function ViewPage({
     );
   }
 
-  const { data: scalarRows } = spec.scalars.length
-    ? await supabase
-        .from("build_scalars")
-        .select("key,value")
-        .eq("build_id", buildId)
-        .in("key", spec.scalars)
-    : { data: [] };
+  // `metadata` rides along on every tab: it carries the build's as-of date, which the
+  // copy formats date their documents with. It is not admin-only, so any reader who can
+  // see the tab can see the date the figures on it were taken.
+  const { data: scalarRows } = await supabase
+    .from("build_scalars")
+    .select("key,value")
+    .eq("build_id", buildId)
+    .in("key", [...spec.scalars, "metadata"]);
   const scalars: Record<string, any> = Object.fromEntries(
     (scalarRows ?? []).map((s) => [s.key, s.value]),
   );
@@ -122,6 +123,18 @@ export default async function ViewPage({
 
   const facts = spec.facts ? spec.facts(scalars) : [];
   const anyRows = tables.some((t) => rowsFor(t).rows.length > 0);
+
+  // What the bespoke copy formats need beyond the rows of the table they sit under: the
+  // build's date, this tab's scalars, and the sections already fetched for it — the PCR
+  // walks the code repository while pricing off the priced-SKU section beside it. Only
+  // sections this tab already holds are passed, so no format costs an extra query.
+  const copyContext = {
+    asOf: String(scalars.metadata?.as_of ?? ""),
+    scalars,
+    sections: Object.fromEntries(
+      Object.entries(fetched).map(([section, held]) => [section, held.rows]),
+    ),
+  };
 
   return (
     <>
@@ -199,6 +212,8 @@ export default async function ViewPage({
             rows={rows}
             averageOver={table.averageOver}
             capped={capped ? CAP : undefined}
+            copies={table.copies}
+            copyContext={copyContext}
           />
         );
       })}

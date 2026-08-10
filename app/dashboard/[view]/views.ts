@@ -17,6 +17,7 @@
  */
 
 import type { AverageOver, Column } from "./table";
+import type { CopySpec } from "./copies";
 
 export type Unit = "mt" | "nos";
 
@@ -32,6 +33,11 @@ export type TableSpec = {
   flatten?: (rows: Record<string, unknown>[]) => Record<string, unknown>[];
   columns: Column[];
   averageOver?: AverageOver;
+  /**
+   * Bespoke copy buttons beside the generic one. A view names the format by kind; the
+   * format itself lives in `copies.ts`, because a function cannot cross into the client.
+   */
+  copies?: CopySpec[];
 };
 
 export type Fact = { label: string; value: string };
@@ -163,6 +169,9 @@ export const VIEWS: Record<string, ViewSpec> = {
           pool("shared_wip_mt", "WIP MT"),
           { field: "history_avg_month_mt", label: "Avg month MT", kind: "mt" },
         ],
+        // Both are addressed to one customer, so both read the customer off the column
+        // filter rather than off a second selector that could disagree with it.
+        copies: [{ kind: "dispatch" }, { kind: "clearance" }],
       },
     ],
   },
@@ -698,6 +707,10 @@ export const VIEWS: Record<string, ViewSpec> = {
           txt("first_billed", "First billed"),
           txt("last_billed", "Last billed"),
         ],
+        // One button per quarter rather than a quarter dropdown: a PCR names the quarter
+        // it is raised for, and a control that silently holds last quarter is a wrong
+        // price in someone's inbox.
+        copies: ctx.quarters.map((q) => ({ kind: "pcr" as const, arg: q })),
       },
     ],
   },
@@ -812,6 +825,7 @@ export const VIEWS: Record<string, ViewSpec> = {
           mt("source_stock_mt", "Source stock MT"),
           list("source_plants", "Source plants"),
         ],
+        copies: [{ kind: "str" }],
       },
       {
         key: "str_lines",

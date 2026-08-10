@@ -286,6 +286,23 @@ have failed silently in this move.
   the count says `80 of 240 rows` whenever anything is active, because `80 rows` beside a
   filtered table reads as the whole truth. State lives in the component, never on the
   rows — the server re-renders the whole table on every navigation.
+- **Every table copies as TSV, and four tables copy a specified document.** The bespoke
+  formats live in `app/dashboard/[view]/copies.ts`, declared per table by `copies:` in
+  `views.ts` as a serializable kind — a function cannot cross into the client. They are
+  **byte-identical to the static page's output**, proved by running the old page's own
+  functions against `data.json` beside the new ones: 36 comparisons over all 16 customers
+  and all 3 quarters. Keep that equivalence when touching them; these strings land in
+  someone else's document. Two traps it caught: the old `fmt` sets only
+  `maximumFractionDigits`, so a 5.1 MT shortfall reads `5.1` and not `5.100`; and
+  quantities keep their thousand separators while *dimensions* drop them, because
+  "1,130 mm" reads as a quantity on a phone.
+- **The clearance list and dispatch plan take their customer from the column filter**, not
+  from a selector of their own — narrow Customer to one and the button knows who it is
+  addressed to; anything else is refused, because a clearance request sent to the wrong
+  customer quotes them someone else's stock. Two controls that can disagree are worse
+  than one.
+- **`metadata` is fetched on every tab** for its `as_of`, which dates the copied
+  documents. It is not `admin_only`, so any reader who can see a tab can see it.
 - **Measure a DOM node inside the event handler, not inside a lazy state updater.** The
   header filter anchors its popup to the `th`'s rect; reading `e.currentTarget` inside
   `setOpen(state => …)` threw on every click, because React clears `currentTarget` once
@@ -332,9 +349,8 @@ have failed silently in this move.
   prefix-to-tab map is seeded, and nothing on the page opens one — every figure that used
   to be clickable is now just a figure. The Admin tab is not ported either, so grants are
   still changed by SQL; that is what `mes` and `groupbuy` are waiting on.
-- **Copy buttons are not ported.** Column filters, search and sort are, as of 10 Aug, but
-  the four specified copy formats — dispatch plan, clearance list (WhatsApp), STR list,
-  PCR — still have no button on the page, and the owner calls them load-bearing.
+- **Drill-downs and the Admin tab are the controls still missing.** Filters, search, sort
+  and every copy button are ported as of 10 Aug.
 - **PCR code repository window**: still the current month only. The trend tab's
   quarterly extracts are not wired into the repository — worth doing so a code last
   billed in April appears in a price change request.

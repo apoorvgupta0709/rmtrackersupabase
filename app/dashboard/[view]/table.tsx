@@ -27,6 +27,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { COPY_FORMATS, type CopyContext, type CopySpec } from "./copies";
 
 export type Kind =
   | "text" | "mt" | "nos" | "int" | "inr" | "days" | "pct" | "rate" | "money"
@@ -98,6 +99,32 @@ const collate = (a: string, b: string) =>
   a.localeCompare(b, "en", { numeric: true, sensitivity: "base" });
 
 type Sort = { index: number; dir: 1 | -1 };
+
+/**
+ * What a cell pastes as. A copied figure has to arrive in the spreadsheet as a number,
+ * so the grouping separators come off anything numeric; `—` and text pass through as
+ * they read on the page, because a blank cell in a pasted queue reads as "nothing to
+ * report" when the empty cells are the work.
+ */
+const forPaste = (text: string, column: Column) =>
+  isNumeric(column) ? text.replace(/,/g, "") : text;
+
+/** Clipboard, with the fallback for a page served over plain http. */
+async function writeClipboard(text: string) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.appendChild(area);
+  area.select();
+  document.execCommand("copy");
+  document.body.removeChild(area);
+}
 
 /* ---- The per-column filter popup ----------------------------------------- */
 
@@ -244,6 +271,8 @@ export default function DataTable({
   rows,
   averageOver,
   capped,
+  copies,
+  copyContext,
 }: {
   title: string;
   note?: string;
@@ -251,11 +280,21 @@ export default function DataTable({
   rows: Record<string, unknown>[];
   averageOver?: AverageOver;
   capped?: number;
+  copies?: CopySpec[];
+  copyContext?: CopyContext;
 }) {
   const [search, setSearch] = useState("");
   const [picked, setPicked] = useState<Record<number, string[]>>({});
   const [sort, setSort] = useState<Sort | null>(null);
   const [open, setOpen] = useState<{ index: number; anchor: DOMRect } | null>(null);
+  /**
+   * What the last copy attempt did, and which button did it.
+   *
+   * A refusal is a sentence, not a word — "filter to one customer first" does not fit on
+   * a chip — so it is said in full under the toolbar while the button keeps its label.
+   * A success is said on the button, where the eye already is.
+   */
+  const [flash, setFlash] = useState<{ id: string; message: string; ok: boolean } | null>(null);
 
   /**
    * What every cell reads as, worked out once.
@@ -371,6 +410,56 @@ export default function DataTable({
   const count = visible.length.toLocaleString("en-IN");
   const held = rows.length.toLocaleString("en-IN");
 
+  // The totals row, worked out once. The rendered cells and the copied ones read off the
+  // same array, so a pasted sheet can never close on a different figure from the page.
+  const footer = columns.map((c, i) =>
+    i === 0
+      ? `${count} rows`
+      : c.field in totals
+        ? format(totals[c.field], c.field === averageOver?.monthsField ? "int" : c.kind)
+        : "",
+  );
+
+  /**
+   * The table as tab-separated text, for paste into a spreadsheet.
+   *
+   * **What is copied is what is on screen** — the visible rows, in the order they are
+   * sorted into, closing on the totals row that was re-added over exactly them. A copy
+   * button that quietly pastes the rows a filter just hid produces a sheet that
+   * disagrees with the screen it was taken from, and the reader has no way to tell.
+   */
+  const tableAsTsv = () =>
+    [
+      columns.map((c) => c.label),
+      ...visible.map((i) => columns.map((c, k) => forPaste(display[i][k], c))),
+      footer.map((cell, k) => forPaste(cell, columns[k])),
+    ]
+      .map((line) => line.join("\t"))
+      .join("\n");
+
+  const announce = (id: string, message: string, ok: boolean) => {
+    setFlash({ id, message, ok });
+    setTimeout(() => setFlash((was) => (was?.id === id ? null : was)), ok ? 1600 : 6000);
+  };
+
+  /** Put text on the clipboard, or say why there is none to put there. */
+  const run = async (id: string, produce: () => { text: string } | { error: string }) => {
+    const result = produce();
+    if ("error" in result) {
+      announce(id, result.error, false);
+      return;
+    }
+    try {
+      await writeClipboard(result.text);
+      announce(id, "Copied", true);
+    } catch {
+      announce(id, "The browser refused the clipboard. Copy again, or check permissions.", false);
+    }
+  };
+
+  /** The rows a bespoke format works on: the visible ones, in the order they are shown. */
+  const visibleRows = () => visible.map((i) => rows[i]);
+
   return (
     <section style={{ marginTop: 26 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
@@ -402,6 +491,30 @@ export default function DataTable({
             placeholder="Filter rows"
             aria-label={`Filter ${title}`}
           />
+          <button
+            type="button"
+            className="chip"
+            onClick={() => run("table", () => ({ text: tableAsTsv() }))}
+          >
+            {flash?.id === "table" && flash.ok ? "Copied" : "Copy table"}
+          </button>
+          {copyContext &&
+            (copies ?? []).map((spec) => {
+              const format = COPY_FORMATS[spec.kind];
+              const id = `${spec.kind}:${spec.arg ?? ""}`;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className="chip"
+                  onClick={() =>
+                    run(id, () => format.build(visibleRows(), copyContext, spec.arg))
+                  }
+                >
+                  {flash?.id === id && flash.ok ? "Copied" : format.label(spec.arg)}
+                </button>
+              );
+            })}
           {filtered && (
             <button type="button" className="chip" onClick={clearAll}>
               Clear filters
@@ -413,8 +526,14 @@ export default function DataTable({
             </button>
           )}
           <span className="hint" style={{ fontSize: 12.5 }}>
-            Every header filters and sorts; the totals row re-adds over what is left.
+            Every header filters and sorts; what is copied is what is left.
           </span>
+        </div>
+      )}
+
+      {flash && !flash.ok && (
+        <div className="notice warn" style={{ marginTop: 8 }}>
+          {flash.message}
         </div>
       )}
 
@@ -513,11 +632,7 @@ export default function DataTable({
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {i === 0
-                      ? `${count} rows`
-                      : c.field in totals
-                        ? format(totals[c.field], c.field === averageOver?.monthsField ? "int" : c.kind)
-                        : ""}
+                    {footer[i]}
                   </td>
                 ))}
               </tr>
