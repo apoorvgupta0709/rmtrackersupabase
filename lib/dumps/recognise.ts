@@ -73,12 +73,29 @@ export function slotsBySheets(sheetNames: string[]): string[] {
 
   const matched: { slot: string; sheet: string }[] = [];
   for (const [slot, spec] of Object.entries(SLOTS)) {
-    if (spec.monthSheet) {
-      if (hasMonth) matched.push({ slot, sheet: "schedule" });
-      continue;
-    }
+    if (spec.monthSheet) continue;
     if (!spec.sheet || GENERIC_SHEET.test(spec.sheet)) continue;
     if (held.has(spec.sheet.trim().toLowerCase())) matched.push({ slot, sheet: spec.sheet.toLowerCase() });
+  }
+
+  /**
+   * A month sheet corroborates; it never identifies on its own.
+   *
+   * `Schedule August` is an ordinary thing to call a sheet and more than one workbook in
+   * this pack has one — the master carries `Schedule August` beside `Schedule Pivot`,
+   * `Schedule for Printing` and `Schedule Ampere`. Taken as proof, a stray month sheet in
+   * any other workbook would fill the schedule slot from the wrong file, and the schedule
+   * is the one thing on this dashboard that must come from the approved master. So it
+   * counts only where the same workbook also carries one of that family's unmistakable
+   * sheets — `Bucketting`, or `OEM_key_1_rev codes`.
+   */
+  if (hasMonth) {
+    const corroborated = new Set(matched.map((h) => familyOf(h.slot)));
+    for (const [slot, spec] of Object.entries(SLOTS)) {
+      if (spec.monthSheet && corroborated.has(familyOf(slot))) {
+        matched.push({ slot, sheet: "schedule" });
+      }
+    }
   }
   if (matched.length === 0) return [];
 
