@@ -1,0 +1,92 @@
+name: Refresh dashboard
+
+# Fired by the Refresh button in the web app (repository_dispatch), or by hand from the
+# Actions tab. Deliberately not on a schedule: a refresh republishes whatever has been
+# uploaded, so a timed run on a day the dumps did not arrive would stamp yesterday's
+# numbers with today's date — which is the one failure this whole rebuild exists to stop.
+
+on:
+  repository_dispatch:
+    types: [refresh-dashboard]
+  workflow_dispatch:
+    inputs:
+      as_of:
+        description: "As-of date (YYYY-MM-DD). Blank means today, UTC."
+        required: false
+        type: string
+      dry_run:
+        description: "Run the pipeline but write no build"
+        required: false
+        type: boolean
+        default: false
+
+# One refresh at a time. Two overlapping runs would each write a build and the later to
+# finish would win, which is not necessarily the later as-of date.
+concurrency:
+  group: refresh-dashboard
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install the pipeline's dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # The lockfile, not requirements.txt: the published build was produced under
+          # pandas 2.3.3, and pandas 3 changes the default string dtype in ways that move
+          # numbers on this data.
+          pip install -r .claude/skills/refresh-tvsm-dashboard/requirements.lock.txt
+
+      - name: Check the package still holds together
+        run: python -m pytest -q .claude/skills/refresh-tvsm-dashboard/tests
+
+      - name: Refresh
+        id: refresh
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python .claude/skills/refresh-tvsm-dashboard/scripts/refresh_from_supabase.py \
+            ${{ inputs.as_of && format('--as-of {0}', inputs.as_of) || '' }} \
+            ${{ inputs.dry_run && '--dry-run' || '' }} \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            | tee refresh.log
+          # tee swallows the script's exit code, so take it from the pipe.
+          exit ${PIPESTATUS[0]}
+
+      - name: Keep the run's outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: refresh-log
+          path: refresh.log
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Say what happened
+        if: always()
+        run: |
+          {
+            echo "### Refresh"
+            echo
+            if [ "${{ steps.refresh.outcome }}" = "success" ]; then
+              echo "Completed. A build is published only if the pipeline's gate allowed it —"
+              echo "check the log below for \`published\` or \`NOT published\`."
+            else
+              echo "Failed. **No build was published**, so the dashboard still shows the"
+              echo "previous one rather than a broken refresh."
+            fi
+            echo
+            echo '```'
+            tail -n 25 refresh.log 2>/dev/null || echo "(no log)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
