@@ -1,20 +1,26 @@
-# Vercel serves whatever it receives, unauthenticated, at rmtrackerchatgpt.vercel.app.
-# The GitHub repository is private; the deployment is not. So everything that is not
-# needed to render the page is kept out of the deployment rather than published at a
-# guessable URL.
-#
-# The page needs exactly three files: index.html, data.json and access.json.
-#
-# dumps/ holds the operational Excel dumps — sales transactions, receivables ageing and
-# customer contract prices. Publishing those would put commercial data on the open web,
-# and contract prices are the reason the `mes` account is denied the SKU pricing tab in
-# the first place.
+# Vercel serves what it receives. Next.js only serves files under public/, so the
+# artefacts at the repository root are not reachable — but they are excluded anyway,
+# because "not reachable today" is a property of the framework rather than a decision,
+# and the cost of being wrong here is customer contract prices on the open web.
+
+# The operational dumps: sales transactions, receivables ageing, contract prices.
 dumps/
 
-# The skill, its docs and the session memory belong in the repository, not on the site.
-# All three now live under .claude/ — the project instructions, the session memory and
-# the skill package, which carries the approved masters (zmat, the RM tracker model and
-# the customer contract prices) under assets/masters/. One line covers them, and any
-# future file added under .claude/ is covered by it too.
+# The pipeline, its docs, the approved masters (zmat, the RM tracker model, contract
+# prices) and the session memory. None of it is needed to render a page.
 .claude/
+.agents/
+
+# The old static dashboard and its data. data.json is the entire 6.5 MB payload every
+# account used to download, and access.json holds the sign-in hashes it was guarded by.
+# Both are superseded; neither should ever be served again.
+data.json
+access.json
+index.html
+
+# Local tooling.
+tools/
+supabase/
+.venv/
 .pytest_cache/
+docs/
