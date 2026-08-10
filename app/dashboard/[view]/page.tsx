@@ -1,191 +1,207 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { supabaseServer } from "@/lib/supabase/server";
+import { currentBuildId, supabaseServer } from "@/lib/supabase/server";
+import DataTable from "./table";
+import { VIEWS, type TableSpec, type Unit } from "./views";
 
 export const dynamic = "force-dynamic";
 
-type Column = { field: string; label: string; num?: boolean; wide?: boolean };
-
 /**
- * The three ported views.
+ * One tab.
  *
- * Columns are named here rather than inferred, because these sheets carry forty-odd
- * fields each and only some of them are what anyone reads. The rest are still in the
- * row and still queryable — this decides what is on screen, not what exists.
- *
- * A view whose section returns nothing renders as empty. That is the grants working:
- * the policies refuse the rows, so there is nothing to hide in the markup.
+ * The page knows nothing about what any view means — `views.ts` declares the sections
+ * and columns, and this fetches them. Reads go through the caller's own client, so a
+ * view the reader has no grant for comes back empty from the database rather than being
+ * hidden in the markup: the worst outcome of a wrong tab list is a page that renders
+ * nothing, never one that shows someone else's prices.
  */
-const VIEWS: Record<string, { label: string; section: string; note: string; columns: Column[] }> = {
-  customerView: {
-    label: "Customer tracker",
-    section: "customer_lines",
-    note:
-      "One row per scheduled size per customer. Pool columns must not be summed across "
-      + "customers — stock is shared, so a total would count it more than once.",
-    columns: [
-      { field: "customer_display", label: "Customer", wide: true },
-      { field: "OEM", label: "OEM" },
-      { field: "bucket", label: "Bucket", wide: true },
-      { field: "ctl_bucket", label: "CTL bucket", wide: true },
-      { field: "Plant", label: "Plant" },
-      { field: "schedule_mt", label: "Schedule MT", num: true },
-      { field: "sales_mt", label: "Sales MT", num: true },
-      { field: "balance_mt", label: "Balance MT", num: true },
-      { field: "open_balance_mt", label: "Open bal MT", num: true },
-      { field: "over_dispatch_mt", label: "Over disp MT", num: true },
-      { field: "ctl_stock_pool_mt", label: "CTL stock MT", num: true },
-      { field: "ll_stock_pool_mt", label: "LL stock MT", num: true },
-      { field: "shared_wip_mt", label: "WIP MT", num: true },
-      { field: "history_avg_month_mt", label: "Avg month MT", num: true },
-    ],
-  },
-  llView: {
-    label: "Long-length tracker",
-    section: "ll_tracker",
-    note:
-      "Bucket-level coverage for long length. Coverage days and the gap columns are "
-      + "computed upstream against the month's schedule.",
-    columns: [
-      { field: "bucket", label: "Bucket", wide: true },
-      { field: "risk", label: "Risk" },
-      { field: "total_schedule_mt", label: "Schedule MT", num: true },
-      { field: "total_sales_mt", label: "Sales MT", num: true },
-      { field: "remaining_schedule_mt", label: "Remaining MT", num: true },
-      { field: "available_ll_stock_mt", label: "LL stock MT", num: true },
-      { field: "shared_wip_mt", label: "WIP MT", num: true },
-      { field: "transit_mt", label: "Transit MT", num: true },
-      { field: "coverage_days", label: "Cover days", num: true },
-      { field: "gap_to_30_days_mt", label: "Gap 30d MT", num: true },
-      { field: "gap_to_45_days_mt", label: "Gap 45d MT", num: true },
-      { field: "order_logged_mt", label: "Ordered MT", num: true },
-      { field: "signoff_mt", label: "Signed MT", num: true },
-      { field: "last_month_sales_mt", label: "Last month MT", num: true },
-    ],
-  },
-  mappingView: {
-    label: "Missing mappings",
-    section: "missing_mappings",
-    note:
-      "The queue. Every row here is tonnage the pipeline could not govern, so it is "
-      + "tonnage missing from a tracker somewhere. The empty cells are the work.",
-    columns: [
-      { field: "mapping_type", label: "Type" },
-      { field: "source", label: "Source", wide: true },
-      { field: "customer_code", label: "Customer code" },
-      { field: "customer", label: "Customer", wide: true },
-      { field: "material_code", label: "Material code" },
-      { field: "description", label: "Description", wide: true },
-      { field: "reason", label: "Reason", wide: true },
-      { field: "affected_mt", label: "Affected MT", num: true },
-    ],
-  },
-};
 
-function cell(value: unknown, num?: boolean) {
-  if (value === null || value === undefined || value === "") return "—";
-  if (num && typeof value === "number") {
-    return value.toLocaleString("en-IN", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+/** PostgREST caps a request at 1,000 rows, and two sections are already above that. */
+const PAGE = 1000;
+/** How much of a section one page will render. Truncation is always stated, never silent. */
+const CAP = 3000;
+
+type Rows = Record<string, unknown>[];
+
+async function fetchSection(
+  supabase: Awaited<ReturnType<typeof supabaseServer>>,
+  buildId: string,
+  section: string,
+): Promise<{ rows: Rows; capped: boolean }> {
+  const query = () =>
+    supabase
+      .from("build_sections")
+      .select("row")
+      .eq("build_id", buildId)
+      .eq("section", section)
+      .order("seq");
+
+  const rows: Rows = [];
+  for (let from = 0; from < CAP; from += PAGE) {
+    const { data } = await query().range(from, Math.min(from + PAGE, CAP) - 1);
+    const page = (data ?? []).map((r) => r.row as Record<string, unknown>);
+    rows.push(...page);
+    if (page.length < PAGE) return { rows, capped: false };
   }
-  return String(value);
+  // Exactly CAP rows came back, so ask for one more to find out whether there are more.
+  const { data: more } = await query().range(CAP, CAP);
+  return { rows, capped: (more ?? []).length > 0 };
 }
 
-export default async function ViewPage({ params }: { params: Promise<{ view: string }> }) {
+export default async function ViewPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ view: string }>;
+  searchParams: Promise<{ unit?: string }>;
+}) {
   const { view } = await params;
   const spec = VIEWS[view];
   if (!spec) notFound();
 
+  const { unit: unitParam } = await searchParams;
+  const unit: Unit = unitParam === "nos" ? "nos" : "mt";
+
   const supabase = await supabaseServer();
-  const { data: rows } = await supabase
-    .from("build_sections")
-    .select("seq,row")
-    .eq("section", spec.section)
-    .order("seq")
-    .limit(1000);
+  const buildId = await currentBuildId(supabase);
 
-  const records = (rows ?? []).map((r) => r.row as Record<string, unknown>);
+  if (!buildId) {
+    return (
+      <div className="sheet rise" style={{ padding: 24, maxWidth: 620 }}>
+        <div className="label">{spec.label}</div>
+        <p className="hint" style={{ marginTop: 8 }}>
+          No build is published, so there is nothing to read. An empty dashboard is better
+          than yesterday&apos;s numbers wearing today&apos;s date.
+        </p>
+      </div>
+    );
+  }
 
-  // Totals over the numeric columns, matching how the sheet is read: a column of
-  // tonnages adds up, a rate or a day-count does not.
-  const NEVER_TOTAL = new Set(["coverage_days", "history_avg_month_mt"]);
-  const totals = Object.fromEntries(
-    spec.columns
-      .filter((c) => c.num && !NEVER_TOTAL.has(c.field))
-      .map((c) => [
-        c.field,
-        records.reduce((sum, r) => sum + (typeof r[c.field] === "number" ? (r[c.field] as number) : 0), 0),
-      ]),
+  const { data: scalarRows } = spec.scalars.length
+    ? await supabase
+        .from("build_scalars")
+        .select("key,value")
+        .eq("build_id", buildId)
+        .in("key", spec.scalars)
+    : { data: [] };
+  const scalars: Record<string, any> = Object.fromEntries(
+    (scalarRows ?? []).map((s) => [s.key, s.value]),
   );
+
+  const tables = spec.tables({
+    months: (scalars.sales_trend?.months as string[]) ?? [],
+    quarters: (scalars.sku_pricing?.quarters as string[]) ?? [],
+    unit,
+    scalars,
+  });
+
+  // Two tables can be built from one section — the STR plan's buckets and the lines
+  // nested inside them — so each section is fetched once.
+  const sections = [...new Set(tables.map((t) => t.section).filter(Boolean) as string[])];
+  const fetched = Object.fromEntries(
+    await Promise.all(
+      sections.map(
+        async (section) => [section, await fetchSection(supabase, buildId, section)] as const,
+      ),
+    ),
+  );
+
+  function rowsFor(table: TableSpec): { rows: Rows; capped: boolean } {
+    if (table.section) {
+      const held = fetched[table.section];
+      const rows = table.flatten ? table.flatten(held.rows) : held.rows;
+      return { rows, capped: held.capped };
+    }
+    if (table.scalar) {
+      const [key, field] = table.scalar;
+      const value = scalars[key]?.[field];
+      return { rows: Array.isArray(value) ? (value as Rows) : [], capped: false };
+    }
+    return { rows: [], capped: false };
+  }
+
+  const facts = spec.facts ? spec.facts(scalars) : [];
+  const anyRows = tables.some((t) => rowsFor(t).rows.length > 0);
 
   return (
     <>
-      <div className="rise" style={{ marginBottom: 16, maxWidth: 760 }}>
-        <div className="label">{spec.section}</div>
+      <div className="rise" style={{ marginBottom: 4, maxWidth: 860 }}>
+        <div className="label">{view}</div>
         <h1 style={{ fontSize: 26, margin: "4px 0 8px", letterSpacing: "-0.025em" }}>
           {spec.label}
         </h1>
         <p className="hint">{spec.note}</p>
       </div>
 
-      {records.length === 0 ? (
-        <div className="sheet" style={{ padding: 24, maxWidth: 620 }}>
-          <div className="label">Nothing to show</div>
-          <p className="hint" style={{ marginTop: 8 }}>
-            Either no build is published yet, or this tab is not granted to your account.
-            An ungranted tab returns no rows rather than hiding them.
-          </p>
-        </div>
-      ) : (
-        <div className="sheet rise scroll-x" style={{ animationDelay: "60ms" }}>
-          <table>
-            <thead>
-              <tr>
-                {spec.columns.map((c) => (
-                  <th key={c.field} className={c.num ? "num" : undefined}>
-                    {c.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {records.map((row, i) => (
-                <tr key={i}>
-                  {spec.columns.map((c) => (
-                    <td
-                      key={c.field}
-                      className={c.num ? "num" : undefined}
-                      style={c.wide ? { maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis" } : undefined}
-                    >
-                      {cell(row[c.field], c.num)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                {spec.columns.map((c, i) => (
-                  <td
-                    key={c.field}
-                    className={c.num ? "num" : undefined}
-                    style={{
-                      borderTop: "1px solid var(--rule-strong)",
-                      fontFamily: "var(--mono)",
-                      fontWeight: 600,
-                      background: "var(--paper)",
-                    }}
-                  >
-                    {i === 0
-                      ? `${records.length} rows`
-                      : c.field in totals
-                        ? cell(totals[c.field], true)
-                        : ""}
-                  </td>
-                ))}
-              </tr>
-            </tfoot>
-          </table>
+      {spec.unitToggle && (
+        <div className="rise" style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
+          <span className="label">Read in</span>
+          {(["mt", "nos"] as Unit[]).map((option) => (
+            <Link
+              key={option}
+              href={`/dashboard/${view}?unit=${option}`}
+              className="label"
+              style={{
+                padding: "5px 10px",
+                border: "1px solid",
+                borderColor: unit === option ? "var(--furnace)" : "var(--rule-strong)",
+                color: unit === option ? "var(--furnace)" : "var(--ink-soft)",
+                textDecoration: "none",
+              }}
+            >
+              {option === "mt" ? "Tonnes" : "Pieces"}
+            </Link>
+          ))}
+          <span className="hint" style={{ fontSize: 12.5 }}>
+            One switch drives every table on this tab — two that can disagree are worse
+            than one.
+          </span>
         </div>
       )}
+
+      {facts.length > 0 && (
+        <div
+          className="rise"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+            gap: 10,
+            marginTop: 16,
+            animationDelay: "60ms",
+          }}
+        >
+          {facts.map((fact) => (
+            <div key={fact.label} className="sheet" style={{ padding: "12px 14px" }}>
+              <div className="label">{fact.label}</div>
+              <div className="figure" style={{ fontSize: 15, marginTop: 4 }}>
+                {fact.value}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!anyRows && (
+        <div className="notice" style={{ marginTop: 20, maxWidth: 720 }}>
+          Nothing on this tab. Either no build is published yet, or this tab is not granted
+          to your account — an ungranted tab returns no rows rather than hiding them.
+        </div>
+      )}
+
+      {tables.map((table) => {
+        const { rows, capped } = rowsFor(table);
+        return (
+          <DataTable
+            key={table.key}
+            title={table.title}
+            note={table.note}
+            columns={table.columns}
+            rows={rows}
+            averageOver={table.averageOver}
+            capped={capped ? CAP : undefined}
+          />
+        );
+      })}
     </>
   );
 }

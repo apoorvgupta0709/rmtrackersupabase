@@ -43,6 +43,22 @@ export function supabaseAdmin() {
   return createClient(URL, key, { auth: { persistSession: false } });
 }
 
+/**
+ * The build a reader is looking at: the most recently published one.
+ *
+ * Every query against `build_sections`, `build_scalars` and `detail_rows` must carry it.
+ * The policies restrict a viewer to the current build already, but they deliberately let
+ * an admin read every build so a failed refresh can be inspected — and without this
+ * filter that privilege silently merges them: the customer tracker rendered 1,188 rows
+ * for a 396-row section because three builds were published against the same day.
+ */
+export async function currentBuildId(
+  supabase: Awaited<ReturnType<typeof supabaseServer>>,
+): Promise<string | null> {
+  const { data } = await supabase.rpc("current_build_id");
+  return (data as string | null) ?? null;
+}
+
 /** The caller's profile and grants, or null when not signed in. */
 export async function currentUser() {
   const supabase = await supabaseServer();

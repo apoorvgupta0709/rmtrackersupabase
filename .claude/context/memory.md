@@ -265,6 +265,20 @@ have failed silently in this move.
 
 ## Accounts and access
 
+- **All eleven tabs are rendered by the web app.** `app/dashboard/[view]/views.ts`
+  declares each one — the sections it is built from and the columns worth putting on
+  screen — and `page.tsx` fetches them. `section_views` still decides which tab a section
+  belongs to, so a view naming a section the reader has no grant for renders empty rather
+  than leaking. **A column is totalled only when it says `total: true`**: rates, coverage
+  days, prices, ages, percentages and shared stock pools carry no sum. The old rule was
+  "total every numeric column except a short list", which is the wrong way round — it
+  shipped the customer tracker's shared pools summed under a note saying they must not be.
+- **Every query against `build_sections`, `build_scalars` and `detail_rows` must filter on
+  `current_build_id()`** — `currentBuildId()` in `lib/supabase/server.ts`. The policies
+  hold a viewer to the current build but deliberately let an admin read every build, so an
+  unfiltered query merges them: with three builds published against 7 August the customer
+  tracker rendered 1,188 rows for a 396-row section, and the overview's cards silently took
+  whichever copy of `summary` came back last.
 - **The web app signs in by email through Supabase Auth, not by username.** As of
   10 Aug 2026 there is exactly **one** account: `apoorvgupta.dce@gmail.com` = admin
   (changed from `it@itarang.com` the same day). The two `@itarang.com` viewer accounts
@@ -293,6 +307,15 @@ have failed silently in this move.
 
 ## Open threads
 
+- **Drill-downs are not ported.** `detail_rows` holds all 16,689 of them and
+  `detail_columns` holds the column layout for each of the sixteen prefixes, the
+  prefix-to-tab map is seeded, and nothing on the page opens one — every figure that used
+  to be clickable is now just a figure. The Admin tab is not ported either, so grants are
+  still changed by SQL; that is what `mes` and `groupbuy` are waiting on.
+- **The tabs carry no column filters, search or copy buttons yet.** The old static page
+  had them and they are load-bearing — dispatch plan, clearance list, STR list, PCR each
+  have a specified copy format in the skill. The Past sales trend tab's tonnes/pieces
+  switch is the only control ported so far.
 - **PCR code repository window**: still the current month only. The trend tab's
   quarterly extracts are not wired into the repository — worth doing so a code last
   billed in April appears in a price change request.

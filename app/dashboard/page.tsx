@@ -1,4 +1,4 @@
-import { currentUser, supabaseServer } from "@/lib/supabase/server";
+import { currentBuildId, currentUser, supabaseServer } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -25,10 +25,16 @@ export default async function Overview() {
   const user = await currentUser();
   const supabase = await supabaseServer();
 
-  const { data: scalars } = await supabase
-    .from("build_scalars")
-    .select("key,value")
-    .in("key", ["summary", "metadata", "mapping_quality"]);
+  // Filtered to the published build: an admin may read every build, so without this the
+  // three keys come back once per build and the cards show whichever one sorted last.
+  const buildId = await currentBuildId(supabase);
+  const { data: scalars } = buildId
+    ? await supabase
+        .from("build_scalars")
+        .select("key,value")
+        .eq("build_id", buildId)
+        .in("key", ["summary", "metadata", "mapping_quality"])
+    : { data: [] };
 
   const byKey = Object.fromEntries((scalars ?? []).map((s) => [s.key, s.value as Record<string, unknown>]));
   const summary = byKey.summary ?? {};
