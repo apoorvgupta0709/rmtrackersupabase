@@ -219,6 +219,153 @@ td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numer
 
 .scroll-x { overflow-x: auto; }
 
+/* ---- Table controls ------------------------------------------------------ */
+/* The search box, the per-column filter and click-to-sort. The page's default button
+   is a heavy solid-ink call to action; none of these are, so each resets it rather
+   than inheriting a form-submit look on a header cell. */
+
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.filters input[type="search"] {
+  width: auto;
+  min-width: 230px;
+  padding: 7px 10px;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule-strong);
+  border-radius: 0;
+  outline: none;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.filters input[type="search"]:focus {
+  border-color: var(--furnace);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--furnace);
+}
+
+button.chip {
+  padding: 6px 10px;
+  font-size: 10px;
+  letter-spacing: 0.11em;
+  background: transparent;
+  color: var(--ink-soft);
+  border-color: var(--rule-strong);
+}
+button.chip:hover:not(:disabled) { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+button.linkish {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--furnace);
+  font-family: inherit;
+  font-size: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+  text-decoration: underline;
+}
+button.linkish:hover:not(:disabled) { background: none; color: var(--furnace); }
+
+.th-inner { display: inline-flex; align-items: center; gap: 6px; }
+th.num .th-inner { flex-direction: row-reverse; }
+
+button.th-label,
+button.th-filter {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+button.th-label:hover:not(:disabled),
+button.th-filter:hover:not(:disabled) { background: none; color: var(--furnace); }
+button.th-label:active:not(:disabled),
+button.th-filter:active:not(:disabled) { transform: none; }
+
+.th-sort { margin-left: 4px; font-size: 8px; color: var(--furnace); }
+
+button.th-filter {
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 3px;
+  color: var(--rule-strong);
+}
+
+/* A filtered column has to look filtered from across the sheet: a reader who cannot
+   see which header is narrowing the table reads the subtotal as the whole. */
+thead th[data-filtered="1"] { background: var(--furnace-soft); color: var(--furnace); }
+thead th[data-filtered="1"] .th-filter { color: var(--furnace); }
+
+.filter-pop {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  box-shadow: var(--shadow-lift);
+}
+.filter-pop input[type="search"] {
+  width: 100%;
+  padding: 6px 8px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule-strong);
+  border-radius: 0;
+  outline: none;
+}
+.filter-pop input[type="search"]:focus { border-color: var(--furnace); background: var(--surface); }
+
+.filter-pop-actions { display: flex; gap: 6px; }
+.filter-pop-actions button {
+  flex: 1;
+  padding: 5px 4px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  background: transparent;
+  color: var(--ink-soft);
+  border-color: var(--rule);
+}
+.filter-pop-actions button:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+
+.filter-pop-list { overflow-y: auto; flex: 1; min-height: 0; }
+.filter-pop-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px;
+  font-size: 12.5px;
+  font-family: var(--mono);
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.filter-pop-list label:hover { background: var(--paper); }
+.filter-pop-list input[type="checkbox"] { accent-color: var(--furnace); flex: none; }
+.filter-pop-list span { overflow: hidden; text-overflow: ellipsis; }
+.filter-pop-empty { padding: 10px 4px; color: var(--ink-faint); font-size: 12.5px; }
+
 /* ---- Page load ---------------------------------------------------------- */
 /* One orchestrated reveal, staggered down the page. Nothing else animates on load. */
 

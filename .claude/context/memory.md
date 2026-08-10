@@ -5,7 +5,7 @@ push whenever a session produces a durable fact. Keep entries true — prune wha
 expires rather than appending forever. Nothing secret goes in this file: the repo is
 served publicly through Vercel, so this file is fetchable by URL.
 
-_Last updated: 2026-08-07 (as-of 7 August build, schedule from v16)._
+_Last updated: 2026-08-10 (as-of 7 August build, schedule from v16; table filters ported)._
 
 ## What this is
 
@@ -273,6 +273,26 @@ have failed silently in this move.
   days, prices, ages, percentages and shared stock pools carry no sum. The old rule was
   "total every numeric column except a short list", which is the wrong way round — it
   shipped the customer tracker's shared pools summed under a note saying they must not be.
+- **Every table filters, searches and sorts itself**, client-side, in `table.tsx` — one
+  Excel-style filter per header over that column's distinct values, a search box across
+  the whole row, and click-to-sort cycling ascending, descending, off. Four rules hold it
+  together, each of which was wrong in some earlier form: the filters **compose** — the
+  values a header offers come from the rows the *other* headers still allow, and a header
+  always still offers its own unticked values so a selection can be widened again;
+  filtering and text sort run on the **rendered text**, not the underlying value, so a
+  null is `—` in the list and in the column and ticking a value hides exactly the rows
+  showing it; **the totals row re-adds over what survived**, average-month rule included
+  (filter a SKU history to rows that only moved in July and Months reads 1, not 2); and
+  the count says `80 of 240 rows` whenever anything is active, because `80 rows` beside a
+  filtered table reads as the whole truth. State lives in the component, never on the
+  rows — the server re-renders the whole table on every navigation.
+- **Measure a DOM node inside the event handler, not inside a lazy state updater.** The
+  header filter anchors its popup to the `th`'s rect; reading `e.currentTarget` inside
+  `setOpen(state => …)` threw on every click, because React clears `currentTarget` once
+  the handler returns and the updater runs after that. The popup is also portalled to
+  `document.body` with fixed positioning: the table sits in an `overflow-x: auto` box,
+  which clips an absolutely positioned child, and the last column's list is the one that
+  most needs reaching.
 - **Every query against `build_sections`, `build_scalars` and `detail_rows` must filter on
   `current_build_id()`** — `currentBuildId()` in `lib/supabase/server.ts`. The policies
   hold a viewer to the current build but deliberately let an admin read every build, so an
@@ -312,10 +332,9 @@ have failed silently in this move.
   prefix-to-tab map is seeded, and nothing on the page opens one — every figure that used
   to be clickable is now just a figure. The Admin tab is not ported either, so grants are
   still changed by SQL; that is what `mes` and `groupbuy` are waiting on.
-- **The tabs carry no column filters, search or copy buttons yet.** The old static page
-  had them and they are load-bearing — dispatch plan, clearance list, STR list, PCR each
-  have a specified copy format in the skill. The Past sales trend tab's tonnes/pieces
-  switch is the only control ported so far.
+- **Copy buttons are not ported.** Column filters, search and sort are, as of 10 Aug, but
+  the four specified copy formats — dispatch plan, clearance list (WhatsApp), STR list,
+  PCR — still have no button on the page, and the owner calls them load-bearing.
 - **PCR code repository window**: still the current month only. The trend tab's
   quarterly extracts are not wired into the repository — worth doing so a code last
   billed in April appears in a price change request.

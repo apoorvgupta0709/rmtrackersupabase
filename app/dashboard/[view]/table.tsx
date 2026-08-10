@@ -1,8 +1,12 @@
+"use client";
+
 /**
- * One table on a tab, with the totals row the sheet would have.
+ * One table on a tab, with the totals row the sheet would have, and the controls that
+ * make a five-hundred-row sheet answerable: a search box, an Excel-style filter on every
+ * column, and click-to-sort.
  *
- * Two rules are enforced here rather than left to each view to remember, because both
- * have already been got wrong on this dashboard:
+ * Four rules are enforced here rather than left to each view to remember, because all
+ * four have already been got wrong on this dashboard:
  *
  *  - **A column is totalled only when it says so.** Prices, coverage days, ages and
  *    percentages are rates, and a stock pool shared between customers is counted once
@@ -11,7 +15,18 @@
  *  - **A per-row average is averaged, never added.** A table that closes on an average
  *    month divides the tonnage by the months that actually moved, not by the row count
  *    and not by the window length.
+ *  - **The totals row states what is on screen.** Filter the table and every figure under
+ *    it re-adds over the rows that survived. A total that ignores the filter above it is
+ *    worse than no total, because it reads as the answer to the question just asked.
+ *  - **The row count says how much was hidden.** "412 of 3,006 rows" is a filter working;
+ *    "412 rows" beside a filtered table is a table that looks like the whole truth.
+ *
+ * Filter state lives in this component, not on the rows: the server re-renders the whole
+ * table on every navigation, so anything written onto a row is lost on the next paint.
  */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export type Kind =
   | "text" | "mt" | "nos" | "int" | "inr" | "days" | "pct" | "rate" | "money"
@@ -32,6 +47,8 @@ export type Column = {
 export type AverageOver = { monthsField: string; avgField: string; totalField: string };
 
 const NUMERIC: Kind[] = ["mt", "nos", "int", "inr", "days", "pct", "rate", "money"];
+
+const isNumeric = (c: Column) => NUMERIC.includes(c.kind ?? "text");
 
 /** `months.2026-01` reaches into the row's month dict; everything else is a plain key. */
 export function get(row: Record<string, unknown>, field: string): unknown {
@@ -77,6 +94,149 @@ export function format(value: unknown, kind: Kind = "text"): string {
   return String(value);
 }
 
+const collate = (a: string, b: string) =>
+  a.localeCompare(b, "en", { numeric: true, sensitivity: "base" });
+
+type Sort = { index: number; dir: 1 | -1 };
+
+/* ---- The per-column filter popup ----------------------------------------- */
+
+/**
+ * The distinct values in one column, searchable and multi-selectable.
+ *
+ * It is anchored to the header with fixed positioning through a portal rather than
+ * placed inside the cell: the table sits in an `overflow-x: auto` box, which clips an
+ * absolutely positioned child, and the last column's list was the one that needed
+ * reaching most. Both edges are clamped to the viewport, and it opens upwards when
+ * there is no room beneath, so no list is ever off screen.
+ */
+function FilterPopup({
+  anchor,
+  values,
+  chosen,
+  onChange,
+  onClose,
+}: {
+  anchor: DOMRect;
+  values: string[];
+  chosen: Set<string> | undefined;
+  onChange: (next: Set<string> | null) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const box = useRef<HTMLDivElement>(null);
+
+  // Values hidden by the search box keep whatever state they had, so searching narrows
+  // what you can tick without silently dropping the rest of the selection.
+  const ticked = useMemo(
+    () => new Set(chosen ? [...chosen] : values),
+    [chosen, values],
+  );
+
+  const shown = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return needle ? values.filter((v) => v.toLowerCase().includes(needle)) : values;
+  }, [values, query]);
+
+  const commit = useCallback(
+    (next: Set<string>) => onChange(next.size === values.length ? null : next),
+    [onChange, values.length],
+  );
+
+  const toggle = (value: string) => {
+    const next = new Set(ticked);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    commit(next);
+  };
+
+  const setShown = (on: boolean) => {
+    const next = new Set(ticked);
+    for (const v of shown) {
+      if (on) next.add(v);
+      else next.delete(v);
+    }
+    commit(next);
+  };
+
+  useEffect(() => {
+    const away = (event: MouseEvent) => {
+      if (!box.current?.contains(event.target as Node)) onClose();
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    // Scrolling the table sideways would leave the panel pointing at nothing, so it
+    // closes rather than drifting away from the header it belongs to.
+    const scroll = () => onClose();
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", key);
+    window.addEventListener("scroll", scroll, true);
+    window.addEventListener("resize", scroll);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", key);
+      window.removeEventListener("scroll", scroll, true);
+      window.removeEventListener("resize", scroll);
+    };
+  }, [onClose]);
+
+  const margin = 8;
+  const width = 274;
+  const height = Math.min(340, window.innerHeight - 2 * margin);
+  const below = anchor.bottom + 4;
+  const top =
+    below + height + margin <= window.innerHeight
+      ? below
+      : Math.max(margin, Math.min(anchor.top - height - 4, window.innerHeight - height - margin));
+
+  return createPortal(
+    <div
+      ref={box}
+      className="filter-pop"
+      style={{
+        left: Math.max(margin, Math.min(anchor.left, window.innerWidth - width - margin)),
+        top,
+        width,
+        maxHeight: height,
+      }}
+    >
+      <input
+        type="search"
+        autoFocus
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search values"
+        aria-label="Search values"
+      />
+      <div className="filter-pop-actions">
+        <button type="button" onClick={() => setShown(true)}>Select all</button>
+        <button type="button" onClick={() => setShown(false)}>Clear</button>
+        <button type="button" onClick={() => { onChange(null); onClose(); }}>Remove filter</button>
+      </div>
+      <div className="filter-pop-list">
+        {shown.length === 0 ? (
+          <div className="filter-pop-empty">No matching values.</div>
+        ) : (
+          shown.map((value) => (
+            <label key={value}>
+              <input
+                type="checkbox"
+                checked={ticked.has(value)}
+                onChange={() => toggle(value)}
+              />
+              <span>{value === "" ? <em>(blank)</em> : value}</span>
+            </label>
+          ))
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/* ---- The table ------------------------------------------------------------ */
+
 export default function DataTable({
   title,
   note,
@@ -92,12 +252,107 @@ export default function DataTable({
   averageOver?: AverageOver;
   capped?: number;
 }) {
-  const isNum = (c: Column) => NUMERIC.includes(c.kind ?? "text");
+  const [search, setSearch] = useState("");
+  const [picked, setPicked] = useState<Record<number, string[]>>({});
+  const [sort, setSort] = useState<Sort | null>(null);
+  const [open, setOpen] = useState<{ index: number; anchor: DOMRect } | null>(null);
 
+  /**
+   * What every cell reads as, worked out once.
+   *
+   * Filters and text sort run on the rendered text, not on the underlying value, for the
+   * same reason the old page did: the list a header offers has to be the list the reader
+   * can see in the column. A null is `—` in both places, a tonnage is grouped and rounded
+   * in both, so ticking a value always hides exactly the rows showing it.
+   */
+  const display = useMemo(
+    () => rows.map((row) => columns.map((c) => format(get(row, c.field), c.kind))),
+    [rows, columns],
+  );
+
+  const chosen = useMemo(() => {
+    const map = new Map<number, Set<string>>();
+    for (const [index, values] of Object.entries(picked)) map.set(Number(index), new Set(values));
+    return map;
+  }, [picked]);
+
+  const needle = search.trim().toLowerCase();
+
+  /**
+   * A row passes when the search box accepts it and every column filter except the one
+   * being edited accepts it. Skipping the edited column is what makes the filters
+   * compose: the values a header offers are drawn from the rows the *other* headers
+   * still allow, so narrowing one column narrows the choices in the next without a
+   * column ever hiding its own unticked values from itself.
+   */
+  const passes = useCallback(
+    (i: number, skip: number) => {
+      const cells = display[i];
+      if (needle && !cells.some((text) => text.toLowerCase().includes(needle))) return false;
+      for (const [index, allowed] of chosen) {
+        if (index === skip) continue;
+        if (!allowed.has(cells[index])) return false;
+      }
+      return true;
+    },
+    [display, needle, chosen],
+  );
+
+  const visible = useMemo(() => {
+    const keep: number[] = [];
+    for (let i = 0; i < rows.length; i++) if (passes(i, -1)) keep.push(i);
+    if (sort) {
+      const column = columns[sort.index];
+      if (isNumeric(column)) {
+        keep.sort(
+          (a, b) =>
+            (num(get(rows[a], column.field)) - num(get(rows[b], column.field))) * sort.dir,
+        );
+      } else {
+        keep.sort((a, b) => collate(display[a][sort.index], display[b][sort.index]) * sort.dir);
+      }
+    }
+    return keep;
+  }, [rows, columns, display, passes, sort]);
+
+  /** The distinct values the open header can offer, over the rows its siblings allow. */
+  const options = useMemo(() => {
+    if (!open) return [];
+    const seen = new Set<string>();
+    for (let i = 0; i < rows.length; i++) if (passes(i, open.index)) seen.add(display[i][open.index]);
+    return [...seen].sort(collate);
+  }, [open, rows.length, display, passes]);
+
+  const filtered = needle !== "" || chosen.size > 0;
+
+  const clearAll = () => {
+    setSearch("");
+    setPicked({});
+    setOpen(null);
+  };
+
+  const setColumn = (index: number, next: Set<string> | null) =>
+    setPicked((state) => {
+      const copy = { ...state };
+      if (next === null) delete copy[index];
+      else copy[index] = [...next];
+      return copy;
+    });
+
+  const cycleSort = (index: number) =>
+    setSort((state) =>
+      !state || state.index !== index
+        ? { index, dir: 1 }
+        : state.dir === 1
+          ? { index, dir: -1 }
+          : null,
+    );
+
+  // Totals over what is on screen, not over what was fetched.
   const totals: Record<string, number> = {};
   for (const c of columns) {
-    if (c.total && isNum(c)) {
-      totals[c.field] = rows.reduce((sum, r) => sum + num(get(r, c.field)), 0);
+    if (c.total && isNumeric(c)) {
+      totals[c.field] = visible.reduce((sum, i) => sum + num(get(rows[i], c.field)), 0);
     }
   }
 
@@ -106,17 +361,22 @@ export default function DataTable({
   // three-month average, and the totals row must say the same thing the cells do.
   if (averageOver) {
     const monthFields = columns.filter((c) => c.month).map((c) => c.field);
-    const moved = monthFields.filter((f) => rows.some((r) => num(get(r, f)) !== 0)).length;
+    const moved = monthFields.filter((f) =>
+      visible.some((i) => num(get(rows[i], f)) !== 0),
+    ).length;
     totals[averageOver.monthsField] = moved;
     totals[averageOver.avgField] = moved ? (totals[averageOver.totalField] ?? 0) / moved : 0;
   }
+
+  const count = visible.length.toLocaleString("en-IN");
+  const held = rows.length.toLocaleString("en-IN");
 
   return (
     <section style={{ marginTop: 26 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <h2 style={{ fontSize: 16, letterSpacing: "-0.015em" }}>{title}</h2>
         <span className="label">
-          {rows.length} row{rows.length === 1 ? "" : "s"}
+          {filtered ? `${count} of ${held} rows` : `${held} row${rows.length === 1 ? "" : "s"}`}
         </span>
       </div>
       {note && (
@@ -127,9 +387,34 @@ export default function DataTable({
 
       {capped !== undefined && (
         <div className="notice warn" style={{ marginTop: 8 }}>
-          Showing the first {rows.length.toLocaleString("en-IN")} rows; this table is
-          capped at {capped.toLocaleString("en-IN")} and there are more behind it. The
-          totals below cover only what is shown.
+          Showing the first {held} rows; this table is capped at{" "}
+          {capped.toLocaleString("en-IN")} and there are more behind it. The filters and
+          the totals below cover only what is shown.
+        </div>
+      )}
+
+      {rows.length > 0 && (
+        <div className="filters">
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filter rows"
+            aria-label={`Filter ${title}`}
+          />
+          {filtered && (
+            <button type="button" className="chip" onClick={clearAll}>
+              Clear filters
+            </button>
+          )}
+          {sort && (
+            <button type="button" className="chip" onClick={() => setSort(null)}>
+              Sorted by {columns[sort.index].label} {sort.dir === 1 ? "↑" : "↓"} — clear
+            </button>
+          )}
+          <span className="hint" style={{ fontSize: 12.5 }}>
+            Every header filters and sorts; the totals row re-adds over what is left.
+          </span>
         </div>
       )}
 
@@ -144,28 +429,71 @@ export default function DataTable({
           <table>
             <thead>
               <tr>
-                {columns.map((c) => (
-                  <th key={c.field} className={isNum(c) ? "num" : undefined}>
-                    {c.label}
-                  </th>
-                ))}
+                {columns.map((c, index) => {
+                  const on = chosen.has(index);
+                  return (
+                    <th
+                      key={c.field}
+                      className={isNumeric(c) ? "num" : undefined}
+                      data-filtered={on ? "1" : undefined}
+                      aria-sort={
+                        sort?.index === index
+                          ? sort.dir === 1 ? "ascending" : "descending"
+                          : undefined
+                      }
+                    >
+                      <span className="th-inner">
+                        <button
+                          type="button"
+                          className="th-label"
+                          onClick={() => cycleSort(index)}
+                          title={`Sort by ${c.label}`}
+                        >
+                          {c.label}
+                          {sort?.index === index && (
+                            <span className="th-sort">{sort.dir === 1 ? "▲" : "▼"}</span>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          className="th-filter"
+                          title={`Filter ${c.label}`}
+                          aria-label={`Filter ${c.label}`}
+                          onClick={(e) => {
+                            // Measure inside the handler, not inside the state updater:
+                            // React clears `currentTarget` once the handler returns, and
+                            // a lazy updater runs after that.
+                            const cell = e.currentTarget.closest("th");
+                            if (!cell) return;
+                            const anchor = cell.getBoundingClientRect();
+                            setOpen((state) =>
+                              state?.index === index ? null : { index, anchor },
+                            );
+                          }}
+                        >
+                          ≡
+                        </button>
+                      </span>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, i) => (
+              {visible.map((i) => (
                 <tr key={i}>
-                  {columns.map((c) => (
+                  {columns.map((c, index) => (
                     <td
                       key={c.field}
-                      className={isNum(c) ? "num" : undefined}
+                      className={isNumeric(c) ? "num" : undefined}
                       style={
                         c.wide
                           ? { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" }
                           : undefined
                       }
-                      title={c.wide ? String(get(row, c.field) ?? "") : undefined}
+                      title={c.wide ? String(get(rows[i], c.field) ?? "") : undefined}
                     >
-                      {format(get(row, c.field), c.kind)}
+                      {display[i][index]}
                     </td>
                   ))}
                 </tr>
@@ -176,7 +504,7 @@ export default function DataTable({
                 {columns.map((c, i) => (
                   <td
                     key={c.field}
-                    className={isNum(c) ? "num" : undefined}
+                    className={isNumeric(c) ? "num" : undefined}
                     style={{
                       borderTop: "1px solid var(--rule-strong)",
                       fontFamily: "var(--mono)",
@@ -186,7 +514,7 @@ export default function DataTable({
                     }}
                   >
                     {i === 0
-                      ? `${rows.length} rows`
+                      ? `${count} rows`
                       : c.field in totals
                         ? format(totals[c.field], c.field === averageOver?.monthsField ? "int" : c.kind)
                         : ""}
@@ -196,6 +524,27 @@ export default function DataTable({
             </tfoot>
           </table>
         </div>
+      )}
+
+      {visible.length === 0 && rows.length > 0 && (
+        <div className="notice" style={{ marginTop: 10 }}>
+          No row matches the filters on this table. The {held} rows behind them are still
+          here —{" "}
+          <button type="button" className="linkish" onClick={clearAll}>
+            clear the filters
+          </button>{" "}
+          to see them.
+        </div>
+      )}
+
+      {open && (
+        <FilterPopup
+          anchor={open.anchor}
+          values={options}
+          chosen={chosen.get(open.index)}
+          onChange={(next) => setColumn(open.index, next)}
+          onClose={() => setOpen(null)}
+        />
       )}
     </section>
   );
