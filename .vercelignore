@@ -2,25 +2,32 @@
 # artefacts at the repository root are not reachable — but they are excluded anyway,
 # because "not reachable today" is a property of the framework rather than a decision,
 # and the cost of being wrong here is customer contract prices on the open web.
+#
+# Every pattern is anchored with a leading slash, and must stay that way. Without it,
+# gitignore semantics match a directory of that name at ANY depth: `dumps/` also
+# swallowed `lib/dumps/` and `supabase/` also swallowed `lib/supabase/` — between them
+# the whole of `lib/`. The app's ten `@/lib/...` imports then resolved to nothing and
+# every deployment failed with `Module not found` before it could serve a page.
 
 # The operational dumps: sales transactions, receivables ageing, contract prices.
-dumps/
+/dumps/
 
 # The pipeline, its docs, the approved masters (zmat, the RM tracker model, contract
 # prices) and the session memory. None of it is needed to render a page.
-.claude/
-.agents/
+/.claude/
+/.agents/
 
 # The old static dashboard and its data. data.json is the entire 6.5 MB payload every
 # account used to download, and access.json holds the sign-in hashes it was guarded by.
 # Both are superseded; neither should ever be served again.
-data.json
-access.json
-index.html
+/data.json
+/access.json
+/index.html
 
-# Local tooling.
-tools/
-supabase/
-.venv/
-.pytest_cache/
-docs/
+# Local tooling. /supabase/ is the migrations directory at the root — not lib/supabase/,
+# which the app imports on every request.
+/tools/
+/supabase/
+/.venv/
+/.pytest_cache/
+/docs/

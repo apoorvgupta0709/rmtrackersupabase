@@ -335,6 +335,15 @@ have failed silently in this move.
 - Tabs and tables are named, never numbered, in rules — ordinals broke twice.
 - The six NMPL reco price mismatches are hand adjustments in the customer's
   sheet, documented deliberately, not formula errors to "fix".
+- **Every `.vercelignore` pattern is anchored with a leading slash, and must stay
+  that way.** Unanchored, gitignore semantics match a directory of that name at *any*
+  depth: `dumps/` also swallowed `lib/dumps/` and `supabase/` also swallowed
+  `lib/supabase/` — between them the whole of `lib/`. The app's ten `@/lib/...`
+  imports then resolved to nothing and every deployment died with `Module not found`
+  before it could serve a page, while the local build stayed green because the files
+  are only missing from the *upload*. Check with
+  `git -c core.excludesFile=.vercelignore check-ignore -v --no-index lib/supabase/server.ts`
+  — it must match nothing.
 
 ## Owner's working preferences
 
