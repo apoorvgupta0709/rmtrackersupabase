@@ -265,12 +265,14 @@ have failed silently in this move.
 
 ## Accounts and access
 
-- **The web app signs in by email through Supabase Auth, not by username.** Three
-  accounts, all confirmed: `apoorvgupta.dce@gmail.com` = admin (changed from
-  `it@itarang.com` on 10 Aug 2026); `mes@itarang.com` = the Megh Steel tracker only;
-  `groupbuy@itarang.com` = the six commercial tabs for the group buy meeting (customer
-  tracker, long-length, sales summary, past sales trend, SKU pricing, stock analysis) —
-  no mapping, STR, transfers or overdue queues.
+- **The web app signs in by email through Supabase Auth, not by username.** As of
+  10 Aug 2026 there is exactly **one** account: `apoorvgupta.dce@gmail.com` = admin
+  (changed from `it@itarang.com` the same day). The two `@itarang.com` viewer accounts
+  were deleted on the owner's instruction — `mes` (Megh Steel tracker) and `groupbuy`
+  (the six commercial tabs for the group buy meeting: customer tracker, long-length,
+  sales summary, past sales trend, SKU pricing, stock analysis). **Megh Steel and the
+  group-buy attendees have no access until someone recreates and re-grants them**; the
+  grants are gone with the rows, so the tab lists above are the record of what they had.
 - Admin needs no grants: `app/dashboard/layout.tsx` gives `role = 'admin'` every tab
   regardless of `view_grants`, which is why the admin row has none.
 - Change an address with the Admin API, never `update auth.users`: GoTrue also keeps
