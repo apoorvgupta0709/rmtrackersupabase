@@ -88,6 +88,12 @@ def main() -> int:
             client.update("dashboard_builds", f"id=eq.{build['id']}",
                           {"is_month_end": True})
             print("marked as the month-end build", flush=True)
+        # Prune only after a successful publish. A refresh that failed is exactly when
+        # the older builds are worth having, so nothing is dropped on the way out of a
+        # bad run.
+        pruned = client.rpc("prune_builds", {"keep_days": 14})
+        uploads = client.rpc("prune_uploads", {"keep_days": 14})
+        print(f"pruned {pruned} old build(s), {uploads} old upload(s)", flush=True)
     else:
         print(f"NOT published — status {status}. Yesterday's build still stands.",
               flush=True)
