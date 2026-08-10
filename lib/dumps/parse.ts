@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
-import { SLOTS, slotsForFilename } from "./adapters";
+import { SLOTS } from "./adapters";
+import { isMonthSheet, recognise, type Recognition } from "./recognise";
 
 /**
  * Turn an uploaded .xlsx into the cell grids the pipeline reads.
@@ -30,6 +31,14 @@ export type ParseResult = {
   grids: ParsedGrid[];
   /** Slots this file should have filled but could not. */
   problems: string[];
+  /** How the slots were arrived at, so a match on contents is visible and not silent. */
+  how: Recognition["how"];
+  /**
+   * Set when nothing recognised the file. It is not an error and not discarded — the
+   * sheets it holds are listed so the uploader can offer them, and the reader assigns
+   * the slot by hand. A workbook the sender renamed is the normal case, not a mistake.
+   */
+  unassigned?: { sheetNames: string[] };
 };
 
 function encode(cell: XLSX.CellObject | undefined): Cell {
@@ -75,21 +84,19 @@ function gridFor(worksheet: XLSX.WorkSheet): { rows: Cell[][]; nCols: number } {
   return { rows, nCols: rows.length ? rows[0].length : 0 };
 }
 
-const MONTHS = ["January", "February", "March", "April", "May", "June", "July",
-  "August", "September", "October", "November", "December"];
-
-/** Parse one uploaded workbook into every slot it fills. */
-export function parseWorkbook(filename: string, data: ArrayBuffer): ParseResult {
-  const slots = slotsForFilename(filename);
-  const problems: string[] = [];
-  if (slots.length === 0) {
-    return {
-      filename,
-      grids: [],
-      problems: [`${filename} is not one of the dumps the dashboard reads.`],
-    };
-  }
-
+/**
+ * Parse one uploaded workbook into every slot it fills.
+ *
+ * The workbook is opened before the slots are decided, because its sheets are the better
+ * evidence of what it is: the sender's filename is whatever they saved it as, while a
+ * `Bucketting` sheet is a fact about the file. Pass `assigned` to override both and put
+ * it where the reader says.
+ */
+export function parseWorkbook(
+  filename: string,
+  data: ArrayBuffer,
+  assigned?: string[],
+): ParseResult {
   const workbook = XLSX.read(new Uint8Array(data), {
     cellDates: true,
     cellFormula: false,
@@ -97,6 +104,22 @@ export function parseWorkbook(filename: string, data: ArrayBuffer): ParseResult 
     cellStyles: false,
     type: "array",
   });
+
+  const found = assigned?.length
+    ? ({ slots: assigned, how: "manual" } as Recognition)
+    : recognise(filename, workbook.SheetNames);
+  const slots = found.slots;
+  const problems: string[] = [];
+
+  if (slots.length === 0) {
+    return {
+      filename,
+      grids: [],
+      problems: [],
+      how: "none",
+      unassigned: { sheetNames: workbook.SheetNames },
+    };
+  }
 
   const grids: ParsedGrid[] = [];
   for (const slot of slots) {
@@ -107,9 +130,7 @@ export function parseWorkbook(filename: string, data: ArrayBuffer): ParseResult 
       // The schedule sheet is named for the month it covers and the owner renames it as
       // the month rolls, so it is discovered rather than declared. Every month sheet the
       // workbook holds is uploaded; the refresh picks the one matching its as-of date.
-      const monthSheets = workbook.SheetNames.filter(
-        (n) => n.startsWith("Schedule ") && MONTHS.includes(n.slice("Schedule ".length)),
-      );
+      const monthSheets = workbook.SheetNames.filter(isMonthSheet);
       for (const name of monthSheets) {
         const { rows, nCols } = gridFor(workbook.Sheets[name]);
         grids.push({ slot, sheet: name, sourceFile: filename, rows, nCols });
@@ -133,7 +154,7 @@ export function parseWorkbook(filename: string, data: ArrayBuffer): ParseResult 
     grids.push({ slot, sheet: sheetName, sourceFile: filename, rows, nCols });
   }
 
-  return { filename, grids, problems };
+  return { filename, grids, problems, how: found.how };
 }
 
 /** A stable digest of the parsed cells, for spotting a dump that was re-sent unchanged. */

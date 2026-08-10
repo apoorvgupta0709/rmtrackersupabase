@@ -6,6 +6,7 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { parseWorkbook, type ParsedGrid } from "@/lib/dumps/parse";
 import { previouslySeen, uploadGrid } from "@/lib/dumps/upload";
 import { SLOTS } from "@/lib/dumps/adapters";
+import { slotChoices } from "@/lib/dumps/recognise";
 
 type Row = {
   key: string;
@@ -14,45 +15,100 @@ type Row = {
   written: number;
   seenBefore?: string;
   error?: string;
+  /** How this file reached its slot: by name, by its sheets, or by hand. */
+  how: string;
 };
+
+/** A workbook nothing recognised, held so the reader can say what it is. */
+type Unassigned = { file: File; sheetNames: string[] };
 
 export default function UploadPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [problems, setProblems] = useState<string[]>([]);
+  const [unassigned, setUnassigned] = useState<Unassigned[]>([]);
   const [busy, setBusy] = useState(false);
   const [refreshState, setRefreshState] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
-  const take = useCallback(async (files: FileList | null) => {
-    if (!files?.length) return;
-    setProblems([]);
+  /** Turn one parsed workbook into table rows, checking each against what came before. */
+  const absorb = useCallback(async (file: File, assigned?: string[]) => {
+    const result = parseWorkbook(file.name, await file.arrayBuffer(), assigned);
     const supabase = supabaseBrowser();
-    const next: Row[] = [];
-    const found: string[] = [];
-
-    for (const file of Array.from(files)) {
-      const result = parseWorkbook(file.name, await file.arrayBuffer());
-      found.push(...result.problems);
-      for (const grid of result.grids) {
-        const { digest } = { digest: await (await import("@/lib/dumps/parse")).digestOf(grid.rows) };
-        const seen = await previouslySeen(supabase, grid.slot, digest);
-        next.push({
-          key: `${grid.slot}::${grid.sheet}`,
-          grid,
-          state: "parsed",
-          written: 0,
-          seenBefore: seen.seen ? seen.uploadedAt : undefined,
-        });
-      }
+    const made: Row[] = [];
+    for (const grid of result.grids) {
+      const digest = await (await import("@/lib/dumps/parse")).digestOf(grid.rows);
+      const seen = await previouslySeen(supabase, grid.slot, digest);
+      made.push({
+        key: `${grid.slot}::${grid.sheet}`,
+        grid,
+        state: "parsed",
+        written: 0,
+        seenBefore: seen.seen ? seen.uploadedAt : undefined,
+        how: result.how,
+      });
     }
-    setProblems(found);
+    return { made, result };
+  }, []);
+
+  const merge = (next: Row[]) =>
     // A second drop of the same slot replaces the first rather than queueing both.
     setRows((current) => {
       const merged = new Map(current.map((r) => [r.key, r]));
       next.forEach((r) => merged.set(r.key, r));
       return [...merged.values()].sort((a, b) => a.key.localeCompare(b.key));
     });
-  }, []);
+
+  const take = useCallback(
+    async (files: FileList | null) => {
+      if (!files?.length) return;
+      setProblems([]);
+      const next: Row[] = [];
+      const found: string[] = [];
+      const waiting: Unassigned[] = [];
+
+      for (const file of Array.from(files)) {
+        const { made, result } = await absorb(file);
+        found.push(...result.problems);
+        next.push(...made);
+        if (result.unassigned) {
+          waiting.push({ file, sheetNames: result.unassigned.sheetNames });
+        }
+      }
+      setProblems(found);
+      setUnassigned((current) => [
+        ...current.filter((u) => !waiting.some((w) => w.file.name === u.file.name)),
+        ...waiting,
+      ]);
+      merge(next);
+    },
+    [absorb],
+  );
+
+  /** The reader has said what an unrecognised workbook is. */
+  const assign = useCallback(
+    async (entry: Unassigned, slot: string) => {
+      if (!slot) return;
+      const { made, result } = await absorb(entry.file, [slot]);
+      if (result.problems.length || made.length === 0) {
+        // Say why nothing happened rather than dropping the file off the list: an
+        // assignment that reads no sheet is the reader picking the wrong slot, and a
+        // workbook that quietly vanishes reads as one that loaded.
+        setProblems(
+          result.problems.length
+            ? result.problems
+            : [
+                `${entry.file.name} has no sheet for slot ${slot} — it holds ` +
+                  `${entry.sheetNames.join(", ") || "no sheets"}. Pick a different slot.`,
+              ],
+        );
+        return;
+      }
+      setProblems([]);
+      merge(made);
+      setUnassigned((current) => current.filter((u) => u.file.name !== entry.file.name));
+    },
+    [absorb],
+  );
 
   async function send() {
     setBusy(true);
@@ -143,9 +199,55 @@ export default function UploadPage() {
         />
         <div className="label">Drop .xlsx files, or click to choose</div>
         <div className="hint" style={{ marginTop: 10 }}>
-          Recognised: {Object.values(SLOTS).flatMap((s) => s.files).filter((f, i, a) => a.indexOf(f) === i).join(", ")}
+          Drop them named as they were mailed. A workbook is matched on its name, or on
+          the sheets it holds when the name has been changed; anything left over is listed
+          below to be assigned by hand rather than refused.
+        </div>
+        <div className="hint" style={{ marginTop: 8, opacity: 0.75 }}>
+          Canonical names: {Object.values(SLOTS).flatMap((s) => s.files).filter((f, i, a) => a.indexOf(f) === i).join(", ")}
         </div>
       </div>
+
+      {unassigned.length > 0 && (
+        <div className="sheet rise" style={{ marginTop: 24, padding: 18 }}>
+          <div className="label">Not recognised — say what these are</div>
+          <p className="hint" style={{ margin: "8px 0 14px", maxWidth: "70ch" }}>
+            Neither the filename nor the sheets identified these. Nothing is guessed: a
+            dump put in the wrong slot is not caught further down. Pick the slot and it is
+            read the same way a recognised file would be.
+          </p>
+          {unassigned.map((entry) => (
+            <div
+              key={entry.file.name}
+              style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}
+            >
+              <div style={{ minWidth: 240 }}>
+                <div className="figure" style={{ fontSize: 14 }}>{entry.file.name}</div>
+                <div className="hint" style={{ fontSize: 12 }}>
+                  sheets: {entry.sheetNames.join(", ") || "none"}
+                </div>
+              </div>
+              <select
+                defaultValue=""
+                aria-label={`Slot for ${entry.file.name}`}
+                style={{ width: "auto", minWidth: 320, padding: "8px 10px", fontSize: 13 }}
+                onChange={(e) => assign(entry, e.target.value)}
+              >
+                <option value="">Choose the slot it fills…</option>
+                {slotChoices().map((c) => (
+                  <option key={c.slot} value={c.slot}>{c.describe}</option>
+                ))}
+              </select>
+              <button
+                className="ghost"
+                onClick={() => setUnassigned((c) => c.filter((u) => u.file.name !== entry.file.name))}
+              >
+                Ignore
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {problems.length > 0 && (
         <div style={{ marginTop: 18 }}>
@@ -174,7 +276,14 @@ export default function UploadPage() {
                 <tr key={row.key}>
                   <td className="figure">{row.grid.slot}</td>
                   <td>{row.grid.sheet}</td>
-                  <td className="hint">{row.grid.sourceFile}</td>
+                  <td className="hint">
+                    {row.grid.sourceFile}
+                    {row.how !== "filename" && (
+                      <div style={{ fontSize: 11, color: "var(--warn)" }}>
+                        matched {row.how === "sheets" ? "on its sheets" : "by hand"}
+                      </div>
+                    )}
+                  </td>
                   <td className="num">
                     {row.state === "uploading"
                       ? `${row.written.toLocaleString()} / ${row.grid.rows.length.toLocaleString()}`

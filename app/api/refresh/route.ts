@@ -18,9 +18,21 @@ export async function POST() {
 
   const token = process.env.GITHUB_DISPATCH_TOKEN;
   const repo = process.env.GITHUB_REPOSITORY;
-  if (!token || !repo) {
+  // Name the one that is actually missing. Reporting both sends the reader to check a
+  // variable that is already set, which is where the time goes.
+  const missing = [
+    !token && "GITHUB_DISPATCH_TOKEN",
+    !repo && "GITHUB_REPOSITORY",
+  ].filter(Boolean);
+  if (missing.length) {
     return NextResponse.json(
-      { error: "GITHUB_DISPATCH_TOKEN and GITHUB_REPOSITORY are not configured." },
+      {
+        error:
+          `${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not set on this ` +
+          `deployment. Add ${missing.length === 1 ? "it" : "them"} in Vercel project ` +
+          `settings, then redeploy — the uploads are already saved, so only the refresh ` +
+          `needs re-running.`,
+      },
       { status: 501 },
     );
   }
