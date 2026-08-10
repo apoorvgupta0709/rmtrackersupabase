@@ -265,20 +265,29 @@ have failed silently in this move.
 
 ## Accounts and access
 
-- Sign-in accounts and per-tab grants live in the committed `access.json`
-  (see SKILL.md for the model). Current: `apoorv` = admin, all tabs;
-  `mes` = the Megh Steel tracker only; `groupbuy` = the six commercial tabs for the
-  group buy meeting (customer tracker, long-length tracker, sales summary, past sales
-  trend, SKU pricing, stock analysis) — no mapping, STR, transfers or overdue queues.
-- Users are created with `scripts/manage_users.py` — one file change, no rebuild.
-- Verified working on the 6 August build: `groupbuy` / `GroupBuy@2026` signs in and
-  gets its six tabs. If an account other than `apoorv` is refused, the cause is almost
-  never the password — `access.json` failed to reach that browser and the page fell back
-  to the admin-only account list. The sign-in form now names that cause instead of
-  saying the password is wrong.
-- All of it is presentation, not security: `data.json` is publicly fetchable
-  whatever the grants say. The owner knows; real protection would be Vercel
-  deployment protection, offered and not yet taken up.
+- **The web app signs in by email through Supabase Auth, not by username.** Three
+  accounts, all confirmed: `apoorvgupta.dce@gmail.com` = admin (changed from
+  `it@itarang.com` on 10 Aug 2026); `mes@itarang.com` = the Megh Steel tracker only;
+  `groupbuy@itarang.com` = the six commercial tabs for the group buy meeting (customer
+  tracker, long-length, sales summary, past sales trend, SKU pricing, stock analysis) —
+  no mapping, STR, transfers or overdue queues.
+- Admin needs no grants: `app/dashboard/layout.tsx` gives `role = 'admin'` every tab
+  regardless of `view_grants`, which is why the admin row has none.
+- Change an address with the Admin API, never `update auth.users`: GoTrue also keeps
+  the address on `auth.identities`, and a direct UPDATE leaves the two disagreeing and
+  sign-in broken in a way nothing surfaces. Update `public.profiles.email` alongside —
+  the sync trigger is on insert only.
+- **The login form's `minLength={8}` is the real password floor**, not Supabase's
+  (which defaults to 6). A password of 7 characters stores fine and then cannot be
+  typed into the form, so the account is unusable.
+- `access.json` and `scripts/manage_users.py` are the **old static site's** model
+  (username + salted sha256) and no longer govern anything the app serves;
+  `.vercelignore` keeps `access.json` off the deployment entirely.
+- Sign-in is now real access control, not presentation: reads go through the caller's
+  own client so RLS policies decide, rather than the old model where `data.json` was
+  publicly fetchable whatever the grants said. Vercel Deployment Protection is also on,
+  which puts a Vercel SSO wall in front of every URL — fine for the owner, but it locks
+  out `mes` and `groupbuy` until it is turned off in Project Settings.
 
 ## Open threads
 
