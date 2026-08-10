@@ -19,6 +19,26 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = SKILL_ROOT.parents[2]
 
 
+def vercelignore_patterns():
+    """The patterns in `.vercelignore`, with the leading slash normalised away.
+
+    Anchoring is not cosmetic and these tests must not push back against it. Unanchored,
+    gitignore semantics match a directory of that name at *any* depth, so `dumps/` also
+    excluded `lib/dumps/` and `supabase/` also excluded `lib/supabase/` — between them
+    the whole of `lib/`. Every deployment then died with `Module not found` while the
+    local build stayed green, because the files were missing only from the upload.
+
+    What these tests care about is that the directory is excluded, not how it is spelt,
+    so compare on the normalised form and let either spelling pass.
+    """
+    text = (REPO_ROOT / ".vercelignore").read_text(encoding="utf-8")
+    return {
+        line.strip().lstrip("/")
+        for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+
 def load_refresh_module():
     script = SKILL_ROOT / "scripts" / "refresh_dashboard.py"
     spec = importlib.util.spec_from_file_location("refresh_dashboard", script)
@@ -311,8 +331,9 @@ def test_dumps_folder_holds_the_masters_unchanged_and_is_never_deployed():
             assert hashlib.sha256(copy.read_bytes()).hexdigest() == master["sha256"], (
                 f"{copy.name} in dumps/ has drifted from the approved master"
             )
-    ignored = (repo / ".vercelignore").read_text(encoding="utf-8").split()
-    assert "dumps/" in ignored, "dumps/ must not be served on the public deployment"
+    assert "dumps/" in vercelignore_patterns(), (
+        "dumps/ must not be served on the public deployment"
+    )
 
 
 def test_megh_length_bucketing_reads_the_plans_own_code_columns():
@@ -553,7 +574,7 @@ def test_the_package_sits_where_claude_code_discovers_it():
     assert (REPO_ROOT / ".claude").is_dir()
 
     # Everything under .claude/ is commercial or internal, and the deployment is public.
-    ignored = (REPO_ROOT / ".vercelignore").read_text(encoding="utf-8").split()
+    ignored = vercelignore_patterns()
     assert ".claude/" in ignored, (
         "the skill package holds the approved masters, including contract prices"
     )
