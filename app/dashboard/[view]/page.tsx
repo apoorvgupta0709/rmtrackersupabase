@@ -78,13 +78,14 @@ export default async function ViewPage({
   }
 
   // `metadata` rides along on every tab: it carries the build's as-of date, which the
-  // copy formats date their documents with. It is not admin-only, so any reader who can
-  // see the tab can see the date the figures on it were taken.
+  // copy formats date their documents with. `detail_columns` rides along for the same
+  // reason — every tab has figures that open a breakup, and it is the layout each one is
+  // rendered with. Neither is admin-only, so any reader who can see the tab can see them.
   const { data: scalarRows } = await supabase
     .from("build_scalars")
     .select("key,value")
     .eq("build_id", buildId)
-    .in("key", [...spec.scalars, "metadata"]);
+    .in("key", [...spec.scalars, "metadata", "detail_columns"]);
   const scalars: Record<string, any> = Object.fromEntries(
     (scalarRows ?? []).map((s) => [s.key, s.value]),
   );
@@ -214,6 +215,8 @@ export default async function ViewPage({
             capped={capped ? CAP : undefined}
             copies={table.copies}
             copyContext={copyContext}
+            buildId={buildId}
+            layouts={scalars.detail_columns ?? {}}
           />
         );
       })}

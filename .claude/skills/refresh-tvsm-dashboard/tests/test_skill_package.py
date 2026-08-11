@@ -1026,3 +1026,75 @@ def test_a_missing_access_file_says_so_rather_than_blaming_the_password():
     # The admin fallback itself stays: one account able to get in and see what is wrong
     # beats everyone locked out.
     assert "const FALLBACK_ACCOUNTS = {" in template
+
+
+def test_the_web_apps_drill_down_carries_the_same_totals_rules_as_the_page():
+    """The breakup panel is ported; the three rules that govern its footer come with it.
+
+    Each of them was wrong on the static page once, and none of them is expressible in a
+    type: a formula breakup that gets totalled, a history that gets added instead of
+    averaged, and three quantity columns that all report the same field are all valid
+    TypeScript. So they are asserted here against the component that now renders them.
+    """
+    panel = (REPO_ROOT / "app" / "dashboard" / "[view]" / "detail.tsx").read_text(encoding="utf-8")
+
+    # A formula breakup lists its inputs and its result; a column of those adds to nothing.
+    assert 'const NO_TOTAL = new Set(["LLCOVERAGE", "LLGAP45", "LLGAP", "BALANCE"]);' in panel
+    # A breakup whose rows are months closes on an average month, and says so.
+    assert 'const AVERAGE_BY_MONTH = new Set(["LLHISTORY", "SKUHISTORY"]);' in panel
+    assert "const over = byMonth ? rows.length : 1;" in panel
+    assert 'byMonth ? "Average month" : "Total"' in panel
+    # Each quantity column totals the field it displays. One total computed from `qty`
+    # and repeated across the sign-off split read as a bucket both fully signed off and
+    # fully outstanding.
+    assert "rows.reduce((sum, row) => sum + (Number(row[c.field]) || 0), 0)" in panel
+    assert "row.qty" not in panel, "a shared total across quantity columns is the defect"
+    # `kind: "mt"` is not summable — it is also weight per metre and rupees per metre.
+    assert 'c.kind === "qty" || c.add === true' in panel
+    # A pieces column beside a tonnage is a count: no unit suffix and no decimals.
+    assert 'const counts = c.kind === "num";' in panel
+
+
+def test_the_web_app_fetches_the_drill_down_layouts_on_every_tab():
+    """Without them every breakup falls back to the source-and-quantity layout.
+
+    `detail_columns` is a scalar on every build and is not admin-only, so it rides along
+    with `metadata` rather than being listed per view — a tab that forgot it would render
+    its breakups with the wrong columns and nothing would fail.
+    """
+    page = (REPO_ROOT / "app" / "dashboard" / "[view]" / "page.tsx").read_text(encoding="utf-8")
+    assert '.in("key", [...spec.scalars, "metadata", "detail_columns"])' in page
+    # A breakup is read from the build the figure came from. The policies hold a viewer
+    # to the current build but let an admin read every build, so an unfiltered query
+    # would merge them — the defect that once rendered 1,188 rows for a 396-row section.
+    panel = (REPO_ROOT / "app" / "dashboard" / "[view]" / "detail.tsx").read_text(encoding="utf-8")
+    assert '.eq("build_id", buildId)' in panel
+    # The prefix leads the primary key and is what `can_read_prefix` checks a grant on.
+    assert '.eq("prefix", prefix)' in panel
+
+
+def test_every_drill_down_on_the_web_app_reaches_a_breakup():
+    """A drill-down template is a string, and no compiler checks where it points.
+
+    `views.ts` names the key each clickable figure opens — `{stock_detail_key}` where the
+    pipeline precomputed one, `LLSCHEDULE|{bucket}` where it is composed. Rename a field
+    upstream and the column keeps compiling and starts opening nothing, silently. So
+    every template is resolved against every row of the published payload and checked
+    against the drill-downs the same build produced.
+    """
+    import shutil
+
+    node = shutil.which("node")
+    if node is None:
+        import pytest
+
+        pytest.skip("node is not on PATH")
+
+    result = subprocess.run(
+        [node, str(REPO_ROOT / "tools" / "check_detail_keys.mjs"), str(REPO_ROOT / "data.json")],
+        capture_output=True, text=True, cwd=REPO_ROOT,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    # The headline cards are the only breakups nothing opens, and deliberately: the fact
+    # strip that replaced them states figures rather than offering them.
+    assert "Not opened from any table: BALANCE" in result.stdout

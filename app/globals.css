@@ -366,6 +366,84 @@ thead th[data-filtered="1"] .th-filter { color: var(--furnace); }
 .filter-pop-list span { overflow: hidden; text-overflow: ellipsis; }
 .filter-pop-empty { padding: 10px 4px; color: var(--ink-faint); font-size: 12.5px; }
 
+/* ---- Drill-down --------------------------------------------------------- */
+/* A figure that opens the lines behind it. It is marked, not restyled: a pill or a
+   colour would break the decimal alignment down a column of tonnage and would make a
+   sheet of buttons rather than a sheet of numbers. The dotted rule under it says the
+   figure is openable and takes no width; the furnace ink arrives on hover, where the
+   pointer already is. */
+
+button.drill {
+  padding: 0;
+  border: 0;
+  border-bottom: 1px dotted var(--rule-strong);
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: inherit;
+  letter-spacing: inherit;
+  text-transform: none;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+button.drill:hover:not(:disabled),
+button.drill:focus-visible {
+  background: none;
+  color: var(--furnace);
+  border-bottom-color: var(--furnace);
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(22, 24, 28, 0.45);
+}
+.modal-card {
+  width: min(1180px, 96vw);
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  box-shadow: var(--shadow-lift);
+}
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--rule-strong);
+}
+.modal-title {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: -0.015em;
+}
+.modal-note {
+  margin: 5px 0 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.modal-close {
+  padding: 4px 10px;
+  font-size: 15px;
+  line-height: 1.2;
+  background: transparent;
+  color: var(--ink-soft);
+  border-color: var(--rule-strong);
+}
+.modal-close:hover:not(:disabled) { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.modal-body { overflow: auto; flex: 1; min-height: 0; padding: 14px 16px; }
+
 /* ---- Page load ---------------------------------------------------------- */
 /* One orchestrated reveal, staggered down the page. Nothing else animates on load. */
 

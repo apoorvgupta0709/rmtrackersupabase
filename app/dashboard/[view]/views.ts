@@ -77,6 +77,23 @@ const money = (field: string, label: string): Column => ({ field, label, kind: "
 const bool = (field: string, label: string): Column => ({ field, label, kind: "bool" });
 const list = (field: string, label: string): Column => ({ field, label, kind: "list", wide: true });
 
+/**
+ * A column whose figures open the lines behind them.
+ *
+ * `key` and `title` are templates resolved against the row — `{stock_detail_key}` where
+ * the pipeline precomputed one, `LLSCHEDULE|{bucket}` where the key is composed from a
+ * prefix and something the row already carries. **A placeholder that resolves to nothing
+ * leaves the cell as plain text**, which is how most buckets carrying no open order come
+ * to show a figure and not a dead button.
+ *
+ * `when` guards the few breakups that exist only where there is something to break up:
+ * the key is on the row regardless, so the guard has to be on the figure beside it.
+ */
+const drill = (column: Column, key: string, title: string, when?: string): Column => ({
+  ...column,
+  detail: { key, title, ...(when ? { when } : {}) },
+});
+
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -87,16 +104,33 @@ export function monthLabel(month: string): string {
   return name ? `${name} ${year.slice(2)}` : month;
 }
 
-/** Months across the columns, read from the build so a new month needs no template change. */
-function monthColumns(months: string[], unit: Unit): Column[] {
+/**
+ * Months across the columns, read from the build so a new month needs no template change.
+ *
+ * `openAs` makes each month cell open its own breakup: the month is part of the key, so
+ * the template is completed here rather than declared once for the whole column set.
+ */
+function monthColumns(
+  months: string[],
+  unit: Unit,
+  openAs?: (month: string) => { key: string; title: string },
+): Column[] {
   const holder = unit === "mt" ? "months" : "months_nos";
-  return months.map((m) => ({
-    field: `${holder}.${m}`,
-    label: monthLabel(m),
-    kind: unit === "mt" ? "mt" : "nos",
-    total: true,
-    month: true,
-  }));
+  return months.map((m) => {
+    const column: Column = {
+      field: `${holder}.${m}`,
+      label: monthLabel(m),
+      kind: unit === "mt" ? "mt" : "nos",
+      total: true,
+      month: true,
+    };
+    // A month a bucket did not sell in has no split behind it — the pipeline writes a
+    // breakup for the months that moved. The cell reads `—`, and guarding on its own
+    // field is what keeps it from being a button that opens nothing.
+    return openAs
+      ? { ...column, detail: { ...openAs(m), when: `${holder}.${m}` } }
+      : column;
+  });
 }
 
 const unitTotal = (unit: Unit): Column =>
@@ -164,10 +198,22 @@ export const VIEWS: Record<string, ViewSpec> = {
           mt("balance_mt", "Balance MT"),
           mt("open_balance_mt", "Open bal MT"),
           mt("over_dispatch_mt", "Over disp MT"),
-          pool("ctl_stock_pool_mt", "CTL stock MT"),
-          pool("ll_stock_pool_mt", "LL stock MT"),
+          drill(
+            pool("ctl_stock_pool_mt", "CTL stock MT"),
+            "{ctl_stock_detail_key}",
+            "{customer_display} · {ctl_bucket} · CTL stock",
+          ),
+          drill(
+            pool("ll_stock_pool_mt", "LL stock MT"),
+            "{ll_stock_detail_key}",
+            "{customer_display} · {bucket} · LL stock",
+          ),
           pool("shared_wip_mt", "WIP MT"),
-          { field: "history_avg_month_mt", label: "Avg month MT", kind: "mt" },
+          drill(
+            { field: "history_avg_month_mt", label: "Avg month MT", kind: "mt" },
+            "{history_detail_key}",
+            "{customer_display} · {ctl_bucket} · sales month by month",
+          ),
         ],
         // Both are addressed to one customer, so both read the customer off the column
         // filter rather than off a second selector that could disagree with it.
@@ -208,17 +254,67 @@ export const VIEWS: Record<string, ViewSpec> = {
           txt("grade", "Grade"),
           txt("cut_type", "Cut type"),
           list("materials", "Material codes"),
-          mt("schedule_mt", "Schedule MT"),
-          mt("sales_mt", "Sales MT"),
+          // Every figure on this tab is guarded by itself. The plan writes a key onto
+          // each row whether or not the SKU has any of that thing, and the breakup for
+          // a zero was never built — 64 of the 73 SKUs sold nothing this month. So a
+          // zero here is a zero, not a button that opens an explanation of nothing.
+          drill(
+            mt("schedule_mt", "Schedule MT"),
+            "MEGHSCHEDULE|{sku}",
+            "{sku} · schedule",
+            "schedule_mt",
+          ),
+          drill(
+            mt("sales_mt", "Sales MT"),
+            "{sales_detail_key}",
+            "{sku} · sales to Megh",
+            "sales_mt",
+          ),
           mt("ground_stock_mt", "Ground stock MT"),
           mt("transit_stock_mt", "Transit MT"),
-          mt("total_stock_mt", "Total stock MT"),
-          mt("stock_at_length_mt", "At length MT"),
-          mt("other_length_stock_mt", "Other length MT"),
-          mt("orders_logged_mt", "Ordered MT"),
-          mt("orders_planning_mt", "Sales-planning orders MT"),
-          mt("signoff_mt", "Signed MT"),
-          mt("non_signoff_mt", "Not signed MT"),
+          drill(
+            mt("total_stock_mt", "Total stock MT"),
+            "{stock_detail_key}",
+            "{sku} · ground plus in transit",
+            "total_stock_mt",
+          ),
+          drill(
+            mt("stock_at_length_mt", "At length MT"),
+            "{at_length_detail_key}",
+            "{sku} · long length at required size",
+            "stock_at_length_mt",
+          ),
+          drill(
+            mt("other_length_stock_mt", "Other length MT"),
+            "{other_length_detail_key}",
+            "{sku} · long length, other sizes",
+            "other_length_stock_mt",
+          ),
+          drill(
+            mt("orders_logged_mt", "Ordered MT"),
+            "{orders_detail_key}",
+            "{sku} · orders logged as per OMS",
+            "orders_logged_mt",
+          ),
+          drill(
+            mt("orders_planning_mt", "Sales-planning orders MT"),
+            "{orders_plan_detail_key}",
+            "{sku} · orders logged as per sales planning, plant by plant",
+          ),
+          // Both halves of the split open the same breakup, which carries the three
+          // quantity columns side by side; only the heading says which half was clicked.
+          drill(
+            mt("signoff_mt", "Signed MT"),
+            "{signoff_detail_key}",
+            "{sku} · signed off",
+            "signoff_mt",
+          ),
+          drill(
+            mt("non_signoff_mt", "Not signed MT"),
+            "{signoff_detail_key}",
+            "{sku} · not signed off",
+            "non_signoff_mt",
+          ),
           days("coverage_days", "Cover days"),
           days("coverage_days_post_order", "Cover days post order"),
           cntNoTotal("bop_nos", "BOP nos"),
@@ -293,18 +389,54 @@ export const VIEWS: Record<string, ViewSpec> = {
         columns: [
           txt("bucket", "Bucket", true),
           txt("risk", "Risk"),
-          mt("total_schedule_mt", "Schedule MT"),
-          mt("total_sales_mt", "Sales MT"),
-          mt("remaining_schedule_mt", "Remaining MT"),
-          mt("available_ll_stock_mt", "LL stock MT"),
+          drill(
+            mt("total_schedule_mt", "Schedule MT"),
+            "LLSCHEDULE|{bucket}",
+            "{bucket} · total schedule breakup",
+          ),
+          drill(
+            mt("total_sales_mt", "Sales MT"),
+            "LLSALES|{bucket}",
+            "{bucket} · total sales breakup",
+          ),
+          // Remaining is the balance the LLGAP breakup shows its working for — schedule
+          // less sales, per party. The two gap-to-cover columns beside it are a different
+          // calculation and only the 45-day one has a breakup of its own.
+          drill(
+            mt("remaining_schedule_mt", "Remaining MT"),
+            "LLGAP|{bucket}",
+            "{bucket} · balance (schedule less sales)",
+          ),
+          drill(
+            mt("available_ll_stock_mt", "LL stock MT"),
+            "{stock_detail_key}",
+            "{bucket} · consolidated LL stock",
+          ),
           mt("shared_wip_mt", "WIP MT"),
           mt("transit_mt", "Transit MT"),
-          days("coverage_days", "Cover days"),
+          drill(
+            days("coverage_days", "Cover days"),
+            "LLCOVERAGE|{bucket}",
+            "{bucket} · coverage calculation",
+          ),
           mt("gap_to_30_days_mt", "Gap 30d MT"),
-          mt("gap_to_45_days_mt", "Gap 45d MT"),
-          mt("order_logged_mt", "Ordered MT"),
-          mt("signoff_mt", "Signed MT"),
-          mt("last_month_sales_mt", "Last month MT"),
+          drill(mt("gap_to_45_days_mt", "Gap 45d MT"), "LLGAP45|{bucket}", "{bucket} · gap to 45 days"),
+          drill(
+            mt("order_logged_mt", "Ordered MT"),
+            "{order_detail_key}",
+            "{bucket} · orders logged, plant by plant",
+          ),
+          drill(
+            mt("signoff_mt", "Signed MT"),
+            "{signoff_detail_key}",
+            "{bucket} · signed off",
+            "signoff_mt",
+          ),
+          drill(
+            mt("last_month_sales_mt", "Last month MT"),
+            "{history_detail_key}",
+            "{bucket} · billed month by month",
+          ),
         ],
       },
       {
@@ -505,7 +637,7 @@ export const VIEWS: Record<string, ViewSpec> = {
           + "to Boiler.",
         columns: [
           txt("OEM", "OEM"),
-          mt("sales_mt", "Sales MT"),
+          drill(mt("sales_mt", "Sales MT"), "{detail_key}", "{OEM} · sales by customer"),
           nos("sales_nos", "Sales nos"),
           { field: "sales_m", label: "Sales m", kind: "mt", total: true },
           cntNoTotal("customers", "Customers"),
@@ -545,7 +677,10 @@ export const VIEWS: Record<string, ViewSpec> = {
           + "is why this table's total reads short of the consolidated figure.",
         columns: [
           txt("bucket", "Bucket", true),
-          ...monthColumns(ctx.months, ctx.unit),
+          ...monthColumns(ctx.months, ctx.unit, (m) => ({
+            key: `TRENDBUCKET|{bucket}|${m}`,
+            title: `{bucket} · ${monthLabel(m)} · split by party`,
+          })),
           unitTotal(ctx.unit),
           ctx.unit === "mt" ? mt("direct_mt", "Direct MT") : nos("direct_nos", "Direct nos"),
           ctx.unit === "mt" ? mt("megh_mt", "Megh MT") : nos("megh_nos", "Megh nos"),
@@ -585,7 +720,11 @@ export const VIEWS: Record<string, ViewSpec> = {
           txt("length_type", "Length"),
           txt("material_codes", "Material codes", true),
           ...monthColumns(ctx.months, ctx.unit),
-          unitTotal(ctx.unit),
+          drill(
+            unitTotal(ctx.unit),
+            "{detail_key}",
+            "{customer} · {sku} · sales month by month",
+          ),
           cntNoTotal("months_active", "Months"),
           ctx.unit === "mt"
             ? { field: "avg_active_month_mt", label: "Avg active month MT", kind: "mt" }
@@ -659,8 +798,15 @@ export const VIEWS: Record<string, ViewSpec> = {
           list("operations", "Operations"),
           mt("schedule_mt", "Schedule MT"),
           nos("schedule_qty", "Schedule qty"),
+          // The price build-up is per quarter, so the key is read out of the row's own
+          // map of them rather than off a single field: a SKU repriced in Q4 has a
+          // different working behind each column.
           ...ctx.quarters.flatMap((q): Column[] => [
-            rate(q, `${q} price`),
+            drill(
+              rate(q, `${q} price`),
+              `{detail_keys.${q}}`,
+              `{bucket} · ${q} · price build-up`,
+            ),
             rate(`${q} per m`, `${q} per m`),
             money(`${q} base per ton`, `${q} base/t`),
           ]),
@@ -736,8 +882,19 @@ export const VIEWS: Record<string, ViewSpec> = {
           txt("description", "Description", true),
           txt("holder", "Held for", true),
           days("oldest_age_days", "Oldest days"),
-          mt("stock_mt", "Stock MT"),
-          mt("high_age_mt", "High age MT"),
+          drill(
+            mt("stock_mt", "Stock MT"),
+            "{detail_key}",
+            "Cut length · {material_code} · plant {plant}",
+          ),
+          // A lot with nothing aged has the key but no aged lines behind it, so the
+          // guard is on the tonnage rather than on the key.
+          drill(
+            mt("high_age_mt", "High age MT"),
+            "{high_age_detail_key}",
+            "High age · {material_code} · plant {plant}",
+            "high_age_mt",
+          ),
           nos("stock_nos", "Stock nos"),
           cnt("batches", "Batches"),
           txt("rfd_status", "RFD status"),
@@ -757,8 +914,17 @@ export const VIEWS: Record<string, ViewSpec> = {
           txt("description", "Description", true),
           txt("holder", "Held for", true),
           days("oldest_age_days", "Oldest days"),
-          mt("stock_mt", "Stock MT"),
-          mt("high_age_mt", "High age MT"),
+          drill(
+            mt("stock_mt", "Stock MT"),
+            "{detail_key}",
+            "Long length · {material_code} · plant {plant}",
+          ),
+          drill(
+            mt("high_age_mt", "High age MT"),
+            "{high_age_detail_key}",
+            "High age · {material_code} · plant {plant}",
+            "high_age_mt",
+          ),
           nos("stock_nos", "Stock nos"),
           cnt("batches", "Batches"),
         ],
@@ -777,7 +943,11 @@ export const VIEWS: Record<string, ViewSpec> = {
           cnt("unmapped_rows", "Unmapped rows"),
           mt("total_mt", "Total MT"),
           mt("mapped_mt", "Mapped MT"),
-          mt("unmapped_mt", "Unmapped MT"),
+          drill(
+            mt("unmapped_mt", "Unmapped MT"),
+            "{detail_key}",
+            "{source} · stock that reaches no governed bucket",
+          ),
           pct("unmapped_pct", "Unmapped %"),
         ],
       },
@@ -817,12 +987,20 @@ export const VIEWS: Record<string, ViewSpec> = {
           mt("requirement_mt", "Requirement MT"),
           mt("owned_8406_mt", "Owned at 8406 MT"),
           mt("in_transit_mt", "In transit MT"),
-          mt("stock_8406_mt", "Stock at 8406 MT"),
+          drill(
+            mt("stock_8406_mt", "Stock at 8406 MT"),
+            "{stock_detail_key}",
+            "{bucket} · stock at 8406 including in transit",
+          ),
           days("coverage_days", "Cover days"),
           mt("str_required_mt", "STR required MT"),
           mt("str_allocated_mt", "STR allocated MT"),
           mt("str_shortfall_mt", "Shortfall MT"),
-          mt("source_stock_mt", "Source stock MT"),
+          drill(
+            mt("source_stock_mt", "Source stock MT"),
+            "{source_detail_key}",
+            "{bucket} · stock at the source plants",
+          ),
           list("source_plants", "Source plants"),
         ],
         copies: [{ kind: "str" }],
@@ -916,7 +1094,11 @@ export const VIEWS: Record<string, ViewSpec> = {
           txt("status", "Status"),
           days("transit_days", "Transit days"),
           txt("mark_customer", "Marked for", true),
-          mt("qty_mt", "Qty MT"),
+          drill(
+            mt("qty_mt", "Qty MT"),
+            "{detail_key}",
+            "{source_plant_label} → {dest_plant_label} · {material_code}",
+          ),
           nos("qty_nos", "Qty nos"),
           cnt("batches", "Batches"),
         ],
@@ -943,13 +1125,19 @@ export const VIEWS: Record<string, ViewSpec> = {
         columns: [
           txt("ancillary", "Ancillary", true),
           txt("customer_code", "Customer code"),
-          inr("overdue_amount", "Overdue INR"),
+          drill(inr("overdue_amount", "Overdue INR"), "{detail_key}", "Overdue · {ancillary}"),
           cnt("documents", "Documents"),
           days("oldest_days", "Oldest days"),
           inr("over_90_days_amount", "Over 90 days INR"),
           inr("overdue_debits", "Debits INR"),
           inr("overdue_credits", "Credits INR"),
-          inr("offsets_amount", "Offsets INR"),
+          // An ancillary with no open credit note has the key and nothing behind it.
+          drill(
+            inr("offsets_amount", "Offsets INR"),
+            "{offsets_detail_key}",
+            "Open payments and credit notes · {ancillary}",
+            "offsets_documents",
+          ),
           cnt("offsets_documents", "Offset documents"),
         ],
       },

@@ -317,6 +317,34 @@ have failed silently in this move.
   addressed to; anything else is refused, because a clearance request sent to the wrong
   customer quotes them someone else's stock. Two controls that can disagree are worse
   than one.
+- **Every figure that opened a breakup on the old page opens one again**, as of 11 Aug:
+  53 columns over ten tabs, 7,155 buttons, 30 of the 34 prefixes. A column says so with
+  `detail: { key, title, when? }` in `views.ts` — both **templates resolved against the
+  row**, because the keys are built two ways (`{stock_detail_key}` where the pipeline
+  precomputed one, `LLSCHEDULE|{bucket}` where it is composed). It is data, not a
+  function, for the same reason `copies` is: columns cross to the client as props.
+  `DetailPanel` in `app/dashboard/[view]/detail.tsx` fetches one key at a time from
+  `detail_rows` on `(build_id, prefix, detail_key)` — the prefix explicitly, because it
+  leads the primary key *and* is what `can_read_prefix` checks a grant against — and
+  caches it per build. `detail_columns` rides along with `metadata` on every tab.
+  Three rules govern its footer, each of which was wrong once: no total on the four
+  formula prefixes (`LLCOVERAGE`, `LLGAP`, `LLGAP45`, `BALANCE`), an **average month**
+  rather than a total on `LLHISTORY` and `SKUHISTORY`, and **each quantity column
+  totalling its own field**. `kind: "mt"` is not summable — only `kind: "qty"` or an
+  explicit `add: true`.
+- **A placeholder that resolves to nothing leaves the cell as plain text**, and `when`
+  guards the figure itself where the key exists but the breakup does not. Both matter:
+  on the 7 Aug build the Megh tab writes a key onto all 73 rows for things 64 of them
+  have none of, and `TRENDBUCKET` has no entry for a month a bucket did not sell in — 618
+  buttons that would each have opened an explanation of nothing. Guard on the figure, not
+  on the key, wherever the pipeline writes the key unconditionally. 195 buttons still
+  open a pool whose list is genuinely empty; the panel says so rather than staying blank.
+- **`tools/check_detail_keys.mjs` resolves every template against `data.json`** and fails
+  if a key reaches no breakup, if a whole column opens nothing, or if a prefix is missing
+  from `detail_prefix_views`. Run it after any pipeline rename — nothing else catches a
+  drill-down that silently stopped pointing anywhere. It is wired into the pytest suite.
+  `BALANCE`, `SCHEDULE` and `TRENDMONTH` are expected to be unreached: those were the
+  headline-card breakups, and the fact strip that replaced the cards does not open them.
 - **`metadata` is fetched on every tab** for its `as_of`, which dates the copied
   documents. It is not `admin_only`, so any reader who can see a tab can see it.
 - **Measure a DOM node inside the event handler, not inside a lazy state updater.** The
@@ -360,13 +388,9 @@ have failed silently in this move.
 
 ## Open threads
 
-- **Drill-downs are not ported.** `detail_rows` holds all 16,689 of them and
-  `detail_columns` holds the column layout for each of the sixteen prefixes, the
-  prefix-to-tab map is seeded, and nothing on the page opens one — every figure that used
-  to be clickable is now just a figure. The Admin tab is not ported either, so grants are
-  still changed by SQL; that is what `mes` and `groupbuy` are waiting on.
-- **Drill-downs and the Admin tab are the controls still missing.** Filters, search, sort
-  and every copy button are ported as of 10 Aug.
+- **The Admin tab is the only control still missing.** Filters, search, sort and every
+  copy button were ported on 10 Aug; the drill-downs on 11 Aug. Grants are therefore
+  still changed by SQL, which is what `mes` and `groupbuy` are waiting on.
 - **PCR code repository window**: still the current month only. The trend tab's
   quarterly extracts are not wired into the repository — worth doing so a code last
   billed in April appears in a price change request.

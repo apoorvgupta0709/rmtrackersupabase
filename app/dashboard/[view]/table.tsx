@@ -27,11 +27,35 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { writeClipboard } from "./clipboard";
 import { COPY_FORMATS, type CopyContext, type CopySpec } from "./copies";
+import DetailPanel, { type Detail, type DetailLayouts } from "./detail";
 
 export type Kind =
   | "text" | "mt" | "nos" | "int" | "inr" | "days" | "pct" | "rate" | "money"
   | "bool" | "list";
+
+/**
+ * How a column says its figures open a breakup.
+ *
+ * Both fields are templates resolved against the row, because the keys are built two
+ * ways: most rows carry theirs precomputed (`{stock_detail_key}`), and the rest are
+ * composed from a prefix and a field the row already holds (`LLSCHEDULE|{bucket}`). It
+ * is data rather than a function for the same reason `copies` is: columns cross the
+ * server-to-client boundary as props, and a function cannot.
+ */
+export type DetailSpec = {
+  key: string;
+  title: string;
+  /**
+   * A field on the row that must be truthy for the figure to open at all.
+   *
+   * Some breakups exist only where there is something to break up: a lot with no aged
+   * tonnage, a bucket nothing was signed off against, an ancillary with no open credit
+   * note. The key is still on the row in those cases, so the guard is on the figure.
+   */
+  when?: string;
+};
 
 export type Column = {
   field: string;
@@ -42,6 +66,8 @@ export type Column = {
   /** A month column, so the average-month totals rule can find them. */
   month?: boolean;
   wide?: boolean;
+  /** This column's figures open the lines behind them. */
+  detail?: DetailSpec;
 };
 
 /** Closes the table on an average month rather than on a window total. */
@@ -98,6 +124,24 @@ export function format(value: unknown, kind: Kind = "text"): string {
 const collate = (a: string, b: string) =>
   a.localeCompare(b, "en", { numeric: true, sensitivity: "base" });
 
+/**
+ * A detail template against one row: `LLSCHEDULE|{bucket}` -> `LLSCHEDULE|25.4-0-2.5-…`.
+ *
+ * **A placeholder that resolves to nothing makes the whole template resolve to nothing**,
+ * and the cell then renders as plain text. Most buckets carry no open order and most
+ * sizes are not signed off; a button that opens an empty panel reads as a defect, so a
+ * column only offers the drill-down on the rows that have one.
+ */
+export function fill(template: string, row: Record<string, unknown>): string | null {
+  let missing = false;
+  const filled = template.replace(/\{([^}]+)\}/g, (_, field: string) => {
+    const value = get(row, field);
+    if (value === null || value === undefined || value === "") missing = true;
+    return String(value ?? "");
+  });
+  return missing ? null : filled;
+}
+
 type Sort = { index: number; dir: 1 | -1 };
 
 /**
@@ -108,23 +152,6 @@ type Sort = { index: number; dir: 1 | -1 };
  */
 const forPaste = (text: string, column: Column) =>
   isNumeric(column) ? text.replace(/,/g, "") : text;
-
-/** Clipboard, with the fallback for a page served over plain http. */
-async function writeClipboard(text: string) {
-  if (navigator.clipboard && window.isSecureContext) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-  const area = document.createElement("textarea");
-  area.value = text;
-  area.setAttribute("readonly", "");
-  area.style.position = "fixed";
-  area.style.opacity = "0";
-  document.body.appendChild(area);
-  area.select();
-  document.execCommand("copy");
-  document.body.removeChild(area);
-}
 
 /* ---- The per-column filter popup ----------------------------------------- */
 
@@ -273,6 +300,8 @@ export default function DataTable({
   capped,
   copies,
   copyContext,
+  buildId,
+  layouts,
 }: {
   title: string;
   note?: string;
@@ -282,11 +311,16 @@ export default function DataTable({
   capped?: number;
   copies?: CopySpec[];
   copyContext?: CopyContext;
+  /** The build the figures came from, so a breakup is fetched from the same one. */
+  buildId: string;
+  /** The per-prefix column layouts, from the build's own `detail_columns`. */
+  layouts: DetailLayouts;
 }) {
   const [search, setSearch] = useState("");
   const [picked, setPicked] = useState<Record<number, string[]>>({});
   const [sort, setSort] = useState<Sort | null>(null);
   const [open, setOpen] = useState<{ index: number; anchor: DOMRect } | null>(null);
+  const [detail, setDetail] = useState<Detail | null>(null);
   /**
    * What the last copy attempt did, and which button did it.
    *
@@ -601,20 +635,40 @@ export default function DataTable({
             <tbody>
               {visible.map((i) => (
                 <tr key={i}>
-                  {columns.map((c, index) => (
-                    <td
-                      key={c.field}
-                      className={isNumeric(c) ? "num" : undefined}
-                      style={
-                        c.wide
-                          ? { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" }
-                          : undefined
-                      }
-                      title={c.wide ? String(get(rows[i], c.field) ?? "") : undefined}
-                    >
-                      {display[i][index]}
-                    </td>
-                  ))}
+                  {columns.map((c, index) => {
+                    // The button carries the same text the cell would have shown, so the
+                    // filters, the text sort and the copy — all of which read the
+                    // rendered string — cannot tell a clickable column from a plain one.
+                    const guarded =
+                      c.detail?.when !== undefined && !get(rows[i], c.detail.when);
+                    const key = c.detail && !guarded ? fill(c.detail.key, rows[i]) : null;
+                    return (
+                      <td
+                        key={c.field}
+                        className={isNumeric(c) ? "num" : undefined}
+                        style={
+                          c.wide
+                            ? { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" }
+                            : undefined
+                        }
+                        title={c.wide ? String(get(rows[i], c.field) ?? "") : undefined}
+                      >
+                        {key && c.detail ? (
+                          <button
+                            type="button"
+                            className="drill"
+                            onClick={() =>
+                              setDetail({ key, title: fill(c.detail!.title, rows[i]) ?? c.label })
+                            }
+                          >
+                            {display[i][index]}
+                          </button>
+                        ) : (
+                          display[i][index]
+                        )}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>
@@ -659,6 +713,15 @@ export default function DataTable({
           chosen={chosen.get(open.index)}
           onChange={(next) => setColumn(open.index, next)}
           onClose={() => setOpen(null)}
+        />
+      )}
+
+      {detail && (
+        <DetailPanel
+          detail={detail}
+          buildId={buildId}
+          layouts={layouts}
+          onClose={() => setDetail(null)}
         />
       )}
     </section>
