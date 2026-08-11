@@ -26,6 +26,64 @@ from sources import (  # noqa: E402
 )
 
 
+SKILL_ROOT = Path(__file__).resolve().parents[1]
+# What the owner has decided on the Missing mappings tab, as of the last run that could
+# reach the database. Committed with the build it produced, which is what lets a clean
+# clone with no credentials reproduce that build byte for byte.
+ASSIGNMENTS_FILE = SKILL_ROOT / "config" / "bucket_assignments.json"
+
+
+def load_bucket_assignments(path: Path = ASSIGNMENTS_FILE, *, refresh: bool = True) -> dict:
+    """The owner's material-code assignments, freshest first.
+
+    The queue on the Missing mappings tab is answered in the browser and the answer is
+    kept in `public.bucket_assignments`, which is not scoped to a build — the whole point
+    is that it survives the refresh that replaces every row on the page. This reads it at
+    the start of a run and writes what it read into the repository, so:
+
+      - the daily run, which has credentials, picks up decisions made since yesterday and
+        commits them alongside the build they produced;
+      - a clean clone with no credentials reads the committed file and reproduces that
+        build exactly, which is the check this project verifies sync claims with.
+
+    A database that cannot be reached is not an error. It means today's run uses the
+    decisions the file already holds, which is the same set the last published build used.
+    """
+    held = {}
+    if path.exists():
+        held = json.loads(path.read_text(encoding="utf-8")).get("assignments", {})
+
+    if not refresh:
+        return held
+
+    try:
+        from supabase_rest import SupabaseRest  # noqa: PLC0415 — optional at build time
+
+        client = SupabaseRest(env_file=SKILL_ROOT.parents[2] / ".env.local")
+        rows = client.select(
+            "bucket_assignments",
+            "select=scope,material_code,assigned_to&order=scope,material_code",
+        )
+    except Exception as error:  # noqa: BLE001 — any failure means "use what is committed"
+        print(f"  assignments: keeping the committed set ({type(error).__name__})")
+        return held
+
+    fresh = {}
+    for row in rows:
+        if not row.get("assigned_to"):
+            continue
+        fresh.setdefault(row["scope"], {})[norm_code(row["material_code"])] = row["assigned_to"]
+
+    if fresh != held:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"assignments": fresh}, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        print(f"  assignments: {sum(len(v) for v in fresh.values())} recorded, file updated")
+    return fresh
+
+
 def norm_code(value):
     if pd.isna(value):
         return None
@@ -717,10 +775,15 @@ def build_sources(input_dir: Path) -> Sources:
 
 
 def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
-         sources: Sources | None = None):
+         sources: Sources | None = None, assignments: dict | None = None):
     input_dir = input_dir.resolve()
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    # Read before anything else is built, because it decides what a material code means
+    # and every frame in this run joins on that. A caller may pass its own set — the
+    # tests do — and then nothing is read and nothing is written.
+    if assignments is None:
+        assignments = load_bucket_assignments()
     # Where the input frames come from. The dumps folder by default; `scripts/sources.py`
     # carries the read spec for every slot so that a second backend serves the same
     # frames without restating twenty-one sheet names and header rows.
@@ -880,6 +943,20 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     zmat["resolved_bucket"] = zmat["direct_bucket"].fillna(zmat["inferred_bucket"])
 
     material_bucket = zmat.groupby("material_key")["resolved_bucket"].agg(first_unique).dropna()
+
+    # The owner's own assignments, applied last so they win.
+    #
+    # This is the single place a material code becomes a bucket — every tracker, every
+    # stock frame and every queue joins through this Series — so overriding it here is
+    # what makes an answer given on the Missing mappings tab actually move tonnage onto a
+    # tracker. It is deliberately an override rather than a fallback: a code the master
+    # resolves *wrongly* is exactly the case somebody is correcting, and a fallback would
+    # silently ignore them.
+    owner_assignments = (assignments or {}).get("bucket", {})
+    for code, bucket in owner_assignments.items():
+        material_bucket.loc[code] = bucket
+    if owner_assignments:
+        print(f"  assignments: {len(owner_assignments)} material codes assigned by the owner")
     material_length = (
         zmat.groupby("material_key")["LENGTH FOR TATA TUBES MATERIAL (WITH 4 D"]
         .agg(first_unique)

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { currentBuildId, supabaseServer } from "@/lib/supabase/server";
+import { currentBuildId, currentUser, supabaseServer } from "@/lib/supabase/server";
 import DataTable from "./table";
 import Picker from "./pick";
 import { VIEWS, type TableSpec, type Unit } from "./views";
@@ -160,6 +160,35 @@ export default async function ViewPage({
     sections: sectionRows,
   };
 
+  // Decisions the owner has already recorded. Not build-scoped and so not fetched with
+  // the build: a material code's bucket has to survive the refresh that replaces every
+  // row on this page, or the queue comes back tomorrow with the same rows in it.
+  const assignable = tables.some((t) => t.columns.some((c) => c.assign));
+  const assignments: Record<string, string> = {};
+  let canAssign = false;
+  if (assignable) {
+    const [{ data: recorded }, me] = await Promise.all([
+      supabase.from("bucket_assignments").select("scope,material_code,assigned_to"),
+      currentUser(),
+    ]);
+    for (const row of recorded ?? []) {
+      if (row.assigned_to) assignments[`${row.scope}|${row.material_code}`] = row.assigned_to;
+    }
+    canAssign = me?.role === "admin";
+  }
+
+  // What each assignable column may be set to. `governed_buckets` is the build's own list
+  // of what `Bucketting` governs, so a bucket added upstream is offered the next day
+  // without a code change; the Megh keys come from the plan the same way.
+  const assignOptions: Record<string, string[]> = {
+    buckets: (scalars.governed_buckets as string[]) ?? [],
+    megh_skus: [
+      ...new Set(
+        (sectionRows.megh_tracker ?? []).map((row) => String(row.sku ?? "")).filter(Boolean),
+      ),
+    ].sort(),
+  };
+
   // The options the selector offers, drawn from the section rather than declared, so a
   // customer that arrives in a build appears without a code change.
   const pickOptions = spec.pick
@@ -266,6 +295,9 @@ export default async function ViewPage({
           copyContext={copyContext}
           buildId={buildId}
           layouts={scalars.detail_columns ?? {}}
+          assignments={assignments}
+          assignOptions={assignOptions}
+          canAssign={canAssign}
         />
       ))}
     </>

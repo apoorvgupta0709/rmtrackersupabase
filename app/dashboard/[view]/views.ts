@@ -174,6 +174,26 @@ function monthColumns(
 const unitTotal = (unit: Unit): Column =>
   unit === "mt" ? mt("total_mt", "Total MT") : nos("total_nos", "Total nos");
 
+/**
+ * A column the owner decides rather than reads.
+ *
+ * It records against the row's material code, so the decision outlives the build it was
+ * made on — which is the whole point: the queue is the same queue every morning until
+ * somebody's answer is kept somewhere the next refresh reads.
+ */
+const assignTo = (scope: "bucket" | "megh_sku", label: string): Column => ({
+  // No field on the row holds this; the decision is looked up by material code. The name
+  // still has to be unique among the columns, because it keys the header's filter.
+  field: `__assign_${scope}`,
+  label,
+  wide: true,
+  assign: {
+    scope,
+    codeField: "material_code",
+    options: scope === "bucket" ? "buckets" : "megh_skus",
+  },
+});
+
 /* ---- The customer tracker ------------------------------------------------ */
 
 /** A CRFH line, told from the bucket the pipeline wrote. */
@@ -277,22 +297,44 @@ export const VIEWS: Record<string, ViewSpec> = {
         section: "customer_summary",
         title: "By customer",
         note:
-          "Schedule, dispatch and balance per customer. The pool columns are the stock a "
-          + "customer's sizes can draw on, not stock allocated to it.",
+          "Schedule, dispatch and balance per customer, in both units. A cut length is "
+          + "ordered in pieces and a long length by the metre, so the piece columns count "
+          + "the cut-length lines only — the tonnage beside them covers both.",
+        // The pieces are summed from the customer's own lines rather than read off the
+        // summary, which carries tonnage alone. Same rows, so the two always agree.
+        flatten: (rows, { sections }) => {
+          const byCustomer = new Map<string, { schedule: number; sales: number; balance: number }>();
+          for (const line of sections.customer_lines ?? []) {
+            // Only the lines actually counted in pieces. Twenty of them are scheduled in
+            // metres, and adding a metre to a piece gives a number that means nothing.
+            if (line.uom !== "NOS") continue;
+            const name = String(line.customer_display ?? "");
+            const held = byCustomer.get(name) ?? { schedule: 0, sales: 0, balance: 0 };
+            held.schedule += Number(line.schedule_qty) || 0;
+            held.sales += Number(line.sales_qty) || 0;
+            held.balance += Number(line.balance_qty) || 0;
+            byCustomer.set(name, held);
+          }
+          return rows.map((row) => {
+            const held = byCustomer.get(String(row.customer_display ?? ""));
+            return {
+              ...row,
+              schedule_qty: held?.schedule ?? 0,
+              sales_qty: held?.sales ?? 0,
+              balance_qty: held?.balance ?? 0,
+            };
+          });
+        },
         columns: [
           txt("customer_display", "Customer", true),
           txt("OEM", "OEM"),
           cnt("schedule_lines", "Lines"),
           mt("schedule_mt", "Schedule MT"),
-          mt("sales_mt", "Sales MT"),
+          cnt("schedule_qty", "Schedule NOS"),
+          mt("sales_mt", "Dispatch MT"),
+          cnt("sales_qty", "Dispatch NOS"),
           mt("balance_mt", "Balance MT"),
-          mt("open_balance_mt", "Open bal MT"),
-          mt("over_dispatch_mt", "Over disp MT"),
-          pool("ctl_stock_pool_mt_do_not_sum", "CTL pool MT"),
-          { field: "ctl_stock_pool_nos_do_not_sum", label: "CTL pool nos", kind: "nos" },
-          pool("ll_stock_pool_mt_do_not_sum", "LL pool MT"),
-          pool("shared_wip_mt_do_not_sum", "WIP pool MT"),
-          pool("shared_transit_mt_do_not_sum", "Transit pool MT"),
+          cnt("balance_qty", "Balance NOS"),
           cnt("unresolved_sales_lines", "Unresolved sales lines"),
         ],
       },
@@ -417,10 +459,11 @@ export const VIEWS: Record<string, ViewSpec> = {
             "{sku} · sales to Megh",
             "sales_mt",
           ),
-          mt("ground_stock_mt", "Ground stock MT"),
-          mt("transit_stock_mt", "Transit MT"),
+          // Ground and in transit are the two halves of one pool. They were their own
+          // columns and are now the breakup behind it: what is asked of this figure is
+          // "how much is there", and the split is the follow-up question.
           drill(
-            mt("total_stock_mt", "Total stock MT"),
+            mt("total_stock_mt", "Stock at VSM MT"),
             "{stock_detail_key}",
             "{sku} · ground plus in transit",
             "total_stock_mt",
@@ -554,13 +597,15 @@ export const VIEWS: Record<string, ViewSpec> = {
             "LLGAP|{bucket}",
             "{bucket} · balance (schedule less sales)",
           ),
+          // One pool, not three columns. WIP and in transit were shown beside it, but
+          // they are already inside it — plant stock, WIP, transit and the TVSM tracker
+          // add up to exactly this figure — so they were the same tonnage counted twice
+          // on screen. The breakup names all four sources.
           drill(
             mt("available_ll_stock_mt", "LL stock MT"),
             "{stock_detail_key}",
             "{bucket} · consolidated LL stock",
           ),
-          mt("shared_wip_mt", "WIP MT"),
-          mt("transit_mt", "Transit MT"),
           drill(
             days("coverage_days", "Cover days"),
             "LLCOVERAGE|{bucket}",
@@ -639,10 +684,13 @@ export const VIEWS: Record<string, ViewSpec> = {
   mappingView: {
     label: "Missing mappings",
     note:
-      "The queue. Every row here is tonnage the pipeline could not govern, so it is "
-      + "tonnage missing from a tracker somewhere. The empty cells are the work, and a "
-      + "queue nobody can find is not a queue — each source gets its own table.",
-    scalars: [],
+      "The queue, and the one tab you write to. Every row here is tonnage the pipeline "
+      + "could not govern, so it is tonnage missing from a tracker somewhere. Assign the "
+      + "bucket a material code belongs to and the decision is kept against the code, not "
+      + "against this build — the next refresh reads it and the tonnage lands where it "
+      + "should. Until that refresh runs the figures on the other tabs are unchanged, and "
+      + "the cell says so rather than implying otherwise.",
+    scalars: ["governed_buckets"],
     tables: () => [
       {
         key: "missing_mappings",
@@ -660,6 +708,7 @@ export const VIEWS: Record<string, ViewSpec> = {
           txt("description", "Description", true),
           txt("reason", "Reason", true),
           mt("affected_mt", "Affected MT"),
+          assignTo("bucket", "Assign bucket"),
         ],
       },
       {
@@ -672,6 +721,9 @@ export const VIEWS: Record<string, ViewSpec> = {
           txt("customer", "Customer", true),
           txt("derived_key", "Derived key", true),
           mt("sales_mt", "Sales MT"),
+          // These are keyed on the plan's own SKU, not on a governed bucket: a Megh- size
+          // has no TVS bucket by design.
+          assignTo("megh_sku", "Assign plan SKU"),
         ],
       },
       {
@@ -686,6 +738,7 @@ export const VIEWS: Record<string, ViewSpec> = {
           txt("length_type", "Length"),
           mt("stock_mt", "Stock MT"),
           cnt("batches", "Batches"),
+          assignTo("bucket", "Assign bucket"),
         ],
       },
       {
@@ -701,6 +754,7 @@ export const VIEWS: Record<string, ViewSpec> = {
           txt("reason", "Reason", true),
           mt("wip_mt", "WIP MT"),
           cnt("batches", "Batches"),
+          assignTo("bucket", "Assign bucket"),
         ],
       },
       {

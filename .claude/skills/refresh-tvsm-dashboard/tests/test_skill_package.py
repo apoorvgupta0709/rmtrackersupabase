@@ -1209,3 +1209,89 @@ def test_the_two_sent_documents_still_read_exactly_as_the_static_pages():
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "32 of 32 documents are byte-identical" in result.stdout, result.stdout
+
+
+def test_an_owner_assignment_overrides_the_master_and_governs_the_code():
+    """The point of the Missing mappings tab is that answering it changes something.
+
+    On the static page the assignment dropdowns wrote to an object in memory: the choice
+    vanished on reload and moved no tonnage on any tab. The decision is now kept against
+    the material code, and the pipeline applies it at the one place a code becomes a
+    bucket — `material_bucket`, which every tracker, stock frame and queue joins through.
+
+    It is an override rather than a fallback on purpose. A code the master resolves to the
+    *wrong* bucket is exactly the case somebody is correcting, and a fallback would
+    silently ignore them.
+    """
+    script = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
+    resolve = script.index('material_bucket = zmat.groupby("material_key")')
+    override = script.index('material_bucket.loc[code] = bucket')
+    assert resolve < override, "the owner's answer is applied after the master's"
+    # Applied once, at the join every view reads. A second place to override is a second
+    # place to forget.
+    assert script.count("material_bucket.loc[code] = bucket") == 1
+
+    refresh = load_refresh_module()
+    # A caller-supplied set is used as given: nothing is read and nothing is written, so
+    # a test and a clean-clone rebuild are both reproducible.
+    import inspect
+
+    assert "assignments" in inspect.signature(refresh.main).parameters
+
+
+def test_the_assignments_the_build_used_are_committed_beside_it():
+    """A clean clone with no credentials has to reproduce the published build.
+
+    The decisions live in `bucket_assignments`, which the browser writes and no clean
+    clone can reach. So the run that reads them writes them into the repository, and a
+    rebuild without credentials reads that file instead. Without this the reproducibility
+    check would start failing the first time anybody assigned anything.
+    """
+    refresh = load_refresh_module()
+    committed = SKILL_ROOT / "config" / "bucket_assignments.json"
+    assert committed.exists(), "the file the pipeline falls back to is committed"
+    held = json.loads(committed.read_text(encoding="utf-8"))
+    assert "assignments" in held and isinstance(held["assignments"], dict)
+
+    # Reading with the refresh turned off must not touch the network or the file.
+    before = committed.read_bytes()
+    assert refresh.load_bucket_assignments(refresh=False) == held["assignments"]
+    assert committed.read_bytes() == before
+
+    # And the table it reads is not scoped to a build — which is the whole point.
+    migrations = "".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((REPO_ROOT / "supabase" / "migrations").glob("*.sql"))
+    )
+    assignments = migrations[migrations.index("create table public.bucket_assignments"):]
+    assignments = assignments[:assignments.index(");")]
+    assert "build_id" not in assignments, "an assignment must outlive the build it was made on"
+    assert "primary key (scope, material_code)" in assignments
+
+
+def test_only_the_admin_may_assign_and_the_database_is_what_says_so():
+    """A control that is merely not drawn is not access control.
+
+    The select is rendered for an admin alone, but anyone can post to the route. So the
+    write goes through the caller's own client and the policy decides, and the refusal is
+    reported rather than swallowed — a cell that silently does nothing is worse than one
+    that says it was refused.
+    """
+    migrations = "".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((REPO_ROOT / "supabase" / "migrations").glob("*.sql"))
+    )
+    for policy in ("admin assigns", "admin reassigns", "admin unassigns"):
+        assert f'create policy "{policy}" on public.bucket_assignments' in migrations
+    assert 'create policy "read assignments" on public.bucket_assignments' in migrations
+
+    route = (REPO_ROOT / "app" / "api" / "assign" / "route.ts").read_text(encoding="utf-8")
+    assert "supabaseServer()" in route, "the caller's client, so the policy decides"
+    assert "supabaseAdmin" not in route, "the service role would bypass the policy it relies on"
+    assert "42501" in route, "a policy refusal is named as one"
+
+    cell = (REPO_ROOT / "app" / "dashboard" / "[view]" / "assign.tsx").read_text(encoding="utf-8")
+    # The screen never shows a decision the database did not take.
+    assert "setValue(previous)" in cell
+    # And never implies the figures have moved, because they have not until a refresh.
+    assert "applies at the next refresh" in cell

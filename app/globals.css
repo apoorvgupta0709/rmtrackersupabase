@@ -378,6 +378,24 @@ select.picker {
   font-size: 13px;
 }
 
+/* ---- Assigning a bucket -------------------------------------------------- */
+/* The one control on the dashboard that writes. It states what happened to the decision
+   under itself, because "saved" and "applied" are different things here and a cell that
+   implied the second would be lying about every figure on the other tabs. */
+
+.assign { display: inline-flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.assign select {
+  width: auto;
+  min-width: 230px;
+  max-width: 340px;
+  padding: 4px 6px;
+  font-size: 12.5px;
+}
+.assign select:disabled { opacity: 0.6; cursor: progress; }
+.assign .hint { font-size: 10px; letter-spacing: 0.06em; }
+.assign-error { font-size: 11px; color: var(--fail); max-width: 320px; white-space: normal; }
+.assigned { font-family: var(--mono); font-size: 12.5px; }
+
 /* ---- Drill-down --------------------------------------------------------- */
 /* A figure that opens the lines behind it. It is marked, not restyled: a pill or a
    colour would break the decimal alignment down a column of tonnage and would make a

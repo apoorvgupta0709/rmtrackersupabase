@@ -27,6 +27,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import AssignCell from "./assign";
 import { writeClipboard } from "./clipboard";
 import { COPY_FORMATS, type CopyContext, type CopySpec } from "./copies";
 import DetailPanel, { type Detail, type DetailLayouts } from "./detail";
@@ -57,6 +58,24 @@ export type DetailSpec = {
   when?: string;
 };
 
+/**
+ * A column the reader writes rather than reads.
+ *
+ * The mapping queues are the working end of this dashboard: a code carrying no governed
+ * bucket reaches no tracker, so somebody has to say which bucket it belongs to. The
+ * decision is saved against the material code and applied by the next refresh — not to
+ * the build on screen, which is a self-contained answer that a single reassignment would
+ * leave internally inconsistent.
+ */
+export type AssignSpec = {
+  /** Which space the choice is in — a governed bucket, or a Megh plan key. */
+  scope: "bucket" | "megh_sku";
+  /** The field holding the material code the decision is recorded against. */
+  codeField: string;
+  /** Which list of choices to offer, by name. The page supplies the lists. */
+  options: string;
+};
+
 export type Column = {
   field: string;
   label: string;
@@ -68,6 +87,8 @@ export type Column = {
   wide?: boolean;
   /** This column's figures open the lines behind them. */
   detail?: DetailSpec;
+  /** This column is a decision the reader makes, not a figure the build carries. */
+  assign?: AssignSpec;
 };
 
 /** Closes the table on an average month rather than on a window total. */
@@ -302,6 +323,9 @@ export default function DataTable({
   copyContext,
   buildId,
   layouts,
+  assignments,
+  assignOptions,
+  canAssign,
 }: {
   title: string;
   note?: string;
@@ -315,6 +339,12 @@ export default function DataTable({
   buildId: string;
   /** The per-prefix column layouts, from the build's own `detail_columns`. */
   layouts: DetailLayouts;
+  /** Decisions already recorded, keyed `scope|material code`. Not build-scoped. */
+  assignments?: Record<string, string>;
+  /** The choices each assignable column offers, by the name the column asks for. */
+  assignOptions?: Record<string, string[]>;
+  /** Whether this reader may record a decision. The database enforces it either way. */
+  canAssign?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const [picked, setPicked] = useState<Record<number, string[]>>({});
@@ -339,8 +369,21 @@ export default function DataTable({
    * in both, so ticking a value always hides exactly the rows showing it.
    */
   const display = useMemo(
-    () => rows.map((row) => columns.map((c) => format(get(row, c.field), c.kind))),
-    [rows, columns],
+    () =>
+      rows.map((row) =>
+        columns.map((c) => {
+          // An assignable column holds a decision, not a figure, and the decision does
+          // not live on the row. It still has to read as text here or the header filter
+          // could not offer "unassigned", the sort could not group by bucket, and the
+          // copied queue would go out with the assignment column blank.
+          if (c.assign) {
+            return assignments?.[`${c.assign.scope}|${get(row, c.assign.codeField)}`]
+              ?? "unassigned";
+          }
+          return format(get(row, c.field), c.kind);
+        }),
+      ),
+    [rows, columns, assignments],
   );
 
   const chosen = useMemo(() => {
@@ -653,7 +696,19 @@ export default function DataTable({
                         }
                         title={c.wide ? String(get(rows[i], c.field) ?? "") : undefined}
                       >
-                        {key && c.detail ? (
+                        {c.assign ? (
+                          <AssignCell
+                            scope={c.assign.scope}
+                            code={String(get(rows[i], c.assign.codeField) ?? "")}
+                            options={assignOptions?.[c.assign.options] ?? []}
+                            initial={
+                              assignments?.[
+                                `${c.assign.scope}|${get(rows[i], c.assign.codeField)}`
+                              ] ?? ""
+                            }
+                            canAssign={canAssign ?? false}
+                          />
+                        ) : key && c.detail ? (
                           <button
                             type="button"
                             className="drill"

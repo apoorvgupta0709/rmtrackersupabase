@@ -370,6 +370,30 @@ have failed silently in this move.
   re-proves byte-identity** with the static page by running its own functions out of
   `index.html` — 32 of 32 documents over all 16 customers — and runs in the pytest suite.
   Run it after any change to what a table hands a copy button.
+- **The Missing mappings tab writes.** It is the one tab that does, and it is why the app
+  exists rather than the static page. Assigning a bucket to a material code saves to
+  `public.bucket_assignments`, which is **deliberately not build-scoped** — a build is
+  replaced wholesale every refresh, so scoping the decision to one would reproduce the
+  defect it fixes, a day later. The pipeline reads it at the start of a run and applies it
+  at the single point a code becomes a bucket, `material_bucket` in `refresh_dashboard.py`,
+  as an **override not a fallback**: a code the master resolves *wrongly* is exactly the
+  case being corrected. Proved end to end on 11 Aug — assigning `2386079` (79.157 MT at
+  788) dropped `stock_unmapped` from 116 rows/514.916 MT to 115/435.759, and moved
+  `stock_analysis`, `str_plan` and `qc` with it. Its holder is a non-TVS party, so the
+  tonnage correctly did **not** enter the TVS cover pool; an assignment governs the code,
+  the business rules still decide where it lands.
+- **An assignment applies at the next refresh, and the cell says so.** Rewriting a
+  published build in place would leave every figure derived from that bucket — coverage,
+  risk, the STR plan — stale with nothing to signal it. The cell reads *saved · applies at
+  the next refresh* rather than implying the other tabs have moved.
+- **The run writes what it used to `config/bucket_assignments.json`**, committed with the
+  build. That is what keeps the clean-clone rebuild reproducible: the browser writes to a
+  database no clean clone can reach, so without the file the reproducibility check would
+  start failing the first time anybody assigned anything. A database that cannot be
+  reached is not an error — the run uses the committed set.
+- **Writing is the admin's, and the policy is what enforces it**, not the hidden control:
+  `/api/assign` goes through the *caller's* client, never the service role, so a forged
+  request is refused by the database and the refusal is shown in the cell.
 - **`metadata` is fetched on every tab** for its `as_of`, which dates the copied
   documents. It is not `admin_only`, so any reader who can see a tab can see it.
 - **Measure a DOM node inside the event handler, not inside a lazy state updater.** The
@@ -414,8 +438,14 @@ have failed silently in this move.
 ## Open threads
 
 - **The Admin tab is the only control still missing.** Filters, search, sort and every
-  copy button were ported on 10 Aug; the drill-downs on 11 Aug. Grants are therefore
-  still changed by SQL, which is what `mes` and `groupbuy` are waiting on.
+  copy button were ported on 10 Aug; the drill-downs, the customer selector and the
+  bucket-assignment write on 11 Aug. Grants are therefore still changed by SQL, which is
+  what `mes` and `groupbuy` are waiting on.
+- **The Megh and WIP assignment queues save but are not yet consumed.** The pipeline
+  applies the `bucket` scope; `megh_sku` is stored and read back into the cell, and
+  nothing acts on it yet — the Megh plan keys off its own mapping, not off
+  `material_bucket`. Wire it where `megh_sku_mapping` is built, or the queue will look
+  answered while the Megh tab stays unchanged.
 - **PCR code repository window**: still the current month only. The trend tab's
   quarterly extracts are not wired into the repository — worth doing so a code last
   billed in April appears in a price change request.
