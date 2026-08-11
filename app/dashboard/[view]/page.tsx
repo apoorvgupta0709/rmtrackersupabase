@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { currentBuildId, supabaseServer } from "@/lib/supabase/server";
 import DataTable from "./table";
+import Picker from "./pick";
 import { VIEWS, type TableSpec, type Unit } from "./views";
 
 export const dynamic = "force-dynamic";
@@ -53,14 +54,15 @@ export default async function ViewPage({
   searchParams,
 }: {
   params: Promise<{ view: string }>;
-  searchParams: Promise<{ unit?: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const { view } = await params;
   const spec = VIEWS[view];
   if (!spec) notFound();
 
-  const { unit: unitParam } = await searchParams;
-  const unit: Unit = unitParam === "nos" ? "nos" : "mt";
+  const query = await searchParams;
+  const unit: Unit = query.unit === "nos" ? "nos" : "mt";
+  const pick = spec.pick ? (query[spec.pick.param] ?? "") : "";
 
   const supabase = await supabaseServer();
   const buildId = await currentBuildId(supabase);
@@ -95,10 +97,13 @@ export default async function ViewPage({
     quarters: (scalars.sku_pricing?.quarters as string[]) ?? [],
     unit,
     scalars,
+    pick: pick || undefined,
   });
 
   // Two tables can be built from one section — the STR plan's buckets and the lines
-  // nested inside them — so each section is fetched once.
+  // nested inside them, the customer's tube lines and its CRFH book — so each section is
+  // fetched once. A section a `flatten` reads across is named by the table that needs it,
+  // so it is already here.
   const sections = [...new Set(tables.map((t) => t.section).filter(Boolean) as string[])];
   const fetched = Object.fromEntries(
     await Promise.all(
@@ -107,23 +112,43 @@ export default async function ViewPage({
       ),
     ),
   );
+  const sectionRows = Object.fromEntries(
+    Object.entries(fetched).map(([section, held]) => [section, held.rows]),
+  );
 
   function rowsFor(table: TableSpec): { rows: Rows; capped: boolean } {
+    let rows: Rows = [];
+    let capped = false;
     if (table.section) {
-      const held = fetched[table.section];
-      const rows = table.flatten ? table.flatten(held.rows) : held.rows;
-      return { rows, capped: held.capped };
-    }
-    if (table.scalar) {
+      rows = fetched[table.section].rows;
+      capped = fetched[table.section].capped;
+    } else if (table.scalar) {
       const [key, field] = table.scalar;
       const value = scalars[key]?.[field];
-      return { rows: Array.isArray(value) ? (value as Rows) : [], capped: false };
+      rows = Array.isArray(value) ? (value as Rows) : [];
     }
-    return { rows: [], capped: false };
+    // Narrow before deriving, so a `flatten` that joins across sections sees only the
+    // rows the reader asked for — the history's "on schedule" column is this customer's
+    // schedule, not everybody's.
+    if (table.pickField) {
+      rows = pick ? rows.filter((row) => String(row[table.pickField!] ?? "") === pick) : [];
+    }
+    if (table.flatten) rows = table.flatten(rows, { sections: sectionRows, pick: pick || undefined });
+    return { rows, capped };
   }
 
+  // A table narrowed by the selector is not shown until a selection is made: the old page
+  // asked for a customer first, and 396 lines across sixteen of them answers nobody's
+  // question. Everything without a `pickField` — the list you choose from — stays up.
+  const shown = tables
+    .map((table) => ({ table, ...rowsFor(table) }))
+    .filter(({ table, rows }) => {
+      if (table.pickField && !pick) return false;
+      return !(table.hideWhenEmpty && rows.length === 0);
+    });
+
   const facts = spec.facts ? spec.facts(scalars) : [];
-  const anyRows = tables.some((t) => rowsFor(t).rows.length > 0);
+  const anyRows = shown.some(({ rows }) => rows.length > 0);
 
   // What the bespoke copy formats need beyond the rows of the table they sit under: the
   // build's date, this tab's scalars, and the sections already fetched for it — the PCR
@@ -132,10 +157,20 @@ export default async function ViewPage({
   const copyContext = {
     asOf: String(scalars.metadata?.as_of ?? ""),
     scalars,
-    sections: Object.fromEntries(
-      Object.entries(fetched).map(([section, held]) => [section, held.rows]),
-    ),
+    sections: sectionRows,
   };
+
+  // The options the selector offers, drawn from the section rather than declared, so a
+  // customer that arrives in a build appears without a code change.
+  const pickOptions = spec.pick
+    ? [
+        ...new Set(
+          (sectionRows[spec.pick.from.section] ?? [])
+            .map((row) => String(row[spec.pick!.from.field] ?? ""))
+            .filter(Boolean),
+        ),
+      ].sort((a, b) => a.localeCompare(b, "en", { numeric: true, sensitivity: "base" }))
+    : [];
 
   return (
     <>
@@ -173,6 +208,16 @@ export default async function ViewPage({
         </div>
       )}
 
+      {spec.pick && (
+        <Picker
+          param={spec.pick.param}
+          label={spec.pick.label}
+          options={pickOptions}
+          value={pick}
+          view={view}
+        />
+      )}
+
       {facts.length > 0 && (
         <div
           className="rise"
@@ -195,31 +240,34 @@ export default async function ViewPage({
         </div>
       )}
 
-      {!anyRows && (
+      {!anyRows && !(spec.pick && !pick) && (
         <div className="notice" style={{ marginTop: 20, maxWidth: 720 }}>
           Nothing on this tab. Either no build is published yet, or this tab is not granted
           to your account — an ungranted tab returns no rows rather than hiding them.
         </div>
       )}
 
-      {tables.map((table) => {
-        const { rows, capped } = rowsFor(table);
-        return (
-          <DataTable
-            key={table.key}
-            title={table.title}
-            note={table.note}
-            columns={table.columns}
-            rows={rows}
-            averageOver={table.averageOver}
-            capped={capped ? CAP : undefined}
-            copies={table.copies}
-            copyContext={copyContext}
-            buildId={buildId}
-            layouts={scalars.detail_columns ?? {}}
-          />
-        );
-      })}
+      {spec.pick && !pick && (
+        <div className="notice" style={{ marginTop: 20, maxWidth: 720 }}>
+          {spec.pick.prompt}
+        </div>
+      )}
+
+      {shown.map(({ table, rows, capped }) => (
+        <DataTable
+          key={table.key}
+          title={table.title}
+          note={table.note}
+          columns={table.columns}
+          rows={rows}
+          averageOver={table.averageOver}
+          capped={capped ? CAP : undefined}
+          copies={table.copies}
+          copyContext={copyContext}
+          buildId={buildId}
+          layouts={scalars.detail_columns ?? {}}
+        />
+      ))}
     </>
   );
 }

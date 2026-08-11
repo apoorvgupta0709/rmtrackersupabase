@@ -81,10 +81,10 @@ const tsv = (lines: (string | number)[][]) =>
  * The one customer the visible rows are about.
  *
  * The dispatch plan and the clearance list are addressed to a customer, so they need one
- * chosen. Rather than a second selector that can disagree with the column filters, the
- * choice *is* the column filter: narrow Customer to one and the button knows who it is
- * writing to. Anything else is refused rather than guessed — a clearance request sent to
- * the wrong customer quotes them someone else's stock.
+ * chosen. Rather than a selector of their own that could disagree with the tab's, the
+ * choice is the tab's: the rows they are handed have already been narrowed to it.
+ * Anything else is refused rather than guessed — a clearance request sent to the wrong
+ * customer quotes them someone else's stock.
  */
 function soleCustomer(rows: Row[]): string | null {
   const names = new Set(rows.map((r) => String(r.customer_display ?? "")).filter(Boolean));
@@ -92,7 +92,25 @@ function soleCustomer(rows: Row[]): string | null {
 }
 
 const PICK_ONE =
-  "Filter the Customer column to a single customer first — this list is addressed to one.";
+  "Select a customer at the top of the tab first — this list is addressed to one.";
+
+/**
+ * Every line the customer has, not the lines left on screen.
+ *
+ * These two documents are the exception to "what is copied is what is left". They are
+ * sent to someone: a dispatch plan that quietly omits a SKU because a search box was
+ * still filled in, or because the customer's CRFH book is shown as its own table, is a
+ * wrong document in the dispatch team's hands and nothing about it looks wrong. So the
+ * customer is read off the rows and the lines are read off the section — which is what
+ * the static page does, and keeps the two byte-identical.
+ */
+function everyLineFor(rows: Row[], ctx: CopyContext): { customer: string; lines: Row[] } | null {
+  const customer = soleCustomer(rows);
+  if (!customer) return null;
+  const held = ctx.sections.customer_lines ?? [];
+  const lines = held.filter((row) => String(row.customer_display ?? "") === customer);
+  return { customer, lines: lines.length ? lines : rows };
+}
 
 /* ---- Clearance list ------------------------------------------------------- */
 
@@ -114,14 +132,15 @@ function skuLabel(row: Row): string {
  * phone. WhatsApp renders `*bold*` and `_italic_`.
  */
 function clearance(rows: Row[], ctx: CopyContext): CopyResult {
-  const customer = soleCustomer(rows);
-  if (!customer) return { error: PICK_ONE };
+  const held = everyLineFor(rows, ctx);
+  if (!held) return { error: PICK_ONE };
+  const { customer } = held;
 
   // CTL stock is a shared pool keyed by CTL bucket, and one customer can carry the same
   // bucket on more than one row, so deduplicate before listing — otherwise the same
   // pieces are offered twice and the total double counts them.
   const seen = new Set<string>();
-  const listed = rows
+  const listed = held.lines
     .filter((r) => n(r.ctl_stock_pool_nos) > CLEARANCE_MIN_NOS)
     .filter((r) => {
       const key = String(r.ctl_bucket ?? "");
@@ -175,10 +194,11 @@ const DISPATCH_COLUMNS =
  * another customer's order would be worse than quoting none.
  */
 function dispatch(rows: Row[], ctx: CopyContext): CopyResult {
-  const customer = soleCustomer(rows);
-  if (!customer) return { error: PICK_ONE };
+  const held = everyLineFor(rows, ctx);
+  if (!held) return { error: PICK_ONE };
+  const { customer } = held;
 
-  const open = rows
+  const open = held.lines
     .filter((r) => n(r.balance_qty) > 0)
     .sort(
       (a, b) =>

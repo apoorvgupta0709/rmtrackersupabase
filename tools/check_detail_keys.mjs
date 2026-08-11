@@ -106,28 +106,44 @@ let buttonsChecked = 0;
 let hollow = 0;
 
 for (const [viewKey, spec] of Object.entries(VIEWS)) {
+  // A tab with a selector renders one selection at a time, so every selection is walked:
+  // a template that resolves for the first customer and not the fourteenth is exactly the
+  // kind of thing that would otherwise be found by the fourteenth customer.
+  const picks = spec.pick
+    ? [...new Set((sections[spec.pick.from.section] ?? [])
+        .map((row) => String(row[spec.pick.from.field] ?? "")).filter(Boolean))]
+    : [undefined];
+
   for (const unit of spec.unitToggle ? ["mt", "nos"] : ["mt"]) {
+   for (const pick of picks) {
     const ctx = {
       months: scalars.sales_trend?.months ?? [],
       quarters: scalars.sku_pricing?.quarters ?? [],
       unit,
       scalars,
+      pick,
     };
     for (const table of spec.tables(ctx)) {
       let rows = [];
       if (table.section) {
         rows = sections[table.section] ?? [];
-        if (table.flatten) rows = table.flatten(rows);
       } else if (table.scalar) {
         const [key, field] = table.scalar;
         const value = scalars[key]?.[field];
         rows = Array.isArray(value) ? value : [];
       }
+      // Held before narrowing: whether a field exists at all is a question about the
+      // section, not about the rows one selection left standing.
+      const unfiltered = rows;
+      if (table.pickField) {
+        rows = pick ? rows.filter((row) => String(row[table.pickField] ?? "") === pick) : [];
+      }
+      if (table.flatten) rows = table.flatten(rows, { sections, pick });
 
       for (const column of table.columns) {
         if (!column.detail) continue;
         columnsChecked += 1;
-        const where = `${viewKey}/${table.key}/${column.field} (${unit})`;
+        const where = `${viewKey}/${table.key}/${column.field} (${unit}${pick ? `, ${pick}` : ""})`;
         let opened = 0;
         const missing = [];
 
@@ -149,16 +165,22 @@ for (const [viewKey, spec] of Object.entries(VIEWS)) {
           problems.push(`${where}: ${missing.length}+ of ${opened} buttons open a key `
             + `that is not in stock_details, e.g. ${missing.join(", ")}`);
         }
-        // A column nothing can open is a column that will never be noticed as broken —
-        // unless it is guarded, in which case a build where every figure in it is zero
-        // is a quiet month rather than a rename. Said either way, failed only when the
-        // template itself is what never resolved.
+        // A column nothing can open is a column that will never be noticed as broken.
+        // But "nothing opens" has two innocent causes — a guard no row passes, and a
+        // customer that has genuinely never bought any of its SKUs — so the failing case
+        // is narrower than it looks: a field the section does not carry **at all**. A
+        // field that is present and null everywhere is an empty answer; a field no row
+        // has ever heard of is a rename.
         if (rows.length && opened === 0) {
           const message = `${where}: no row in ${rows.length} opens anything`;
-          if (column.detail.when === undefined) {
-            problems.push(`${message} — the field behind the key is probably renamed`);
+          const unknown = [...column.detail.key.matchAll(/\{([^}]+)\}/g)]
+            .map((m) => m[1].split(".")[0])
+            .filter((field) => !unfiltered.some((row) => field in row));
+          if (unknown.length) {
+            problems.push(`${message} — no row in the section carries ${unknown.join(", ")}, `
+              + "so the field behind the key is renamed");
           } else {
-            notes.push(`${message}; every row's ${column.detail.when} is zero on this build`);
+            notes.push(`${message}; nothing on this selection has one`);
           }
         }
         // The title has to resolve too, or the panel opens headed by its column label.
@@ -171,6 +193,7 @@ for (const [viewKey, spec] of Object.entries(VIEWS)) {
         }
       }
     }
+   }
   }
 }
 

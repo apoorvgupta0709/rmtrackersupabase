@@ -1084,17 +1084,128 @@ def test_every_drill_down_on_the_web_app_reaches_a_breakup():
     """
     import shutil
 
+    # The checker is a Node script because it evaluates the real view declarations rather
+    # than parsing them. Where there is no Node there is no web app to check either.
     node = shutil.which("node")
-    if node is None:
-        import pytest
-
-        pytest.skip("node is not on PATH")
+    if not node:
+        return
 
     result = subprocess.run(
-        [node, str(REPO_ROOT / "tools" / "check_detail_keys.mjs"), str(REPO_ROOT / "data.json")],
+        [str(node), str(REPO_ROOT / "tools" / "check_detail_keys.mjs"),
+         str(REPO_ROOT / "data.json")],
         capture_output=True, text=True, cwd=REPO_ROOT,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     # The headline cards are the only breakups nothing opens, and deliberately: the fact
     # strip that replaced them states figures rather than offering them.
     assert "Not opened from any table: BALANCE" in result.stdout
+
+
+def test_the_web_apps_customer_tracker_carries_the_same_columns_as_the_page():
+    """The two dashboards answer the same question and must not answer it differently.
+
+    The web app's tracker had drifted: it had dropped the three piece columns, was showing
+    the CTL pool in tonnes where the page shows it in pieces, and had added a WIP column
+    the page does not carry — so a customer's line read differently depending on which URL
+    you opened. These are the page's own thirteen headings, in its order.
+    """
+    template = (SKILL_ROOT / "assets" / "dashboard_template.html").read_text(encoding="utf-8")
+    head = re.search(r'<table id="customerTable">\s*<thead><tr>(.*?)</tr>', template, re.S)
+    assert head, "the static page's customer table has a header row"
+    expected = re.findall(r"<th[^>]*>([^<]+)</th>", head.group(1))
+    assert expected == [
+        "OEM", "Customer", "SKU / CTL bucket", "Plant",
+        "Schedule Qty", "Dispatch Qty", "Balance Qty",
+        "Schedule MT", "Dispatch MT", "Balance MT",
+        "CTL stock NOS", "LL stock MT", "Avg month sales",
+    ], expected
+
+    views = (REPO_ROOT / "app" / "dashboard" / "[view]" / "views.ts").read_text(encoding="utf-8")
+    block = re.search(r"const customerLineColumns = \(\): Column\[\] => \[(.*?)\n\];", views, re.S)
+    assert block, "the shared line columns are declared in one place"
+    # A column is written either as a shorthand call — `mt("field", "Label")` — or as the
+    # object the shorthands build. Both forms are read, in source order, so the test
+    # compares the order of the headings and not just the set of them.
+    labels = [
+        found.group(1) or found.group(2)
+        for found in re.finditer(r'\(\s*"[^"]*",\s*"([^"]+)"|label: "([^"]+)"', block.group(1))
+    ]
+    assert labels == expected, labels
+    # The columns the page does not carry stay off it.
+    for absent in ("WIP MT", "Open bal MT", "Over disp MT", "Bucket"):
+        assert f'"{absent}"' not in block.group(1), absent
+
+
+def test_the_customer_tab_asks_for_a_customer_before_it_answers():
+    """396 lines across sixteen customers answers nobody's question.
+
+    The static page renders nothing until a customer is chosen, and its three tables all
+    read the same choice. The web app holds that choice in the URL so the server does the
+    narrowing and the tables cannot disagree with each other — the same rule the tonnes /
+    pieces switch follows.
+    """
+    views = (REPO_ROOT / "app" / "dashboard" / "[view]" / "views.ts").read_text(encoding="utf-8")
+    customer = views[views.index("customerView: {"):views.index("meghView: {")]
+    assert 'param: "customer"' in customer
+    # All three of the customer's tables narrow on the one selection.
+    assert customer.count("pickField:") == 3
+    assert 'pickField: "customer_display"' in customer   # lines, and the CRFH book
+    assert 'pickField: "customer"' in customer           # the sales history
+
+    page = (REPO_ROOT / "app" / "dashboard" / "[view]" / "page.tsx").read_text(encoding="utf-8")
+    # Narrowed before derived, so a join inside `flatten` sees one customer's rows.
+    assert page.index("table.pickField") < page.index("table.flatten")
+    # A table without a pickField — the summary you choose from — is always shown.
+    assert "if (table.pickField && !pick) return false;" in page
+
+
+def test_the_crfh_book_is_split_out_for_the_two_customers_that_ask_for_it():
+    """Marathwada and Sri Balaji Gear read their CRFH range as its own book.
+
+    Mixed into the tube lines it distorts every total on the table above it, which is why
+    the static page lifts it out. The split is on the bucket, so it needs no customer list
+    to maintain: only those two have CRFH rows, and the table hides itself for everyone
+    else rather than showing an empty sheet with an explanation.
+    """
+    views = (REPO_ROOT / "app" / "dashboard" / "[view]" / "views.ts").read_text(encoding="utf-8")
+    assert 'String(row.bucket ?? "").toUpperCase().includes("CRFH")' in views
+    assert "flatten: (rows) => rows.filter((row) => !isCrfh(row))" in views, "tube lines exclude it"
+    assert "flatten: (rows) => rows.filter(isCrfh)" in views, "the book is only CRFH"
+    assert "hideWhenEmpty: true" in views
+
+
+def test_the_customer_tab_may_read_the_history_it_shows():
+    """An ungranted section returns no rows, and a page cannot tell that from no sales.
+
+    The history is the same section the trend tab reads whole; the customer tab reads it
+    one customer at a time. Without this row a reader granted only the customer tab would
+    see an empty history and no reason for it.
+    """
+    migrations = REPO_ROOT / "supabase" / "migrations"
+    granted = "".join(
+        path.read_text(encoding="utf-8") for path in sorted(migrations.glob("*.sql"))
+    )
+    assert "('trend_customer_sku_history', 'customerView')" in granted
+
+
+def test_the_two_sent_documents_still_read_exactly_as_the_static_pages():
+    """These are pasted into WhatsApp and into the dispatch team's sheet.
+
+    A difference of a decimal place or a thousand separator is a wrong figure in someone
+    else's document and nothing about it looks wrong, so the equivalence is re-proved
+    rather than remembered. It matters most right after a change to what the table hands
+    the buttons: splitting the CRFH book into its own table would otherwise have dropped
+    those lines out of Marathwada's and Sri Balaji Gear's dispatch plans silently.
+    """
+    import shutil
+
+    node = shutil.which("node")
+    if not node:
+        return
+
+    result = subprocess.run(
+        [str(node), str(REPO_ROOT / "tools" / "compare_copy_formats.mjs")],
+        capture_output=True, text=True, cwd=REPO_ROOT,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "32 of 32 documents are byte-identical" in result.stdout, result.stdout

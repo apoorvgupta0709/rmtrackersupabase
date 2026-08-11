@@ -345,6 +345,31 @@ have failed silently in this move.
   drill-down that silently stopped pointing anywhere. It is wired into the pytest suite.
   `BALANCE`, `SCHEDULE` and `TRENDMONTH` are expected to be unreached: those were the
   headline-card breakups, and the fact strip that replaced the cards does not open them.
+- **The customer tracker asks for a customer before it answers.** 396 lines across
+  sixteen customers answers nobody's question, which is why the static page never showed
+  any until one was picked. The selection lives in the **URL** (`?customer=`), like the
+  tonnes/pieces switch, so the server narrows every table and none of them can disagree:
+  `ViewSpec.pick` declares it, `TableSpec.pickField` names the field each table narrows
+  on, and a table without one — the summary you choose from — is always shown.
+  Narrowing happens **before** `flatten`, so a flatten that joins across sections sees one
+  customer's rows; that is how the history's *On schedule* column is this customer's
+  schedule and not everybody's. The tab carries three tables: schedule lines, the **CRFH
+  book** split out for Marathwada and Sri Balaji Gear (`hideWhenEmpty`, matched on the
+  bucket so no customer list needs maintaining), and the customer's **sales history**,
+  which needed `('trend_customer_sku_history','customerView')` in `section_views`.
+  Its columns are the static page's own thirteen, in its order — a test compares them
+  against `dashboard_template.html` because the two had already drifted: the piece
+  columns were missing, the CTL pool was in tonnes where the page shows pieces, and a WIP
+  column had appeared that the page does not carry.
+- **The dispatch plan and the clearance list read the customer's whole line set, not the
+  visible rows** — the one exception to "what is copied is what is left". They are sent
+  to someone: a plan that quietly omits a SKU because a search box was still filled in,
+  or because the CRFH book is now its own table, is a wrong document in the dispatch
+  team's hands and nothing about it looks wrong. The customer is read off the rows they
+  are handed; the lines off `ctx.sections.customer_lines`. **`tools/compare_copy_formats.mjs`
+  re-proves byte-identity** with the static page by running its own functions out of
+  `index.html` — 32 of 32 documents over all 16 customers — and runs in the pytest suite.
+  Run it after any change to what a table hands a copy button.
 - **`metadata` is fetched on every tab** for its `as_of`, which dates the copied
   documents. It is not `admin_only`, so any reader who can see a tab can see it.
 - **Measure a DOM node inside the event handler, not inside a lazy state updater.** The

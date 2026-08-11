@@ -29,8 +29,21 @@ export type TableSpec = {
   section?: string;
   /** Rows that travel in a scalar beside the section rows: `[scalar key, field]`. */
   scalar?: [string, string];
-  /** Derive rows from the fetched ones — used where one section carries a nested list. */
-  flatten?: (rows: Record<string, unknown>[]) => Record<string, unknown>[];
+  /**
+   * Derive rows from the fetched ones — used where one section carries a nested list,
+   * where a table takes only part of a section, and where a column has to be joined in
+   * from another section. It runs on the server, after the pick filter, so it sees only
+   * the rows the reader asked for.
+   */
+  flatten?: (rows: Row[], from: { sections: Record<string, Row[]>; pick?: string }) => Row[];
+  /**
+   * The field the view's selector narrows this table on. A table naming one shows
+   * nothing until a selection is made; a table without one is always shown, which is
+   * how the list you choose from stays on screen.
+   */
+  pickField?: string;
+  /** Leave the table off the page entirely when it has no rows, rather than saying so. */
+  hideWhenEmpty?: boolean;
   columns: Column[];
   averageOver?: AverageOver;
   /**
@@ -40,6 +53,8 @@ export type TableSpec = {
   copies?: CopySpec[];
 };
 
+export type Row = Record<string, unknown>;
+
 export type Fact = { label: string; value: string };
 
 export type Ctx = {
@@ -47,6 +62,28 @@ export type Ctx = {
   quarters: string[];
   unit: Unit;
   scalars: Record<string, any>;
+  /** What the view's selector is set to, so a table can say so in its own note. */
+  pick?: string;
+};
+
+/**
+ * One selector for the whole tab, held in the URL.
+ *
+ * The customer tracker asks a question about one customer — its lines, its CRFH book,
+ * its history — and three tables each with a dropdown of their own is three controls
+ * that can disagree. This is one control: it sets a search parameter, the server filters
+ * every table that names a field, and the header filter on that column reads the same
+ * value back.
+ */
+export type PickSpec = {
+  /** The search parameter it lives in. */
+  param: string;
+  /** What to call it. */
+  label: string;
+  /** The section and field the options are drawn from. */
+  from: { section: string; field: string };
+  /** Shown in place of the tables until a choice is made. */
+  prompt: string;
 };
 
 export type ViewSpec = {
@@ -56,6 +93,7 @@ export type ViewSpec = {
   scalars: string[];
   /** Offer the tonnes/pieces switch. One control drives every table on the tab. */
   unitToggle?: boolean;
+  pick?: PickSpec;
   facts?: (s: Record<string, any>) => Fact[];
   tables: (ctx: Ctx) => TableSpec[];
 };
@@ -136,6 +174,76 @@ function monthColumns(
 const unitTotal = (unit: Unit): Column =>
   unit === "mt" ? mt("total_mt", "Total MT") : nos("total_nos", "Total nos");
 
+/* ---- The customer tracker ------------------------------------------------ */
+
+/** A CRFH line, told from the bucket the pipeline wrote. */
+const isCrfh = (row: Row) => String(row.bucket ?? "").toUpperCase().includes("CRFH");
+
+/**
+ * The customer tracker's line columns, shared by the tube table and the CRFH book.
+ *
+ * These are the thirteen the static page carries, in its order. Two things about them
+ * are deliberate and easy to get wrong: **a cut length is scheduled in pieces**, so the
+ * quantity columns sit beside the tonnage rather than being dropped for it; and the last
+ * three carry **no total** — two are stock pools shared between the customers drawing on
+ * them, and the third is a per-SKU average month.
+ */
+const customerLineColumns = (): Column[] => [
+  txt("OEM", "OEM"),
+  txt("customer_display", "Customer", true),
+  txt("ctl_bucket", "SKU / CTL bucket", true),
+  txt("Plant", "Plant"),
+  cnt("schedule_qty", "Schedule Qty"),
+  cnt("sales_qty", "Dispatch Qty"),
+  cnt("balance_qty", "Balance Qty"),
+  mt("schedule_mt", "Schedule MT"),
+  mt("sales_mt", "Dispatch MT"),
+  mt("balance_mt", "Balance MT"),
+  drill(
+    { field: "ctl_stock_pool_nos", label: "CTL stock NOS", kind: "nos" },
+    "{ctl_stock_detail_key}",
+    "{customer_display} · {ctl_bucket} · CTL stock",
+  ),
+  drill(
+    pool("ll_stock_pool_mt", "LL stock MT"),
+    "{ll_stock_detail_key}",
+    "{customer_display} · {bucket} · LL stock",
+  ),
+  drill(
+    { field: "history_avg_month_mt", label: "Avg month sales", kind: "mt" },
+    "{history_detail_key}",
+    "{customer_display} · {ctl_bucket} · sales month by month",
+  ),
+];
+
+/**
+ * What the history table has to say before its rows mean anything.
+ *
+ * The window it covers, and — where it applies — that the history belongs to a customer
+ * *code* shared with another name. Three codes are shared on this build, and a reader who
+ * does not know that reads someone else's tonnage as this customer's.
+ */
+function historyNote(ctx: Ctx): string {
+  const trend = ctx.scalars.sales_trend ?? {};
+  const months: string[] = trend.months ?? [];
+  const window =
+    months.length
+      ? `${monthLabel(months[0])} to ${monthLabel(months[months.length - 1])}`
+      : "the history window";
+  const meta = (trend.customer_history_notes ?? {})[ctx.pick ?? ""] ?? {};
+  const shared: string[] = meta.shared_codes_with ?? [];
+  return (
+    `Every SKU bought over ${window}, joined on the customer's own SAP codes rather than `
+    + "on its name. Filter On schedule to no for what it has quietly stopped ordering. "
+    + "The table closes on an average month, over the months that moved."
+    + (shared.length
+      ? ` This customer shares a code with ${shared.join(", ")}, so the history is the `
+        + "code's and not this name's alone."
+      : "")
+    + (meta.reason ? ` ${meta.reason}.` : "")
+  );
+}
+
 /* ---- Fact-strip helpers -------------------------------------------------- */
 
 const f3 = (v: unknown) =>
@@ -150,11 +258,20 @@ export const VIEWS: Record<string, ViewSpec> = {
   customerView: {
     label: "Customer tracker",
     note:
-      "One row per scheduled size per customer, over a customer-level summary. The stock "
-      + "pools are shared between the customers drawing on them, so they carry no total: "
-      + "adding them down the column would count the same tube several times.",
-    scalars: [],
-    tables: () => [
+      "Pick a customer to see every SKU it has schedule or dispatch against, its CRFH "
+      + "book where it keeps one, and everything it has bought over the trend window. The "
+      + "stock pools are shared between the customers drawing on them, so they carry no "
+      + "total: adding them down the column would count the same tube several times.",
+    scalars: ["sales_trend"],
+    pick: {
+      param: "customer",
+      label: "Customer",
+      from: { section: "customer_lines", field: "customer_display" },
+      prompt:
+        "Select a customer above to see its schedule lines, its CRFH book and its sales "
+        + "history. The summary below lists every customer on this build.",
+    },
+    tables: (ctx) => [
       {
         key: "customer_summary",
         section: "customer_summary",
@@ -183,41 +300,71 @@ export const VIEWS: Record<string, ViewSpec> = {
         key: "customer_lines",
         section: "customer_lines",
         title: "Schedule lines",
+        pickField: "customer_display",
+        // The two customers below keep their CRFH range as its own book, so it is lifted
+        // out of this table rather than mixed into the tube lines.
+        flatten: (rows) => rows.filter((row) => !isCrfh(row)),
         note:
-          "One row per scheduled size per customer. Pool columns must not be summed across "
-          + "customers — stock is shared, so a total would count it more than once. The "
-          + "history cell is an average month, not a window total.",
-        columns: [
-          txt("customer_display", "Customer", true),
-          txt("OEM", "OEM"),
-          txt("bucket", "Bucket", true),
-          txt("ctl_bucket", "CTL bucket", true),
-          txt("Plant", "Plant"),
-          mt("schedule_mt", "Schedule MT"),
-          mt("sales_mt", "Sales MT"),
-          mt("balance_mt", "Balance MT"),
-          mt("open_balance_mt", "Open bal MT"),
-          mt("over_dispatch_mt", "Over disp MT"),
-          drill(
-            pool("ctl_stock_pool_mt", "CTL stock MT"),
-            "{ctl_stock_detail_key}",
-            "{customer_display} · {ctl_bucket} · CTL stock",
-          ),
-          drill(
-            pool("ll_stock_pool_mt", "LL stock MT"),
-            "{ll_stock_detail_key}",
-            "{customer_display} · {bucket} · LL stock",
-          ),
-          pool("shared_wip_mt", "WIP MT"),
-          drill(
-            { field: "history_avg_month_mt", label: "Avg month MT", kind: "mt" },
-            "{history_detail_key}",
-            "{customer_display} · {ctl_bucket} · sales month by month",
-          ),
-        ],
-        // Both are addressed to one customer, so both read the customer off the column
-        // filter rather than off a second selector that could disagree with it.
+          "Every SKU this customer carries schedule or dispatch against. Pool columns must "
+          + "not be summed across customers — stock is shared, so a total would count it "
+          + "more than once. The history cell is an average month, not a window total.",
+        columns: customerLineColumns(),
+        // Both are addressed to one customer, and read it off the selector above through
+        // the rows they are handed, rather than off a second control of their own.
         copies: [{ kind: "dispatch" }, { kind: "clearance" }],
+      },
+      {
+        key: "customer_lines_crfh",
+        section: "customer_lines",
+        title: "CRFH line items",
+        pickField: "customer_display",
+        flatten: (rows) => rows.filter(isCrfh),
+        hideWhenEmpty: true,
+        note:
+          "Marathwada and Sri Balaji Gear buy a large CRFH range beside their tube SKUs "
+          + "and read it as its own book, so it is held out of the table above.",
+        columns: customerLineColumns(),
+      },
+      {
+        key: "customer_sku_history",
+        section: "trend_customer_sku_history",
+        title: "Sales history — every SKU this customer has bought",
+        pickField: "customer",
+        // On schedule is a join, not a field: the SKU is on this month's tracker if the
+        // customer's own lines carry its CTL bucket. Filter that column to `no` for what
+        // has quietly stopped being ordered, which is the question this table exists for.
+        flatten: (rows, { sections, pick }) => {
+          const scheduled = new Set(
+            (sections.customer_lines ?? [])
+              .filter((line) => line.customer_display === pick)
+              .map((line) => line.ctl_bucket),
+          );
+          return rows.map((row) => ({ ...row, on_schedule: scheduled.has(row.sku) }));
+        },
+        note: historyNote(ctx),
+        columns: [
+          txt("sku", "SKU", true),
+          txt("bucket", "Bucket", true),
+          { field: "length_m", label: "Length m", kind: "rate" },
+          txt("length_type", "Type"),
+          bool("on_schedule", "On schedule"),
+          ...monthColumns(ctx.months, ctx.unit),
+          drill(
+            unitTotal(ctx.unit),
+            "{detail_key}",
+            "{customer} · {sku} · sales month by month",
+          ),
+          ctx.unit === "mt" ? nos("total_nos", "Total nos") : mt("total_mt", "Total MT"),
+          cntNoTotal("months_active", "Months"),
+          ctx.unit === "mt"
+            ? { field: "avg_active_month_mt", label: "Avg active month MT", kind: "mt" }
+            : { field: "avg_active_month_nos", label: "Avg active month nos", kind: "nos" },
+        ],
+        averageOver: {
+          monthsField: "months_active",
+          avgField: ctx.unit === "mt" ? "avg_active_month_mt" : "avg_active_month_nos",
+          totalField: ctx.unit === "mt" ? "total_mt" : "total_nos",
+        },
       },
     ],
   },
