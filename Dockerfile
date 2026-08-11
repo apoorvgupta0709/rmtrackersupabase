@@ -42,6 +42,10 @@ ENV NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
+# Opt this build — and only this build — into next.config.ts's standalone output. Vercel
+# builds the same commit and must not get it: standalone stops Next writing the trace
+# file Vercel's build hook opens by name, and the deploy fails on the last step.
+ENV BUILD_STANDALONE=1
 # Also needs network: app/layout.tsx pulls Archivo and IBM Plex Mono through
 # next/font/google, which fetches and self-hosts them during the build.
 RUN npm run build
