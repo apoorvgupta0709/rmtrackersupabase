@@ -2,18 +2,35 @@
 
 Working memory for the TVSM operations dashboard. Read at session start; update and
 push whenever a session produces a durable fact. Keep entries true — prune what
-expires rather than appending forever. Nothing secret goes in this file: the repo is
-served publicly through Vercel, so this file is fetchable by URL.
+expires rather than appending forever.
 
-_Last updated: 2026-08-10 (as-of 7 August build, schedule from v16; table filters ported)._
+**Nothing secret goes in this file.** It is no longer literally fetchable — the old
+static site served the repository, the Next.js app serves only what it builds, and
+`/.claude/` is excluded from both the Vercel upload and the container image. But that
+is now three ignore rules deep, one anchored pattern away from being wrong, and the
+repo is served by two public deployments. The rule stands on that, not on the file
+being reachable today.
+
+_Last updated: 2026-08-11 (as-of 7 August build, schedule from v16; drill-downs and
+customer selector ported; second deployment on the VPS)._
 
 ## What this is
 
-A static operations dashboard for Tata Steel Tubes' TVSM business, built daily from
-mailed Excel dumps by `.claude/skills/refresh-tvsm-dashboard/scripts/refresh_dashboard.py` and
-published to `main` of `apoorvgupta0709/rmtrackerchatgpt`, which Vercel serves at
-`rmtrackerchatgpt.vercel.app`. Eleven tabs plus an Admin tab; the full list and every
-business rule are in `SKILL.md` — do not restate them here.
+An operations dashboard for Tata Steel Tubes' TVSM business, built daily from mailed
+Excel dumps and read behind a login. The repo is `apoorvgupta0709/rmtrackersupabase`.
+Eleven tabs plus an Admin tab; the full list and every business rule are in `SKILL.md`
+— do not restate them here.
+
+**It is no longer a static site, and the difference matters in three places.** A refresh
+writes a *build* into Supabase rather than a file into the repo; the page reads that
+build through the reader's own client so RLS decides what they see; and `index.html`,
+`data.json` and `access.json` at the repo root are the **old** dashboard's artefacts,
+superseded and deliberately served by nothing. Anything phrased as "publish `index.html`"
+or "reproduce `data.json`" is describing the model before 10 August.
+
+The pipeline is still `scripts/refresh_dashboard.py` and does all the work; the GitHub
+Action's entry point is `scripts/refresh_from_supabase.py`, which only hands it a
+different source of frames and a different place to put the answer.
 
 The daily pack now includes `orders.xlsx`, the sales-planning order book (sheets
 `jsr`, `hk_so`, `hk_str`). It feeds the **Order logged** column on the long-length
@@ -225,19 +242,21 @@ day's inputs live in `dumps/`, **which shows the current month only** — a clos
 set moves to `dumps/YYYY-MM/` via `scripts/archive_month.py`, and the schedule workbook
 goes with it (July's is `dumps/2026-07/july0626_rm_tracker_v1.xlsx`). The canonical slot
 is `rm_tracker_model.xlsx`, month-neutral, because a filename asserting July while
-holding August demand could not be archived without taking the live month with it. A
-clean clone plus `--input-dir dumps` must reproduce
-the published `index.html` byte-identically. Refresh `dumps/` and its `README.md`
-manifest with every daily publish.
+holding August demand could not be archived without taking the live month with it.
+Refresh `dumps/` and its `README.md` manifest with every daily publish. A clean clone
+plus `--input-dir dumps` must still reproduce the pipeline's output — but that output is
+now a Supabase build, not a byte-identical `index.html`.
 
-**The GitHub repo is private; the Vercel deployment is not.** It serves whatever it
-receives at a guessable URL with no auth — verified by fetching `CLAUDE.md` from the
-live site. `.vercelignore` holds `dumps/` and `.claude/` out of it; only `index.html`,
-`data.json` and `access.json` are served. Never add a path holding commercial data
-without checking that file. Tests assert both stay ignored, that the masters in `dumps/`
-match the checksum manifest, and that the package still sits where Claude Code looks —
-the repo root is `SKILL_ROOT.parents[2]` now, and deriving it by counting was what would
-have failed silently in this move.
+**The GitHub repo is private; both deployments of it are public.** Nothing at the
+repository root is reachable through either — the app serves only what it builds, and
+Next serves user files only from `public/`, which does not exist here. Three separate
+lists keep it that way and all three must be checked before adding a path that holds
+commercial data: `.vercelignore` for Vercel, `.dockerignore` for the container image, and
+`.gitignore` for what is committed at all. `/dumps/`, `/.claude/`, `/data.json`,
+`/access.json` and `/index.html` are excluded from the first two. Tests assert the
+Vercel exclusions hold, that the masters in `dumps/` match the checksum manifest, and
+that the package still sits where Claude Code looks — the repo root is
+`SKILL_ROOT.parents[2]`, and deriving it by counting was what would have failed silently.
 
 ## How it runs day to day
 
@@ -278,13 +297,24 @@ have failed silently in this move.
   and a `--force-with-lease` push. Also check `git branch --show-current` after a
   restart — the checkout can silently sit on the designated feature branch while
   `push origin main` no-ops against a stale local `main`; push `HEAD:main`.
-- **The app has two homes and both deploy from `main`.** Vercel as before, and since
-  11 Aug a container on the Hostinger VPS `168.231.102.230` at
+- **The app has two homes and every push to `main` deploys to both.** Vercel — project
+  `rmtracker-supabase`, git-connected, production at `rmtracker-supabase.vercel.app` —
+  and since 11 Aug a container on the Hostinger VPS `168.231.102.230` at
   `rmtracker.thecuriouspandas.cloud`. `.github/workflows/deploy.yml` builds the image,
   pushes it to GHCR tagged with the commit SHA, and rolls it out over SSH; the host
   holds only `/srv/rmtracker/{docker-compose.yml,app.env}` and the compose file is
   re-copied from `deploy/` every run, so the host cannot drift from the repo. Roll back
   with `cd /srv/rmtracker && IMAGE_TAG=<older-sha> docker compose up -d`.
+- **A build setting for one home can break the other, silently.** `output: "standalone"`
+  in `next.config.ts` is what the container needs and it is *not* inert on Vercel: it
+  folds the file trace into `.next/standalone` instead of writing
+  `.next/next-server.js.nft.json`, which Vercel's `onBuildComplete` hook opens by name.
+  The build compiles, typechecks, generates every page, then dies `ENOENT` on the last
+  line. Two commits shipped green to the VPS and red on Vercel before anyone looked. It
+  is now behind `BUILD_STANDALONE=1`, set only in the Dockerfile. **After a change to
+  `next.config.ts`, the Dockerfile or the workflows, check both** — the second home only
+  helps if it is not failing unwatched: `gh run list --workflow=deploy.yml` and
+  `vercel ls --scope apoorvgupta0709s-projects`.
 - **That box also runs n8n, and the dashboard borrows its Traefik** rather than starting
   a proxy: Traefik owns :80/:443 and holds the Let's Encrypt account, so a second one
   could neither bind the ports nor get a certificate. Its resolver is named
@@ -448,13 +478,17 @@ have failed silently in this move.
   `.vercelignore` keeps `access.json` off the deployment entirely.
 - Sign-in is now real access control, not presentation: reads go through the caller's
   own client so RLS policies decide, rather than the old model where `data.json` was
-  publicly fetchable whatever the grants said. Vercel Deployment Protection is also on,
-  which puts a Vercel SSO wall in front of every URL — fine for the owner, but it locks
-  out `mes` and `groupbuy` until it is turned off in Project Settings.
-- **The VPS host has no such wall**, so `rmtracker.thecuriouspandas.cloud` is the URL to
-  give `mes` and `groupbuy` without touching the Vercel setting. It also means the app's
-  own sign-in and RLS are the only thing standing in front of it there — which is the
-  design, but it is now load-bearing in a way it was not while Vercel SSO sat in front.
+  publicly fetchable whatever the grants said.
+- **Vercel Deployment Protection is on, but set to `all_except_custom_domains`** — so it
+  walls the per-deployment `…-<hash>-…vercel.app` preview URLs (302 to a Vercel SSO
+  page) and does **not** wall production. Both
+  `rmtracker-supabase.vercel.app` and `rmtracker.thecuriouspandas.cloud` answer a signed-
+  out visitor with the app's own login page. Either can be given to `mes` and `groupbuy`;
+  what they are actually waiting on is the Admin tab, not this setting.
+- **So the app's own sign-in and RLS are the only gate on production**, on both hosts.
+  That is the design rather than a gap — reads go through the caller's client and the
+  policies decide — but it is load-bearing in a way it was not while anyone believed an
+  SSO wall sat in front of it.
 - **Runtime secrets on the VPS live in `/srv/rmtracker/app.env` (0600) and nowhere else.**
   Only the two `NEXT_PUBLIC_` values are baked into the image, because Next inlines those
   into the browser bundle at build time and they arrive too late via `docker run`. The
