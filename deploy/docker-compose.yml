@@ -1,0 +1,77 @@
+# The dashboard's container on the Hostinger VPS.
+#
+# Lives at /srv/rmtracker/docker-compose.yml on the host and is re-copied from this repo
+# on every deploy, so the host can never drift from what is committed here.
+#
+# It joins the Traefik that is already running for n8n rather than standing up a proxy of
+# its own: that Traefik owns :80 and :443 and holds the Let's Encrypt account, so a second
+# one could neither bind the ports nor obtain a certificate.
+
+services:
+  rmtracker:
+    # Pinned to a commit SHA by the deploy job. The `latest` default is only there so an
+    # interactive `docker compose up` on the host does something sensible.
+    image: ghcr.io/apoorvgupta0709/rmtrackersupabase:${IMAGE_TAG:-latest}
+    container_name: rmtracker
+    restart: always
+
+    # Runtime secrets — service-role key, dispatch token — arrive here and nowhere else.
+    # Written once by provision-vps.sh, chmod 600, never committed and never in a layer.
+    env_file: /srv/rmtracker/app.env
+
+    volumes:
+      # Next's on-disk cache. Bind-mounted so it sits inside the 30 GB filesystem rather
+      # than on the shared root disk n8n also lives on.
+      - /srv/rmtracker/cache:/app/.next/cache
+
+    networks:
+      # Created by /root/docker-compose.yml, which is where Traefik and n8n live. Marked
+      # external below so this project attaches to it instead of making its own.
+      - root_default
+
+    labels:
+      # That daemon runs with --providers.docker.exposedbydefault=false, so without this
+      # the container is simply invisible to Traefik and the domain 404s.
+      - traefik.enable=true
+      # And this one names which network to route over. Omit it and Traefik can pick the
+      # wrong address whenever a container is on more than one network — the failure
+      # looks like an intermittent bad gateway, which is a miserable thing to chase.
+      - traefik.docker.network=root_default
+
+      - traefik.http.routers.rmtracker.rule=Host(`rmtracker.thecuriouspandas.cloud`)
+      - traefik.http.routers.rmtracker.entrypoints=web,websecure
+      - traefik.http.routers.rmtracker.tls=true
+      # The resolver the existing Traefik was started with. A different name here would
+      # silently produce a self-signed certificate.
+      - traefik.http.routers.rmtracker.tls.certresolver=mytlschallenge
+      - traefik.http.services.rmtracker.loadbalancer.server.port=3000
+
+      # The same hardening the n8n router already carries on this proxy.
+      - traefik.http.middlewares.rmtracker.headers.STSSeconds=315360000
+      - traefik.http.middlewares.rmtracker.headers.forceSTSHeader=true
+      - traefik.http.middlewares.rmtracker.headers.STSIncludeSubdomains=true
+      - traefik.http.middlewares.rmtracker.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.rmtracker.headers.browserXSSFilter=true
+      - traefik.http.routers.rmtracker.middlewares=rmtracker@docker
+
+    healthcheck:
+      # /login is the one route middleware.ts treats as public; everything else answers a
+      # signed-out probe with a redirect. Checking a redirect would prove only that the
+      # process is up, not that it can render.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/login"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    logging:
+      driver: json-file
+      # Container logs are written under /var/lib/docker, outside the 30 GB filesystem,
+      # so they are capped here instead. 30 MB per container, and it cannot grow.
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  root_default:
+    external: true

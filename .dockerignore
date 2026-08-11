@@ -1,0 +1,47 @@
+# What the build must not see.
+#
+# This repo tracks ~64 MB of source spreadsheets and a 6 MB data.json that the running
+# app never opens — the dashboard reads Supabase, not the working tree. Shipping them
+# into the build context would slow every layer and bloat every image for nothing.
+
+# Build and dependency output — reinstalled and rebuilt inside the image.
+node_modules
+.next
+*.tsbuildinfo
+next-env.d.ts
+
+# The dumps and the artefacts of the old published dashboard. Historical inputs, not
+# runtime inputs.
+dumps/
+data.json
+index.html
+access.json
+
+# The pipeline, its fixtures and its Python tooling. All of it runs in the refresh
+# Action on GitHub, never in this container.
+.claude/
+tools/
+docs/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Migrations are applied to the hosted Supabase project by hand, not by the container.
+supabase/
+
+# Never let a local secret reach a layer. Runtime values come from the env file on the
+# host; the two NEXT_PUBLIC_ ones come in as build args.
+.env
+.env.*
+
+# Everything else that is local-only.
+.git
+.github
+.vercel
+.agents
+.playwright-mcp/
+.mcp.json
+.DS_Store
+**/.DS_Store
+deploy/

@@ -1,0 +1,161 @@
+name: Deploy to VPS
+
+# Every push to main rebuilds the image and rolls it onto the Hostinger box behind the
+# Traefik that already fronts n8n. Vercel keeps deploying the same commits in parallel —
+# the two are independent and read the same Supabase project.
+#
+# Nothing here overlaps with refresh.yml: that one recomputes the numbers, this one
+# replaces the code that displays them.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      # Prose, fixtures and the pipeline's own files. None of them reach the image —
+      # .dockerignore drops them — so rebuilding on a change to them buys nothing.
+      - ".claude/**"
+      - "docs/**"
+      - "dumps/**"
+      - "**/*.md"
+  workflow_dispatch:
+
+# One rollout at a time. Two overlapping deploys would race on `docker compose up` and
+# the container left running would be whichever finished last, not whichever is newest.
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+  APP_URL: https://rmtracker.thecuriouspandas.cloud
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # Two tags on purpose: the SHA is what gets deployed and what a rollback names,
+          # `latest` only so an interactive `docker compose up` on the host does something
+          # sensible.
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          build-args: |
+            NEXT_PUBLIC_SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Authorise SSH
+        env:
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          install -m 600 /dev/null ~/.ssh/deploy
+          printf '%s\n' "$KEY" > ~/.ssh/deploy
+          # Pinned rather than trust-on-first-use: the runner is a fresh machine every
+          # time, so accept-new would in practice verify nothing at all.
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Log the host into GHCR
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Over stdin, never as an argument: a token in argv is readable from `ps` for
+          # as long as the command runs. This one is scoped to this run and is discarded
+          # by the `docker logout` at the end of the deploy step.
+          printf '%s' "$TOKEN" | ssh -i ~/.ssh/deploy \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "docker login ghcr.io -u ${{ github.actor }} --password-stdin"
+
+      - name: Ship the compose file
+        run: |
+          # Re-copied every deploy so the host cannot drift from what is committed here.
+          scp -i ~/.ssh/deploy deploy/docker-compose.yml \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/srv/rmtracker/docker-compose.yml"
+
+      - name: Roll out
+        run: |
+          ssh -i ~/.ssh/deploy \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "IMAGE_TAG='${{ github.sha }}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd /srv/rmtracker
+
+          # Fail loudly rather than starting a container with no configuration: without
+          # the env file the app comes up and every Supabase call fails at request time,
+          # which reads as a broken dashboard rather than a broken deploy.
+          test -f app.env || { echo "app.env missing — run provision-vps.sh"; exit 1; }
+          export IMAGE_TAG
+
+          docker compose pull
+          docker compose up -d --remove-orphans
+
+          # Nothing long-lived is left behind: the credential above was valid only for
+          # this workflow run.
+          docker logout ghcr.io
+
+          # Image layers live on the shared root disk, outside the app's 30 GB
+          # filesystem, so they are bounded here instead. A week of history is enough to
+          # roll back to and small enough not to matter.
+          docker image prune -af --filter "until=168h"
+
+          docker compose ps
+          REMOTE
+
+      - name: Prove it is serving
+        run: |
+          # Traefik needs a moment to notice the new container, and on the very first
+          # deploy it also has to complete the ACME challenge. Poll rather than sleep.
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$APP_URL/login" || true)
+            if [ "$code" = "200" ]; then
+              echo "Serving: $APP_URL/login -> 200"
+              exit 0
+            fi
+            echo "attempt $i: got '$code', retrying"
+            sleep 10
+          done
+          echo "::error::$APP_URL/login never returned 200 after the rollout."
+          # The container's own account of why, rather than making someone SSH in for it.
+          ssh -i ~/.ssh/deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            'docker logs --tail 50 rmtracker' || true
+          exit 1
+
+      - name: Say what happened
+        if: always()
+        run: |
+          {
+            echo "### Deploy"
+            echo
+            echo "- Image: \`${{ env.IMAGE }}:${{ github.sha }}\`"
+            echo "- Host: \`rmtracker.thecuriouspandas.cloud\`"
+            echo
+            echo "Roll back by SSHing to the host and running:"
+            echo
+            echo '```'
+            echo "cd /srv/rmtracker && IMAGE_TAG=<previous-sha> docker compose up -d"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
