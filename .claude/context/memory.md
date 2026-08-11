@@ -278,6 +278,23 @@ have failed silently in this move.
   and a `--force-with-lease` push. Also check `git branch --show-current` after a
   restart — the checkout can silently sit on the designated feature branch while
   `push origin main` no-ops against a stale local `main`; push `HEAD:main`.
+- **The app has two homes and both deploy from `main`.** Vercel as before, and since
+  11 Aug a container on the Hostinger VPS `168.231.102.230` at
+  `rmtracker.thecuriouspandas.cloud`. `.github/workflows/deploy.yml` builds the image,
+  pushes it to GHCR tagged with the commit SHA, and rolls it out over SSH; the host
+  holds only `/srv/rmtracker/{docker-compose.yml,app.env}` and the compose file is
+  re-copied from `deploy/` every run, so the host cannot drift from the repo. Roll back
+  with `cd /srv/rmtracker && IMAGE_TAG=<older-sha> docker compose up -d`.
+- **That box also runs n8n, and the dashboard borrows its Traefik** rather than starting
+  a proxy: Traefik owns :80/:443 and holds the Let's Encrypt account, so a second one
+  could neither bind the ports nor get a certificate. Its resolver is named
+  `mytlschallenge` and its network is `root_default` — both must be named exactly, and
+  `traefik.enable=true` is required because the daemon runs `exposedbydefault=false`.
+- **`/srv/rmtracker` is a 30 GB loop-mounted ext4 image**, so nothing the dashboard writes
+  can starve n8n. It must be made with `mkfs.ext4 -E nodiscard` and mounted `nodiscard`:
+  mkfs TRIMs by default, the loop driver turns that into hole-punching on the backing
+  file, and the reservation silently evaporates into a ceiling with no space actually held.
+  Check with `du -h /var/lib/rmtracker.img` — allocated must be ~30 G, not ~130 M.
 
 ## Accounts and access
 
@@ -434,6 +451,15 @@ have failed silently in this move.
   publicly fetchable whatever the grants said. Vercel Deployment Protection is also on,
   which puts a Vercel SSO wall in front of every URL — fine for the owner, but it locks
   out `mes` and `groupbuy` until it is turned off in Project Settings.
+- **The VPS host has no such wall**, so `rmtracker.thecuriouspandas.cloud` is the URL to
+  give `mes` and `groupbuy` without touching the Vercel setting. It also means the app's
+  own sign-in and RLS are the only thing standing in front of it there — which is the
+  design, but it is now load-bearing in a way it was not while Vercel SSO sat in front.
+- **Runtime secrets on the VPS live in `/srv/rmtracker/app.env` (0600) and nowhere else.**
+  Only the two `NEXT_PUBLIC_` values are baked into the image, because Next inlines those
+  into the browser bundle at build time and they arrive too late via `docker run`. The
+  file must also carry `GITHUB_REPOSITORY`: Vercel supplies it for free, and without it
+  the Refresh button answers 501 with advice to check Vercel settings.
 
 ## Open threads
 
