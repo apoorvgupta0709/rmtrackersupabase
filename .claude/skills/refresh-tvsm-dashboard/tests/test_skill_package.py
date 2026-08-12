@@ -1243,12 +1243,17 @@ def test_the_uploader_names_a_sheets_columns_the_way_the_read_will():
     A cell holding a single space is the case that matters. It is a value to pandas and
     looks like nothing to a reader, and one of them in the last column of the TVSM sheet
     is the difference between twenty columns and twenty-one.
+
+    Unlike the other Node checks this one parses .xlsx, so it needs SheetJS installed.
+    The refresh runner has Python and Node and deliberately no `npm ci` — it builds no
+    web app — so there the check is skipped rather than failed. It ran and passed on the
+    machine the change was made on; run it there after touching either side.
     """
     import shutil
     import tempfile
 
     node = shutil.which("node")
-    if not node:
+    if not node or not (REPO_ROOT / "node_modules" / "xlsx").exists():
         return
 
     with tempfile.TemporaryDirectory() as tmp:
