@@ -17,14 +17,20 @@ export async function POST() {
   }
 
   const token = process.env.GITHUB_DISPATCH_TOKEN;
-  const repo = process.env.GITHUB_REPOSITORY;
+  // Vercel does not set GITHUB_REPOSITORY — that is a GitHub Actions variable, and
+  // believing otherwise is what put a bare repository name in the deployment's settings.
+  // What Vercel does set is the owner and the repository name, separately. Joining them
+  // is right by construction, so fall back to it rather than to a typed-in guess.
+  const { VERCEL_GIT_REPO_OWNER: owner, VERCEL_GIT_REPO_SLUG: slug } = process.env;
+  const repo =
+    process.env.GITHUB_REPOSITORY || (owner && slug ? `${owner}/${slug}` : undefined);
   // Name the one that is actually missing. Reporting both sends the reader to check a
   // variable that is already set, which is where the time goes.
-  const missing = [
-    !token && "GITHUB_DISPATCH_TOKEN",
-    !repo && "GITHUB_REPOSITORY",
-  ].filter(Boolean);
-  if (missing.length) {
+  if (!token || !repo) {
+    const missing = [
+      !token && "GITHUB_DISPATCH_TOKEN",
+      !repo && "GITHUB_REPOSITORY",
+    ].filter(Boolean);
     return NextResponse.json(
       {
         error:
@@ -32,6 +38,24 @@ export async function POST() {
           `deployment. Add ${missing.length === 1 ? "it" : "them"} in Vercel project ` +
           `settings, then redeploy — the uploads are already saved, so only the refresh ` +
           `needs re-running.`,
+      },
+      { status: 501 },
+    );
+  }
+
+  // Both halves, or nothing. A bare repository name goes down the wire as
+  // /repos/{name}/dispatches, which GitHub reads as the two-segment /repos/{owner}/{repo}
+  // and answers with a 404 documented against *updating a repository* — a reply that
+  // reads as a dead token or a missing scope, and sends the reader looking for the fault
+  // everywhere except in the variable that caused it.
+  if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) {
+    return NextResponse.json(
+      {
+        error:
+          `GITHUB_REPOSITORY is set to something that is not owner/repo, so GitHub has ` +
+          `nothing to dispatch to. Set it to the full path — owner and repository, one ` +
+          `slash between them — and redeploy. The uploads are already saved, so only the ` +
+          `refresh needs re-running.`,
       },
       { status: 501 },
     );

@@ -315,6 +315,17 @@ that the package still sits where Claude Code looks — the repo root is
   `next.config.ts`, the Dockerfile or the workflows, check both** — the second home only
   helps if it is not failing unwatched: `gh run list --workflow=deploy.yml` and
   `vercel ls --scope apoorvgupta0709s-projects`.
+- **Nothing sets `GITHUB_REPOSITORY` for free, Vercel least of all.** It is a GitHub
+  Actions variable; Vercel's own pair is `VERCEL_GIT_REPO_OWNER` and
+  `VERCEL_GIT_REPO_SLUG`, and the slug is the bare name. On 12 Aug the Vercel deployment
+  held that bare name, so Refresh posted to `/repos/rmtrackersupabase/dispatches` and
+  GitHub — reading it as the two-segment `/repos/{owner}/{repo}` — answered 404 against
+  *repos#update-a-repository*, which looks exactly like a dead token. **The tell is the
+  `documentation_url`**: `update-a-repository` means the path was one segment short,
+  `create-a-repository-dispatch-event` means the path was right and the repo or the
+  token's sight of it was wrong. The route now rejects a value without a slash by name
+  and falls back to Vercel's owner/slug pair; the VPS gets it from
+  `provision-vps.sh`, which hardcodes the full path.
 - **That box also runs n8n, and the dashboard borrows its Traefik** rather than starting
   a proxy: Traefik owns :80/:443 and holds the Let's Encrypt account, so a second one
   could neither bind the ports nor get a certificate. Its resolver is named

@@ -99,9 +99,11 @@ NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY
 GITHUB_DISPATCH_TOKEN=$GITHUB_DISPATCH_TOKEN
-# Vercel sets this for free; here it has to be stated. Without it the Refresh button
-# returns a 501 telling the reader to check their Vercel settings, which on this host is
-# advice to nowhere.
+# Owner and repository both, one slash between them. Nothing sets this for free — not
+# even Vercel, whose own variables name the owner and the repository separately — and a
+# bare name here earns a 404 from GitHub that reads like a dead token. Without it at all
+# the Refresh button returns a 501 telling the reader to check their Vercel settings,
+# which on this host is advice to nowhere.
 GITHUB_REPOSITORY=$REPO
 EOF
   chmod 600 "$ROOT/app.env"
