@@ -178,6 +178,7 @@ def test_governed_constants_match_the_pipeline_contract():
     assert refresh.HIGH_AGE_DAYS == config["stock_ageing"]["high_age_days"]
     assert refresh.RECEIVABLE_DUE_DAYS == config["receivables"]["due_days_from_invoice"]
     assert refresh.BILLING_DOC_TYPES == set(config["receivables"]["billing_doc_types"])
+    assert refresh.OFFSET_NATURES == set(config["receivables"]["offset_natures"])
     assert refresh.CONVERSION_AGENT_OEM_BY_CODE == config["conversion_agent_oem_by_code"]
     assert refresh.TVS_PROXY_CUSTOMER_NAMES == set(config["tvs_proxy_customer_names"])
     assert refresh.TRANSIT_CUSTOMER_NAME == config["transit_customer_name"]
@@ -1295,3 +1296,44 @@ def test_only_the_admin_may_assign_and_the_database_is_what_says_so():
     assert "setValue(previous)" in cell
     # And never implies the figures have moved, because they have not until a refresh.
     assert "applies at the next refresh" in cell
+
+
+def test_a_remark_outlives_the_build_and_applies_at_once():
+    """Why an invoice is late is written from the panel and kept outside the build.
+
+    Two things separate it from a bucket assignment, and both are easy to lose. It cannot
+    be scoped to a build — the next refresh replaces every drill-down row and their key
+    ends in a sort position. And it applies immediately, because it feeds no figure, so
+    the cell must not carry the assign cell's "applies at the next refresh" caveat.
+    """
+    migrations = "".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((REPO_ROOT / "supabase" / "migrations").glob("*.sql"))
+    )
+    remarks = migrations[migrations.index("create table public.invoice_remarks"):]
+    remarks = remarks[:remarks.index(");")]
+    assert "build_id" not in remarks, "a remark must outlive the build it was made on"
+    assert "invoice_no  text primary key" in remarks, "held against the invoice, not the row"
+
+    # Whoever may read the overdue tab may remark on it, and the database is what says so.
+    for policy in ("read overdue remarks", "record a remark", "revise a remark",
+                   "withdraw a remark"):
+        assert f'create policy "{policy}" on public.invoice_remarks' in migrations
+    assert migrations.count("public.can_read_view('overdueView')") == 5
+
+    route = (REPO_ROOT / "app" / "api" / "remark" / "route.ts").read_text(encoding="utf-8")
+    assert "supabaseServer()" in route, "the caller's client, so the policy decides"
+    assert "supabaseAdmin" not in route, "the service role would bypass the policy it relies on"
+    assert "42501" in route, "a policy refusal is named as one"
+
+    cell = (REPO_ROOT / "app" / "dashboard" / "[view]" / "remark.tsx").read_text(encoding="utf-8")
+    # The screen never shows a remark the database did not take.
+    assert "setValue(previous)" in cell
+    # A remark moves no figure, so there is nothing to wait for and nothing to caveat.
+    assert "applies at the next refresh" not in cell.split("*/", 1)[1]
+
+    # And the panel holds them apart from the rows it caches by build, or a save would be
+    # undone on screen the next time the same figure was opened.
+    panel = (REPO_ROOT / "app" / "dashboard" / "[view]" / "detail.tsx").read_text(encoding="utf-8")
+    assert "invoice_remarks" in panel
+    assert "cache.set(slot, rows)" in panel and "cache.set(slot, remarks" not in panel

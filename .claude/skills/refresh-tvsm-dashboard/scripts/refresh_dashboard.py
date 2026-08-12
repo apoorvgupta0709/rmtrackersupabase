@@ -203,6 +203,17 @@ RECEIVABLE_DUE_DAYS = 47
 # Nature is BILLING; everything else is a debit balance, credit note or collection.
 BILLING_DOC_TYPES = {"RV", "RD"}
 
+# What counts as an offset: a document that *reduces* what the ancillary owes. A debit
+# balance does not — it adds to the exposure — so it is not an offset, and reporting one
+# beside the credits made the figure a net of two unrelated things and its breakup a list
+# to read past. Doc Type cannot decide this: AB carries both OTHER DEBIT BALANCE and
+# OTHER CREDIT BALANCE rows. Nature can, so Nature is what governs.
+#
+# This is a whitelist, like BILLING_DOC_TYPES beside it, so a Nature nobody has seen is
+# not quietly counted as an offset. What it excludes is tallied into the QC summary, so a
+# new one is reported rather than dropped.
+OFFSET_NATURES = {"CREDIT NOTE", "OTHER CREDIT BALANCE", "COLLECTION"}
+
 # Stock transfer plan. Hosur EPA (8406) is the forward stocking point for the Hosur
 # ancillary cluster; it is fed by stock transfer orders raised on the tube plants.
 STR_DESTINATION_PLANT = "8406"
@@ -2468,6 +2479,7 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     # 10. Overdue analysis for TVS ancillaries, from the yf65 receivables ageing file.
     overdue_rows = []
     overdue_unmapped = []
+    overdue_excluded = {}
     if not receivables.empty:
         rec = receivables.copy()
         rec["customer_name_key"] = rec["Customer Name"].map(norm_text)
@@ -2492,12 +2504,31 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
         # are exactly the rows with Nature = BILLING; other types are debit balances,
         # credit notes and collections, which are not invoices to chase.
         rec["doc_type_key"] = rec["Doc Type"].astype(str).str.strip().str.upper()
+        rec["nature_key"] = rec["Nature"].astype(str).str.strip().str.upper()
         overdue = rec[
             (rec["days_overdue"] > 0) & rec["doc_type_key"].isin(BILLING_DOC_TYPES)
         ].copy()
         # Open payments and credit notes are not invoices to chase, but they offset
         # what is owed, so report them beside the overdue rather than discarding them.
-        offsets = rec[~rec["doc_type_key"].isin(BILLING_DOC_TYPES)].copy()
+        # An offset is told by its Nature, not by not being a billing document: the
+        # complement of billing also holds debit balances, which add to the exposure
+        # rather than reducing it and belong nowhere near this figure.
+        offsets = rec[rec["nature_key"].isin(OFFSET_NATURES)].copy()
+        tvs_rows = rec[rec["oem"].eq("TVS")]
+        # What the two whitelists leave behind — debit balances, and any Nature nobody has
+        # seen before. Excluded from the view, not from the record: the QC summary carries
+        # the count and the amount per Nature, so setting the debit balances aside is a
+        # figure somebody can check rather than a disappearance.
+        overdue_excluded = {
+            str(nature): {
+                "documents": int(len(group)),
+                "amount": round(float(group["open_amount"].sum()), 2),
+            }
+            for nature, group in tvs_rows[
+                ~tvs_rows["doc_type_key"].isin(BILLING_DOC_TYPES)
+                & ~tvs_rows["nature_key"].isin(OFFSET_NATURES)
+            ].groupby("nature_key", dropna=False)
+        }
         tvs_overdue = overdue[overdue["oem"].eq("TVS")]
         for name, group in tvs_overdue.groupby("Customer Name", dropna=False):
             detail_key = f"OVERDUE|{name}"
@@ -5455,10 +5486,18 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             "rule": f"open items unpaid {RECEIVABLE_DUE_DAYS} days after invoice date",
             "ancillaries": len(overdue_rows),
             "total_overdue": round(sum(r["overdue_amount"] for r in overdue_rows), 2),
+            # The gross split of the net. Recorded here rather than shown on the tab,
+            # where two more columns sat between the figure and its ageing.
             "total_debits": round(sum(r["overdue_debits"] for r in overdue_rows), 2),
             "total_credits": round(sum(r["overdue_credits"] for r in overdue_rows), 2),
             "over_90_days": round(sum(r["over_90_days_amount"] for r in overdue_rows), 2),
             "unmapped_customers": overdue_unmapped,
+            "total_offsets": round(sum(r["offsets_amount"] for r in overdue_rows), 2),
+            # Rows that are neither a billing document nor an offset — chiefly the debit
+            # balances, which add to the exposure rather than reducing it and so are kept
+            # out of the offsets figure. Reported per Nature so the exclusion is a number
+            # somebody can check, and so a Nature nobody has seen appears here first.
+            "excluded_natures": overdue_excluded,
         },
         "transfers": {
             "available": transfers_available,

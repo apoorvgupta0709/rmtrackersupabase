@@ -24,16 +24,17 @@
  *    them read as a bucket both fully signed off and fully outstanding.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { writeClipboard } from "./clipboard";
+import RemarkCell from "./remark";
 
 /** A column of a breakup, as the pipeline declares it in `detail_columns`. */
 export type DetailColumn = {
   label: string;
   field: string;
-  kind?: "num" | "qty" | "mt" | "plant";
+  kind?: "num" | "qty" | "mt" | "plant" | "remark";
   /** Sum this column even though it is not the row's own quantity field. */
   add?: boolean;
 };
@@ -61,6 +62,23 @@ const NO_TOTAL = new Set(["LLCOVERAGE", "LLGAP45", "LLGAP", "BALANCE"]);
 /** Breakups whose rows are months, and only the months that moved. */
 const AVERAGE_BY_MONTH = new Set(["LLHISTORY", "SKUHISTORY"]);
 
+/**
+ * The one column here the pipeline does not declare.
+ *
+ * Every other column of every breakup comes from the build's `detail_columns`, because
+ * every other column is build data. A remark is not: it is written from this panel, lives
+ * in its own table and outlives the build it was typed against. Declaring it in the
+ * pipeline would also mean it did not appear until the next refresh had run, for a column
+ * that has nothing to do with a refresh.
+ */
+const REMARK_COLUMN: DetailColumn = { label: "Remark", field: "__remark", kind: "remark" };
+
+/** What a remark is held against: the invoice, not the accounting document. */
+const invoiceOf = (row: Record<string, unknown>) => String(row.invoice_no ?? "").trim();
+
+/** A remark as the panel holds it, keyed by invoice number. */
+type Remark = { remark: string; at: string };
+
 /** `STOCKCTL|789|3177055|Allied` -> `STOCKCTL`. It is what a grant is checked against. */
 export const detailPrefix = (key: string) => key.split("|", 1)[0];
 
@@ -83,12 +101,19 @@ const digitsFor = (unit: unknown) => (unit === "NOS" ? 0 : unit === "INR" ? 2 : 
 
 const isNumeric = (c: DetailColumn) => c.kind === "num" || c.kind === "qty" || c.kind === "mt";
 
-function detailCell(row: Record<string, unknown>, column: DetailColumn): string {
+function detailCell(
+  row: Record<string, unknown>,
+  column: DetailColumn,
+  remarks?: Map<string, Remark>,
+): string {
   // The default layout puts the two together, because on a stock list neither answers
   // "where is this" on its own.
   if (column.field === "__source_plant") {
     return `${row.source ?? "—"} · ${displayPlant(row.plant)}`;
   }
+  // Not on the row: a remark is looked up by invoice number. Reading it as text is what
+  // lets the copied table carry it alongside the columns the build declared.
+  if (column.kind === "remark") return remarks?.get(invoiceOf(row))?.remark || "—";
   const value = row[column.field];
   if (column.kind === "qty") return `${fixed(value, digitsFor(row.unit))} ${row.unit ?? ""}`.trim();
   if (column.kind === "num") return fixed(value, 0);
@@ -127,13 +152,30 @@ export default function DetailPanel({
     return held ? { phase: "ready", rows: held } : { phase: "loading" };
   });
   const [copied, setCopied] = useState(false);
+  // Deliberately not in `cache`: that is keyed by build and holds what the build says,
+  // which is exactly what a remark is not. Keeping them together would serve a stale
+  // remark the moment one was saved, and again every time the panel was reopened.
+  const [remarks, setRemarks] = useState<Map<string, Remark>>(() => new Map());
   const card = useRef<HTMLDivElement>(null);
   const closer = useRef<HTMLButtonElement>(null);
 
   const prefix = detailPrefix(detail.key);
-  const columns = layouts[prefix] ?? DEFAULT_DETAIL_COLUMNS;
+  const declared = layouts[prefix] ?? DEFAULT_DETAIL_COLUMNS;
+  // Only an overdue invoice can be remarked. The offsets beside it are credit notes and
+  // collections — documents, not receivables anybody is chasing a reason for.
+  const remarkable = prefix === "OVERDUE";
+  const columns = useMemo(
+    () => (remarkable ? [...declared, REMARK_COLUMN] : declared),
+    [declared, remarkable],
+  );
+
+  /** `OVERDUE|BALAJI PRESS PRODUCTS INDIA` -> `BALAJI PRESS PRODUCTS INDIA`. */
+  const ancillary = detail.key.slice(prefix.length + 1);
 
   useEffect(() => {
+    // A different figure was opened: drop the last one's remarks rather than letting them
+    // sit behind the new rows until their own read returns.
+    setRemarks(new Map());
     const slot = `${buildId}|${detail.key}`;
     if (cache.has(slot)) {
       setState({ phase: "ready", rows: cache.get(slot)! });
@@ -186,7 +228,50 @@ export default function DetailPanel({
     return () => document.removeEventListener("keydown", key, true);
   }, [onClose]);
 
-  const rows = state.phase === "ready" ? state.rows : [];
+  const rows = useMemo(
+    () => (state.phase === "ready" ? state.rows : []),
+    [state],
+  );
+
+  // The remarks for the invoices on screen, read once the rows are known and held apart
+  // from them. A failure here is quiet on purpose: the breakup is the answer and it has
+  // already loaded, so an empty remark column is a worse outcome than a warning banner
+  // over figures that are perfectly good.
+  useEffect(() => {
+    if (!remarkable || !rows.length) return;
+    const invoices = [...new Set(rows.map(invoiceOf).filter(Boolean))];
+    if (!invoices.length) return;
+    let live = true;
+    (async () => {
+      const { data } = await supabaseBrowser()
+        .from("invoice_remarks")
+        .select("invoice_no,remark,remarked_at")
+        .in("invoice_no", invoices);
+      if (!live) return;
+      setRemarks(
+        new Map(
+          (data ?? []).map((r) => [
+            String(r.invoice_no),
+            { remark: String(r.remark ?? ""), at: String(r.remarked_at ?? "") },
+          ]),
+        ),
+      );
+    })();
+    return () => {
+      live = false;
+    };
+  }, [remarkable, rows]);
+
+  // One invoice can arrive as several line items. They are the same invoice with the same
+  // reason for being late, so the save from any of them moves all of them.
+  const noteSaved = useCallback((invoice: string, remark: string, at: string) => {
+    setRemarks((held) => {
+      const next = new Map(held);
+      if (remark) next.set(invoice, { remark, at });
+      else next.delete(invoice);
+      return next;
+    });
+  }, []);
 
   /**
    * The totals row, or none. A summable column is one holding the row's own quantity or
@@ -218,7 +303,7 @@ export default function DetailPanel({
       columns.map((c) => c.label),
       ...rows.map((row) =>
         columns.map((c) => {
-          const text = detailCell(row, c);
+          const text = detailCell(row, c, remarks);
           return isNumeric(c) ? text.replace(/,/g, "") : text;
         }),
       ),
@@ -306,11 +391,27 @@ export default function DetailPanel({
                 <tbody>
                   {rows.map((row, i) => (
                     <tr key={i}>
-                      {columns.map((c) => (
-                        <td key={c.field} className={isNumeric(c) ? "num" : undefined}>
-                          {detailCell(row, c)}
-                        </td>
-                      ))}
+                      {columns.map((c) =>
+                        c.kind === "remark" ? (
+                          <td key={c.field}>
+                            <RemarkCell
+                              // Keyed by the invoice so opening a different breakup
+                              // starts each field fresh rather than carrying a
+                              // half-typed remark down onto another invoice's row.
+                              key={invoiceOf(row)}
+                              invoiceNo={invoiceOf(row)}
+                              ancillary={ancillary}
+                              initial={remarks.get(invoiceOf(row))?.remark ?? ""}
+                              at={remarks.get(invoiceOf(row))?.at ?? ""}
+                              onSaved={noteSaved}
+                            />
+                          </td>
+                        ) : (
+                          <td key={c.field} className={isNumeric(c) ? "num" : undefined}>
+                            {detailCell(row, c)}
+                          </td>
+                        ),
+                      )}
                     </tr>
                   ))}
                 </tbody>

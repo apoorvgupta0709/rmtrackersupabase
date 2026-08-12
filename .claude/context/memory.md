@@ -441,6 +441,20 @@ that the package still sits where Claude Code looks — the repo root is
 - **Writing is the admin's, and the policy is what enforces it**, not the hidden control:
   `/api/assign` goes through the *caller's* client, never the service role, so a forged
   request is refused by the database and the refusal is shown in the cell.
+- **The overdue drill-down writes too, and it is the counter-example to the rule above.**
+  A free-text remark against an overdue invoice — why it has not been paid — saves to
+  `public.invoice_remarks` via `/api/remark`, keyed on `invoice_no` (`Billing Doc`) and
+  likewise **not build-scoped**: drill-down rows key on `seq`, a sort position, so a remark
+  written onto one would be gone by morning. Two differences from an assignment, and both
+  are easy to get wrong by copying `assign.tsx` too faithfully. It **applies immediately**,
+  because it feeds no figure and nothing downstream has to be recomputed — the cell must
+  not say *applies at the next refresh*, and a test asserts it does not. And **any reader
+  of the tab may write one**, not the admin alone: the person who knows why an invoice is
+  stuck is rarely the person who published the build. Both read and write are gated on
+  `can_read_view('overdueView')`. The pipeline neither reads nor writes remarks, so unlike
+  `bucket_assignments` there is no committed JSON echo and the clean-clone rebuild is
+  untouched. `detail.tsx` holds remarks **outside** its module-level row cache, which is
+  keyed by build — together they would serve a stale remark the moment one was saved.
 - **`metadata` is fetched on every tab** for its `as_of`, which dates the copied
   documents. It is not `admin_only`, so any reader who can see a tab can see it.
 - **Measure a DOM node inside the event handler, not inside a lazy state updater.** The
@@ -559,6 +573,15 @@ that the package still sits where Claude Code looks — the repo root is
 - Tabs and tables are named, never numbered, in rules — ordinals broke twice.
 - The six NMPL reco price mismatches are hand adjustments in the customer's
   sheet, documented deliberately, not formula errors to "fix".
+- **Offsets on the overdue tab are credit-side only, and the two gross columns are
+  gone.** An offset is told by `Nature` — credit note, other credit balance,
+  collection — and `OTHER DEBIT BALANCE` is excluded from the figure, its count and
+  its breakup alike, because a debit balance adds to the exposure rather than
+  reducing it; 1,846 of them were netting +₹34.0 lakh against −₹121.8 lakh of credits
+  and making the figure a net of two unrelated things. `Doc Type` cannot decide this:
+  `AB` carries both. `Debits INR` and `Credits INR` left the tab on 12 Aug 2026; the
+  split is still recorded in `qc_summary.json`, as is everything the two whitelists
+  exclude, per `Nature`.
 - **Every `.vercelignore` pattern is anchored with a leading slash, and must stay
   that way.** Unanchored, gitignore semantics match a directory of that name at *any*
   depth: `dumps/` also swallowed `lib/dumps/` and `supabase/` also swallowed

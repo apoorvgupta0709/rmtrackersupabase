@@ -105,6 +105,11 @@
       "RV",
       "RD"
     ],
+    "offset_natures": [
+      "CREDIT NOTE",
+      "OTHER CREDIT BALANCE",
+      "COLLECTION"
+    ],
     "invoice_number_field": "Billing Doc",
     "scope": "customers whose OEM resolves to TVS"
   },

@@ -828,7 +828,9 @@ Apply the rule to every open item, not only those the file flags. Open credits �
 credit notes, collections and other credit balances — therefore net against overdue
 debits, giving each ancillary's net overdue exposure. Record the gross debit and
 credit components per ancillary so the netting stays auditable, since netting can
-leave an ageing bucket negative.
+leave an ageing bucket negative. Record them in `qc_summary.json` under
+`overdue_analysis.total_debits` and `total_credits` rather than as columns on the tab,
+where two more figures sat between the overdue and its ageing.
 
 Count only billing documents:
 
@@ -845,6 +847,43 @@ amount ageing beyond 90 days, sorted by descending overdue. Each amount opens an
 invoice-level drill-down, oldest first, with invoice number, document, invoice date,
 due date, overdue age in days, amount, and a closing total row. The invoice number is
 `Billing Doc`; `Document Number` is the accounting document and is shown separately.
+
+Report open payments and credit notes as one column beside the overdue, opening a
+document-level breakup. An offset is a document that *reduces* what is owed, told by
+its `Nature`, not by not being a billing document:
+
+```text
+Offsets = Nature in (CREDIT NOTE, OTHER CREDIT BALANCE, COLLECTION)
+```
+
+`Doc Type` cannot decide this — `AB` carries both `OTHER DEBIT BALANCE` and `OTHER
+CREDIT BALANCE` rows. Debit balances are not offsets: they add to the exposure rather
+than reducing it, and reporting 1,846 of them beside the credits made the figure a net
+of two unrelated things and its breakup a list to read past. They are excluded from
+the figure, its document count and its drill-down alike, so the figure adds up to the
+lines behind it.
+
+Both lists are whitelists, so a `Nature` nobody has seen is not quietly counted.
+Everything neither billing nor an offset is tallied per `Nature` into
+`qc_summary.json` under `overdue_analysis.excluded_natures`, with its document count
+and amount, so setting the debit balances aside is a figure somebody can check rather
+than a disappearance.
+
+### 5c.2 Invoice remarks
+
+Why an invoice is late is the only part of an overdue row that is judgement rather
+than arithmetic, so it is the one thing on this view a person writes. A remark is held
+against the invoice number in `public.invoice_remarks` and is **not scoped to a
+build** — every refresh replaces the build wholesale and drill-down rows key on a sort
+position, so a remark written onto one would be gone by morning.
+
+One invoice can arrive as several line items differing only in amount; they are the
+same invoice with the same reason for being late and share one remark. Whoever may
+read the tab may write one, and the row records who and when.
+
+The pipeline neither reads nor writes remarks. Unlike a bucket assignment they feed no
+figure, so they apply the moment they are saved rather than at the next refresh, and a
+rebuild from the dumps alone still reproduces the published build exactly.
 
 ### 5c.1 Clearance list
 

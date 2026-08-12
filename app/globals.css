@@ -379,9 +379,9 @@ select.picker {
 }
 
 /* ---- Assigning a bucket -------------------------------------------------- */
-/* The one control on the dashboard that writes. It states what happened to the decision
-   under itself, because "saved" and "applied" are different things here and a cell that
-   implied the second would be lying about every figure on the other tabs. */
+/* One of the two controls on the dashboard that write. It states what happened to the
+   decision under itself, because "saved" and "applied" are different things here and a
+   cell that implied the second would be lying about every figure on the other tabs. */
 
 .assign { display: inline-flex; flex-direction: column; gap: 3px; align-items: flex-start; }
 .assign select {
@@ -395,6 +395,34 @@ select.picker {
 .assign .hint { font-size: 10px; letter-spacing: 0.06em; }
 .assign-error { font-size: 11px; color: var(--fail); max-width: 320px; white-space: normal; }
 .assigned { font-family: var(--mono); font-size: 12.5px; }
+
+/* ---- Remarking an overdue invoice ---------------------------------------- */
+/* The other writing control, in the drill-down behind an overdue figure. It borrows the
+   assign cell's shape and none of its caveat: a remark moves no figure, so it is true the
+   moment it saves and says only when that was. The field is quiet until it has focus —
+   a column of boxes would read as a form, and this is still a table. */
+
+.remark { display: inline-flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.remark input {
+  width: 100%;
+  min-width: 220px;
+  padding: 4px 6px;
+  font-size: 12.5px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom-color: var(--rule);
+}
+.remark input::placeholder { color: var(--ink-soft); opacity: 0.55; }
+.remark input:hover { border-bottom-color: var(--rule-strong); }
+.remark input:focus {
+  background: var(--paper);
+  border-color: var(--rule-strong);
+  outline: 2px solid var(--furnace);
+  outline-offset: -1px;
+}
+.remark input:disabled { opacity: 0.6; cursor: progress; }
+.remark .hint { font-size: 10px; letter-spacing: 0.06em; }
 
 /* ---- Drill-down --------------------------------------------------------- */
 /* A figure that opens the lines behind it. It is marked, not restyled: a pill or a

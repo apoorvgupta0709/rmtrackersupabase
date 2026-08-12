@@ -1321,8 +1321,9 @@ export const VIEWS: Record<string, ViewSpec> = {
         section: "overdue_analysis",
         title: "By ancillary",
         note:
-          "Amounts in INR. Oldest days is a per-row age and carries no total. Gross debits "
-          + "and credits are kept beside the net so the netting stays auditable.",
+          "Amounts in INR. Oldest days is a per-row age and carries no total. The gross "
+          + "debit and credit components of the net are recorded in the run's QC summary "
+          + "rather than shown here, where they sat between the figure and its ageing.",
         columns: [
           txt("ancillary", "Ancillary", true),
           txt("customer_code", "Customer code"),
@@ -1330,8 +1331,6 @@ export const VIEWS: Record<string, ViewSpec> = {
           cnt("documents", "Documents"),
           days("oldest_days", "Oldest days"),
           inr("over_90_days_amount", "Over 90 days INR"),
-          inr("overdue_debits", "Debits INR"),
-          inr("overdue_credits", "Credits INR"),
           // An ancillary with no open credit note has the key and nothing behind it.
           drill(
             inr("offsets_amount", "Offsets INR"),
