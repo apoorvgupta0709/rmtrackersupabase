@@ -191,6 +191,35 @@ def none_if_nan(value):
     return None if pd.isna(value) else value
 
 
+def megh_ex_jsr_rate(realisation, carrying_days, is_long) -> float | None:
+    """The ex-JSR rate at which Megh's landed cost equals what it can realise.
+
+    The owner's workbook does this as a goal seek: it drives `Difference`, which is cost
+    minus realisation, to zero by hand. The cost is linear in the rate being solved for,
+    so there is a closed form and no iteration is needed —
+
+        cost(r) = r + long_length_handling + levy_rate x (r - levy_threshold)
+                    + fixed
+                    + r x GST x interest x carrying_days / 365
+                    + realisation x GST x interest x realisation_days / 365
+
+    Setting `cost(r) = realisation` and gathering the terms in `r` gives the rate below.
+    Verified against every one of the 1,211 TVS lines of the owner's Q1 FY27 workbook.
+    """
+    if realisation is None or not realisation:
+        return None
+    cost = MEGH_RECO_COST
+    carried = cost["interest_rate"] * MEGH_RECO_GST_FACTOR
+    in_rate = 1 + cost["levy_rate"] + carried * carrying_days / 365
+    fixed = (
+        (cost["long_length_handling"] if is_long else 0)
+        + sum(cost["fixed"])
+        - cost["levy_rate"] * cost["levy_threshold"]
+        + realisation * carried * cost["realisation_days"] / 365
+    )
+    return (realisation - fixed) / in_rate
+
+
 def whole_number_text(value) -> str | None:
     """An identifier that arrived as a number, back as the text it is.
 
@@ -322,6 +351,46 @@ MEGH_BOP_ADDED_NOTE = "Not in the vsm stock plan — BOP list only"
 # is taken from the daily dump only, so archiving early is safe.
 SALES_TREND_FILES = ("sales_q4.xlsx", "sales_q1.xlsx", "sales_jul.xlsx")
 SALES_TREND_SHEET = "Sheet1"
+# ---- Megh Steel's price-difference reconciliation ---------------------------------
+#
+# Megh's quarterly CN/DN working is not the ancillaries' working with different numbers
+# in it; the arithmetic is a different shape, and it is worth stating why. An ancillary
+# buys a tube and is billed for it, so the claim is the contract price against the billed
+# price. Megh *converts*: it buys from Tata, processes, and sells on to TVS, Royal
+# Enfield, HMSIL and Rane. What it should have been billed is therefore what it can sell
+# at, less what conversion costs it — so the working solves for the ex-JSR rate at which
+# Megh's landed cost equals its realisation, and compares that against what it was
+# actually charged. Everything is per tonne, because Megh is billed per kilogram.
+#
+# Reverse-engineered from the owner's own Q4 FY26 and Q1 FY27 workbooks and verified
+# against them line by line: the closing arithmetic reproduces all 3,175 lines of both
+# quarters across all four OEMs, and this cost model reproduces the ex-JSR rate on all
+# 1,211 TVS lines of Q1. Both are pinned by tests.
+#
+# The one thing the dashboard does not hold is Megh's **base price master**. Their
+# workbook looks it up by material number in a separate file, and while it agrees with
+# `contract.xlsx` on most sizes it does not on all: deriving the base from the contract
+# instead reproduces 1,060 of 1,207 lines and overstates a Rs 1.76 crore quarter by
+# Rs 5.05 lakh. So the published working states every line and its charged price, and
+# leaves the claim columns blank rather than filling them with a figure that is right
+# seven times in eight. A wrong claim looks exactly like a right one.
+MEGH_RECO_GST_FACTOR = 1.18
+# What conversion costs Megh, per tonne, on top of the ex-JSR rate it pays.
+MEGH_RECO_COST = {
+    "long_length_handling": 1720,   # a long length only
+    "levy_rate": 0.02,              # on the ex-JSR rate above the threshold below
+    "levy_threshold": 39240,
+    "fixed": (625, 150, 450, 800),  # handling, and the three freight and service legs
+    "interest_rate": 0.102,         # per annum, charged on the GST-inclusive value
+    "realisation_days": 60,         # Megh's own credit against its onward sale
+}
+# How long Megh carries the stock before it sells on, by the plant that despatched it.
+# Read off the owner's workbook: the long haul from Jamshedpur and Khopoli carries a
+# month, the southern plants a week. Three lines at 8406 carry nothing at all and are
+# hand adjustments rather than a rule, so they are not reproduced.
+MEGH_RECO_CARRYING_DAYS = {"56": 30, "788": 30, "789": 7, "4731": 7, "8406": 7}
+MEGH_RECO_DEFAULT_CARRYING_DAYS = 30
+
 # The two parties the trend splits. Megh Steel converts for TVS under this code, which
 # `OEM_key_1_rev codes` classifies as Direct, so it is named rather than inferred.
 MEGH_TVS_CUSTOMER_CODE = "943209"
@@ -335,6 +404,18 @@ CONVERSION_AGENT_OEM_BY_CODE = {
     "943209": "TVS",    # MEGH STEELS PRIVATE LIMITED - TVS A
     "943210": "HMSIL",  # MEGH STEELS PRIVATE LIMITED - HMSIL
     "943211": "RE",     # MEGH STEELS PRIVATE LIMITED - RE
+    # Megh converts for a fourth OEM and this map did not say so. The effect was
+    # narrower than it looks, because `OEM_key_1_rev codes` already files this one
+    # customer under `Rane` where it files the other three Megh codes under `Direct` —
+    # so the sales summary was already right and only the **code repository** was
+    # wrong, its scope being "OEM is TVS, or the code is a conversion agent". Three
+    # bill-to/ship-to/plant combinations at 150.631 MT over the sales window sat
+    # outside it and so could never appear in a price change request.
+    #
+    # Spelt `Rane`, exactly as the OEM key spells it. `RANE` would be a second name for
+    # the same OEM, arriving on whichever rows this map labelled rather than the key,
+    # and two spellings of one customer is how a summary grows a duplicate row.
+    "943213": "Rane",   # MEGH STEELS PRIVATE LIMITED - RANE
 }
 TVS_PROXY_CUSTOMER_NAMES = {"MEGH STEELS PRIVATE LIMITED TVS A"}
 
@@ -591,6 +672,26 @@ OVERDUE_DETAIL_COLUMNS = [
     {"label": "Overdue age (days)", "field": "age_days", "kind": "num"},
     {"label": "Amount", "field": "qty", "kind": "qty"},
 ]
+# Megh Steel's own quarterly working. Four OEMs in one document, the OEM first, which is
+# how the owner's workbook divides it into sheets. The claim columns carry nothing until
+# Megh's base-price master is a held input; the note beside `MEGH_RECO_COST` says why.
+MEGH_RECO_DETAIL_COLUMNS = [
+    {"label": "OEM", "field": "oem"},
+    {"label": "Invoice", "field": "invoice_no"},
+    {"label": "Item", "field": "billing_item"},
+    {"label": "Plant", "field": "plant", "kind": "plant"},
+    {"label": "Material code", "field": "material_code"},
+    {"label": "Description", "field": "description"},
+    {"label": "Sales unit", "field": "sales_unit"},
+    {"label": "Qty nos", "field": "qty_nos", "kind": "num", "add": True},
+    {"label": "Qty M", "field": "qty_m", "kind": "num", "add": True},
+    {"label": "Qty KG", "field": "qty_kg", "kind": "num", "add": True},
+    {"label": "Charged INR/kg", "field": "charged_rate_per_kg", "kind": "num"},
+    {"label": "Contract key", "field": "contract_key"},
+    {"label": "Contract INR/MT", "field": "contract_base_per_mt", "kind": "num"},
+    {"label": "CN/DN", "field": "cn_dn"},
+]
+
 # The quarterly price-difference working, as the panel shows it. The three quantity
 # columns are summed and the rate is not: a column of rates added together is a number
 # that means nothing, and this document is copied into a claim.
@@ -4252,9 +4353,16 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                 for quarter, (ton_col, metre_col) in spec["quarters"].items():
                     per_ton = pd.to_numeric(row[ton_col], errors="coerce")
                     per_metre = pd.to_numeric(row[metre_col], errors="coerce")
+                    # The quarter's increase sits immediately left of its per-tonne
+                    # price on both sheets — `Q1 delta / ton`, `Q1 base price / ton`.
+                    # The Megh reconciliation states it as its own column, so it is read
+                    # here rather than inferred by subtracting one quarter from another,
+                    # which would be wrong wherever a correction column sits between.
+                    delta = pd.to_numeric(row[ton_col - 1], errors="coerce")
                     prices[quarter] = {
                         "per_ton": None if pd.isna(per_ton) else float(per_ton),
                         "per_m": None if pd.isna(per_metre) else float(per_metre),
+                        "delta": None if pd.isna(delta) else float(delta),
                     }
                 if not any(p["per_m"] is not None for p in prices.values()):
                     continue
@@ -4272,13 +4380,17 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                     }
                 )
 
-    def contract_row_for(bucket):
-        """The contract row that prices a governed bucket, and how it was reached."""
-        parsed = size_key(bucket)
-        if parsed is None:
-            return None, None
-        dim1, dim2, thickness, parts = parsed
-        grade = ("-".join(parts[3:-1]) if len(parts) > 4 else parts[3]).strip().upper()
+    def contract_row_for_size(dim1, dim2, thickness, grade):
+        """The contract row that prices a size, and how it was reached.
+
+        Split out from `contract_row_for` so the Megh reconciliation can price off the
+        dimensions its billing lines carry rather than off a governed bucket, and get
+        the same answer. Megh's own workbook keys the same way and reaches the same
+        rows — including both cases that make this more than a dictionary lookup: a
+        drawn CEW line names its bore where the contract names nothing, and a 38.1
+        ERW 2 has no `-HST` row so it prices off the plain one.
+        """
+        grade = (grade or "").strip().upper()
         candidates = contract_index.get((dim1, dim2, thickness))
         via = "size"
         if not candidates and dim2 and abs(dim1 - 2 * thickness - dim2) <= PRICING_BORE_TOLERANCE_MM:
@@ -4299,6 +4411,15 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
         wanted_hst = "HST" in grade or "ERW 2" in grade
         scoped = [c for c in scoped if (c["variant"] == "HST") == wanted_hst] or scoped
         return scoped[0], via
+
+    def contract_row_for(bucket):
+        """The contract row that prices a governed bucket, and how it was reached."""
+        parsed = size_key(bucket)
+        if parsed is None:
+            return None, None
+        dim1, dim2, thickness, parts = parsed
+        grade = ("-".join(parts[3:-1]) if len(parts) > 4 else parts[3]).strip().upper()
+        return contract_row_for_size(dim1, dim2, thickness, grade)
 
     if pricing_available:
         # Annealing is a property of the material, not of the schedule line: Bucketting
@@ -5354,6 +5475,142 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     # nil claim rather than a missing dump.
     reco_quarters = sorted(reco_quarters, key=financial_quarter_order)
 
+    # Which despatch plants each quarter's billing actually covers, and which it is
+    # missing that another quarter has.
+    #
+    # This exists because two of the archived extracts are short and nothing said so.
+    # `sales_q4.xlsx` and `sales_q1.xlsx` carry the southern plants only — no Jamshedpur
+    # and no Khopoli — where `sales_jul.xlsx` and the daily dump carry every plant. On
+    # the complete months those two are 17.7% of lines and 29% of tonnage, and for Megh
+    # Steel alone they are 125 of the 200 invoices in Q1 FY27. A claim built off a
+    # quarter like that is not slightly short, it is missing a third of itself, and it
+    # looks exactly like a complete one.
+    #
+    # So the coverage is computed rather than assumed, by comparing each quarter against
+    # the plants the whole window has seen, and every document says what it is standing
+    # on. Nothing is filtered out — a short quarter is still worth reading, and the
+    # right response is to re-archive the extract, not to hide the quarter.
+    quarter_plants = {}
+    plant_weight = {}
+    for _, r in trend_all.iterrows():
+        quarter = financial_quarter(r["billing_month"])
+        plant = norm_code(r["DESP P LANT"])
+        if not (quarter and plant):
+            continue
+        quarter_plants.setdefault(quarter, set()).add(plant)
+        plant_weight[plant] = plant_weight.get(plant, 0.0) + float(r["sales_mt"] or 0)
+    plants_seen = set().union(*quarter_plants.values()) if quarter_plants else set()
+    window_mt = sum(plant_weight.values()) or 1.0
+    quarter_coverage = {}
+    for quarter, plants in quarter_plants.items():
+        missing = sorted(plants_seen - plants)
+        # Weighted, because a plant is not a plant: 4318 and 8307 come and go with a
+        # handful of lines between them, where Jamshedpur and Khopoli are nearly three
+        # tonnes in ten.
+        #
+        # Stated and not judged. A plant absent from one quarter's extract and present
+        # in another's is either a gap in the extract or a plant that shipped nothing,
+        # and nothing in the data tells the two apart — so the document prints what each
+        # quarter covers and leaves the reading to somebody who knows. A boolean here
+        # would be a guess wearing a fact's clothes, and it would be wrong about 4318,
+        # which really did stop.
+        share = sum(plant_weight.get(p, 0.0) for p in missing) / window_mt
+        quarter_coverage[quarter] = {
+            "plants": sorted(plants),
+            "missing_plants": missing,
+            "missing_share": round(share, 4),
+        }
+
+    # ---- Megh Steel's own quarterly working ---------------------------------------
+    #
+    # A separate document, because it is a separate calculation — see the note beside
+    # `MEGH_RECO_COST` for why a conversion agent's claim cannot be the ancillaries'.
+    # All four codes Megh converts under, in one working per quarter with the OEM as its
+    # first column, which is how the four sheets of the owner's workbook divide.
+    #
+    # **The claim columns are blank and that is deliberate.** Megh prices off its own
+    # base-price master, looked up by material number in a workbook this dashboard does
+    # not hold. It agrees with `contract.xlsx` on most sizes and not on all: deriving the
+    # base from the contract instead reproduces 1,060 of 1,207 lines and overstates a
+    # Rs 1.76 crore quarter by Rs 5.05 lakh. Everything that does not depend on it — the
+    # line, its quantities in all three units, and the price actually charged — is
+    # stated, so the working is complete except for the half nobody can compute yet.
+    megh_reco_lines = trend_all[
+        trend_all["customer_key"].isin(CONVERSION_AGENT_OEM_BY_CODE)
+    ]
+    megh_reco_quarters = set()
+    megh_reco_grouped = {}
+    for _, r in megh_reco_lines.iterrows():
+        quarter = financial_quarter(r["billing_month"])
+        if quarter is None:
+            continue
+        megh_reco_quarters.add(quarter)
+        kg = float(pd.to_numeric(r["Quantity"], errors="coerce") or 0)
+        gross = float(pd.to_numeric(r["TOTAL INV VALUE"], errors="coerce") or 0)
+        # What Megh was actually charged, per kilogram, net of GST. Taken off the gross
+        # invoice value and not off `MATERIAL VAL`: the two agree on all but a handful of
+        # lines, and on those handful the gross is what the owner's workbook uses.
+        charged = round(gross / MEGH_RECO_GST_FACTOR / kg, 2) if kg else None
+        plant = norm_code(r["DESP P LANT"])
+        # The dimensions the line was billed at, which is what Megh's own workbook keys
+        # on. A blank bore is zero and not `NaN`: `NaN` is truthy, so a bore left blank
+        # would look like a bore and never reach the round key.
+        def dim(column):
+            value = pd.to_numeric(r[column], errors="coerce")
+            return 0.0 if pd.isna(value) else float(value)
+        # The sales dump has no grade column; the governed bucket's fourth part is where
+        # the grade lives, and it is what tells ERW 2 and CEW apart for the contract.
+        parsed = size_key(r["bucket"]) if pd.notna(r["bucket"]) else None
+        grade = "" if parsed is None or len(parsed[3]) < 4 else parsed[3][3]
+        match = contract_row_for_size(
+            dim("Outer Diameter of Material"),
+            dim("Inner Diameter of Material"),
+            dim("Thickness for TATA Tubes Material"),
+            grade,
+        )[0]
+        base = None if match is None else match["prices"].get(quarter, {}).get("per_ton")
+        length_m = pd.to_numeric(r["length_m"], errors="coerce")
+        is_long = bool(pd.notna(length_m) and float(length_m) >= LONG_LENGTH_MIN_M)
+        megh_reco_grouped.setdefault(quarter, []).append({
+            "oem": CONVERSION_AGENT_OEM_BY_CODE[r["customer_key"]],
+            "customer_code": r["customer_key"],
+            "invoice_no": whole_number_text(r["Billing  Document Number"]),
+            "billing_item": whole_number_text(r["Billing Item"]),
+            "plant": plant,
+            "material_code": r["material_key"],
+            "description": none_if_nan(r["Material   Description"]),
+            "sales_unit": (
+                None if pd.isna(r["SALES  UNIT"]) else str(r["SALES  UNIT"]).strip()
+            ),
+            "qty_nos": round(float(r["sales_nos"] or 0), 0),
+            "qty_m": round(float(r["sales_m"] or 0), 3),
+            "qty_kg": round(kg, 3),
+            "grade": grade or None,
+            "length_type": "LL" if is_long else "CTL",
+            "carrying_days": MEGH_RECO_CARRYING_DAYS.get(
+                plant, MEGH_RECO_DEFAULT_CARRYING_DAYS
+            ),
+            # The Tata contract's own figure for the size, for reference beside the
+            # charged price. It is **not** Megh's base price and must not be read as one.
+            "contract_key": None if match is None else match["key"],
+            "contract_base_per_mt": base,
+            "charged_rate_per_kg": charged,
+            "proposed_rate_per_kg": None,
+            "difference_per_kg": None,
+            "cn_dn_value": None,
+            "cn_dn": None,
+            "basis": (
+                "Megh prices off its own base-price master, which this build does not "
+                "hold — the contract figure beside this is Tata's, not Megh's"
+            ),
+            "unit": "INR",
+        })
+    for quarter, lines in megh_reco_grouped.items():
+        lines.sort(key=lambda x: (x["oem"], str(x["invoice_no"] or ""),
+                                  str(x["billing_item"] or "")))
+        stock_details[f"MEGHRECO|{quarter}"] = lines
+    megh_reco_quarters = sorted(megh_reco_quarters, key=financial_quarter_order)
+
     # The same history, re-keyed to the names the customer tracker uses, so a buying
     # meeting can ask "is this month normal for this SKU" without leaving the tab.
     #
@@ -6122,9 +6379,28 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             # offering all three would hand somebody an empty document that reads as a nil
             # claim rather than as a missing dump.
             "reco_quarters": reco_quarters,
+            # What each of those quarters is standing on. A quarter whose extract is
+            # missing a plant that another quarter has is named as such on the document.
+            "quarter_coverage": quarter_coverage,
             "operation_rates_inr_per_ton": dict(PRICING_OPERATION_RATES),
         },
         "megh_tracker": megh_rows,
+        # The quarters Megh's own working can be produced for, and how much of it is
+        # still waiting on their base-price master. A scalar rather than a section: it
+        # is four numbers, and the working itself is a drill-down.
+        "megh_reco": {
+            "quarters": megh_reco_quarters,
+            "quarter_coverage": quarter_coverage,
+            "lines": sum(len(v) for v in megh_reco_grouped.values()),
+            "oems": sorted(set(CONVERSION_AGENT_OEM_BY_CODE.values())),
+            "priced": False,
+            "note": (
+                "Line-level only. Megh prices off its own base-price master, looked up "
+                "by material number in a workbook this build does not hold, so the "
+                "claim columns are left blank rather than derived from the Tata "
+                "contract — which agrees on most sizes and not on all."
+            ),
+        },
         "megh_length_bucketing": megh_length_bucketing,
         "megh_bop_added": megh_bop_added,
         "megh_unmapped": megh_unmapped,
@@ -6156,6 +6432,7 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             "LLHISTORY": LL_HISTORY_DETAIL_COLUMNS,
             "PRICEBUILD": PRICE_BUILD_DETAIL_COLUMNS,
             "RECO": RECO_DETAIL_COLUMNS,
+            "MEGHRECO": MEGH_RECO_DETAIL_COLUMNS,
             "TRANSFER": TRANSFER_DETAIL_COLUMNS,
             "ORDERS": ORDER_DETAIL_COLUMNS,
             "MEGHORDERPLAN": ORDER_DETAIL_COLUMNS,

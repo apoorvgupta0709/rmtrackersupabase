@@ -116,7 +116,8 @@
   "conversion_agent_oem_by_code": {
     "943209": "TVS",
     "943210": "HMSIL",
-    "943211": "RE"
+    "943211": "RE",
+    "943213": "Rane"
   },
   "tvs_proxy_customer_names": [
     "MEGH STEELS PRIVATE LIMITED TVS A"

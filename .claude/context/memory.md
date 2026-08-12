@@ -12,7 +12,7 @@ repo is served by two public deployments. The rule stands on that, not on the fi
 being reachable today.
 
 _Last updated: 2026-08-12 (as-of 7 August build, schedule from v16; pricing corrections,
-the quarterly CN/DN working, trend selectors, sticky headers and the upload tab)._
+both quarterly CN/DN workings, trend selectors, sticky headers and the upload tab)._
 
 ## What this is
 
@@ -600,7 +600,45 @@ that the package still sits where Claude Code looks — the repo root is
   what lets the checks in `tools/` import the app's own modules rather than keeping a second
   copy of the pricing formula and the column naming.
 
+- **Megh's claim is a different calculation, and three quarters of it is now pinned.**
+  An ancillary buys a tube and is billed for it; Megh *converts*, so what it should have
+  been billed is what it can sell on at less what converting costs it. Their workbook
+  goal-seeks the ex-JSR rate at which landed cost equals realisation; the cost is linear
+  in that rate, so `megh_ex_jsr_rate` solves it in closed form and reproduces **all 2,304
+  TVS lines of both their quarters**. The closing arithmetic — proposed less charged, per
+  kilogram, times kilograms — reproduces **all 3,175 lines across all four OEMs**.
+- **What is missing is Megh's base-price master**, looked up by material number in a
+  workbook the dashboard does not hold. It agrees with `contract.xlsx` on most sizes and
+  not on all: deriving the base from the contract instead reproduces 1,060 of 1,207 lines
+  and overstates a Rs 1.76 crore quarter by **Rs 5.05 lakh**. So `MEGHRECO` publishes
+  every line, its quantities in all three units and the price actually charged, and
+  leaves the claim columns **blank**. A claim right seven times in eight is not a claim.
+- **Megh converts for four OEMs, not three.** `943213` is Megh-Rane and was missing from
+  `CONVERSION_AGENT_OEM_BY_CODE`. The effect was narrower than it looks — the OEM key
+  already files that one code under `Rane` where it files the other three under `Direct`,
+  so only the **code repository** was wrong, three combinations at 150.631 MT that could
+  never reach a price change request. Spelt `Rane`, as the OEM key spells it: `RANE`
+  would be a second name for one OEM and a duplicate row in any summary fed by both.
+- **`sales_q4.xlsx` and `sales_q1.xlsx` hold the southern plants only.** No Jamshedpur
+  and no Khopoli, where `sales_jul.xlsx` and the daily dump hold every plant. For Megh
+  alone that is 125 of the 200 invoices in Q1 FY27, and on the complete months those two
+  plants are 17.7% of lines. **Both quarterly workings therefore print the plants they
+  stand on**, computed per quarter against the plants the whole window has seen. The
+  coverage is stated and never judged: a plant absent from one quarter is either a gap in
+  the extract or a plant that shipped nothing, 4318 really did stop, and a boolean there
+  would be a guess in a fact's clothing. Re-archiving those two extracts with every plant
+  is the fix, and until then Q4 FY26 and Q1 FY27 are short on both workings.
+
 ## Open threads
+
+- **Re-archive `sales_q4.xlsx` and `sales_q1.xlsx` with all plants.** Until then every
+  figure drawn from January to June is southern-plants-only — the trend, the code
+  repository window and both CN/DN workings.
+- **Megh's base-price master is the one input the reco still wants.** Send the workbook
+  the `Key2` / `VSM Base Price` VLOOKUP points at and the TVS half fills in; RE, HMSIL
+  and Rane also need their own cost constants, which are pasted values in the sheets sent
+  and so are not recoverable from them. HMSIL does not goal-seek at all — its proposed
+  rate is set some other way.
 
 - **The two new migrations are not applied and no build carries the new fields yet.**
   `20260812120000_pricing_operations_and_customer_po_price.sql` and
@@ -609,10 +647,6 @@ that the package still sits where Claude Code looks — the repo root is
   workflow. Until both land and a refresh runs, the operations and PO-price cells save
   nothing and the calculation buttons do not appear — the page copes with the tables being
   absent rather than erroring, which is why this is quiet.
-- **Megh Steel's CN/DN working is deferred**, waiting on the owner's sheet. Megh is billed
-  per kilogram against a conversion rate and does not follow the contract formula, so it is
-  excluded from the `RECO` rows by segment rather than left to come out wrong, and it gets
-  its own document.
 - **"SKU trend by customer" and "SKU history — average month" now close on the same two
   figures** and differ only by a Segment and a Length-m column. One of them is probably
   redundant; not resolved without the owner.

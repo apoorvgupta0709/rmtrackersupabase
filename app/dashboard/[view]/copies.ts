@@ -15,7 +15,8 @@
  * document rather than a dump of the tab.
  */
 
-export type CopyKind = "clearance" | "dispatch" | "str" | "pcr" | "calculation";
+export type CopyKind =
+  | "clearance" | "dispatch" | "str" | "pcr" | "calculation" | "megh_calculation";
 
 /** A copy button, as a view declares it. Serializable: it crosses the server boundary. */
 export type CopySpec = { kind: CopyKind; arg?: string };
@@ -327,6 +328,30 @@ function pcr(rows: Row[], ctx: CopyContext, quarter?: string): CopyResult {
   return { text: tsv(lines) };
 }
 
+
+/**
+ * What a quarter's billing actually covers, as a line the document carries.
+ *
+ * Two of the archived sales extracts hold the southern plants only — no Jamshedpur and
+ * no Khopoli — where the daily dump and July hold every plant. For Megh Steel alone that
+ * is 125 of the 200 invoices in Q1 FY27. A claim built off a quarter like that is not
+ * slightly short, it is missing a third of itself, and on the page it looks exactly like
+ * a complete one. So every document says which plants it stands on.
+ */
+function coverageLine(ctx: CopyContext, quarter: string, scalar: string): (string | number)[] {
+  const held = ctx.scalars[scalar]?.quarter_coverage?.[quarter];
+  if (!held) return ["Plants covered", "not recorded for this quarter"];
+  const missing = (held.missing_plants ?? []) as string[];
+  const share = Number(held.missing_share ?? 0);
+  return [
+    "Plants covered",
+    (held.plants ?? []).join(" "),
+    missing.length
+      ? `not in this extract: ${missing.join(" ")} — ${(share * 100).toFixed(1)}% of window tonnage`
+      : "every plant the window has billed from",
+  ];
+}
+
 /* ---- The quarterly CN/DN calculation --------------------------------------- */
 
 /**
@@ -399,6 +424,7 @@ function calculation(rows: Row[], ctx: CopyContext, quarter?: string): CopyResul
 
   const out: (string | number)[][] = [
     ["PRICE DIFFERENCE WORKING", `as of ${ctx.asOf}`, q],
+    coverageLine(ctx, q, "sku_pricing"),
     CALCULATION_COLUMNS,
   ];
 
@@ -466,6 +492,73 @@ function calculation(rows: Row[], ctx: CopyContext, quarter?: string): CopyResul
   return { text: tsv(out) };
 }
 
+
+/* ---- Megh Steel's own quarterly working ------------------------------------ */
+
+const MEGH_COLUMNS = [
+  "OEM", "CUSTOMER CODE", "BILLING DOCUMENT", "BILLING ITEM", "PLANT",
+  "MATERIAL CODE", "MATERIAL DESCRIPTION", "GRADE", "CTL/LL", "SALES UNIT",
+  "QTY IN NOS", "QTY IN M", "QTY IN KG",
+  "CHARGED INR/KG", "CONTRACT KEY", "CONTRACT INR/MT", "CARRYING DAYS",
+  "PROPOSED INR/KG", "DIFF INR/KG", "CN/DN VALUE", "CN/DN", "BASIS",
+];
+
+/**
+ * Megh Steel's quarter, all four OEMs, in the shape their own workbook divides into
+ * sheets — the OEM first, so it splits on a filter.
+ *
+ * **The claim columns are empty and that is the point.** Megh is a conversion agent, not
+ * a customer buying a tube: what it should have been billed is what it can sell on at,
+ * less what converting costs it, so the working solves for the ex-JSR rate at which its
+ * landed cost equals its realisation. That arithmetic is reproduced exactly — all 2,304
+ * TVS lines of both the owner's quarters — but it starts from Megh's own base-price
+ * master, looked up by material number in a workbook this dashboard does not hold.
+ *
+ * Deriving the base from `contract.xlsx` instead gets 1,060 of 1,207 lines right and
+ * overstates a Rs 1.76 crore quarter by Rs 5.05 lakh. So the lines, the quantities and
+ * the price actually charged are all here, and the claim is left for the master to fill.
+ * A claim that is right seven times in eight is not a claim.
+ */
+function meghCalculation(rows: Row[], ctx: CopyContext, quarter?: string): CopyResult {
+  const q = quarter ?? (ctx.scalars.megh_reco?.quarters ?? []).slice(-1)[0];
+  if (!q) return { error: "This build holds no quarter of Megh billing." };
+  const lines = ctx.sections[`meghreco:${q}`] ?? [];
+  if (!lines.length) {
+    return { error: `No Megh Steel billing lines in ${q} on this build.` };
+  }
+
+  const out: (string | number)[][] = [
+    ["MEGH STEEL PRICE DIFFERENCE WORKING", `as of ${ctx.asOf}`, q],
+    coverageLine(ctx, q, "megh_reco"),
+    ["Claim columns", String(ctx.scalars.megh_reco?.note ?? "")],
+    MEGH_COLUMNS,
+  ];
+  for (const l of lines) {
+    out.push([
+      String(l.oem ?? ""),
+      String(l.customer_code ?? ""),
+      String(l.invoice_no ?? ""),
+      String(l.billing_item ?? ""),
+      displayPlant(l.plant),
+      String(l.material_code ?? ""),
+      String(l.description ?? ""),
+      String(l.grade ?? ""),
+      String(l.length_type ?? ""),
+      String(l.sales_unit ?? ""),
+      plain(l.qty_nos, 0),
+      plain(l.qty_m, 3),
+      plain(l.qty_kg, 3),
+      plain(l.charged_rate_per_kg, 2),
+      String(l.contract_key ?? ""),
+      plain(l.contract_base_per_mt, 0),
+      plain(l.carrying_days, 0),
+      "", "", "", "",
+      String(l.basis ?? ""),
+    ]);
+  }
+  return { text: tsv(out) };
+}
+
 /* ---- The registry --------------------------------------------------------- */
 
 export const COPY_FORMATS: Record<
@@ -479,5 +572,9 @@ export const COPY_FORMATS: Record<
   calculation: {
     label: (arg) => (arg ? `Copy calculation · ${arg}` : "Copy calculation"),
     build: calculation,
+  },
+  megh_calculation: {
+    label: (arg) => (arg ? `Copy Megh working · ${arg}` : "Copy Megh working"),
+    build: meghCalculation,
   },
 };

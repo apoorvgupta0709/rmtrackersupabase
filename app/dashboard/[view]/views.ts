@@ -447,16 +447,26 @@ export const VIEWS: Record<string, ViewSpec> = {
     label: "Megh Steel sales",
     note:
       "The vendor service model: Tata Steel supplies Megh Steel, which supplies TVSM, "
-      + "Royal Enfield and HMSIL. A key carrying the Megh- prefix is an RE or HMSIL size "
-      + "and has no TVS bucket by design — it is not a mapping gap.",
-    scalars: ["signoff", "orders"],
+      + "Royal Enfield, HMSIL and Rane. A key carrying the Megh- prefix is an RE or HMSIL "
+      + "size and has no TVS bucket by design — it is not a mapping gap.",
+    scalars: ["signoff", "orders", "megh_reco"],
+    // Megh's quarterly price-difference working, one document per quarter with all four
+    // OEMs in it. Fetched for the copy because the clipboard is not writable after an
+    // await; nothing is read unless the tab is open.
+    prefetchDetails: (_picks, s) =>
+      ((s.megh_reco?.quarters as string[]) ?? []).map((q) => ({
+        key: `MEGHRECO|${q}`,
+        as: `meghreco:${q}`,
+      })),
     facts: (s) => [
       { label: "Signed off", value: `${f3(s.signoff?.signed_mt)} MT` },
       { label: "Not signed off", value: `${f3(s.signoff?.non_signed_mt)} MT` },
       { label: "Sign-off reaching no bucket", value: `${f3(s.signoff?.unmapped_mt)} MT` },
       { label: "Sign-off sheets", value: join(s.signoff?.sheets) },
+      { label: "Reco lines held", value: f0(s.megh_reco?.lines) },
+      { label: "Reco OEMs", value: join(s.megh_reco?.oems) },
     ],
-    tables: () => [
+    tables: (ctx) => [
       {
         key: "megh_tracker",
         section: "megh_tracker",
@@ -543,6 +553,14 @@ export const VIEWS: Record<string, ViewSpec> = {
           txt("bop_stated_size", "BOP stated size"),
           txt("plan_note", "Plan note", true),
         ],
+        // One document per quarter, all four OEMs in it with the OEM first — the way
+        // the owner's own workbook divides into sheets, and the way it splits again on a
+        // filter. Separate from the ancillaries' working because it is separate
+        // arithmetic, not the same one with other numbers in it.
+        copies: ((ctx.scalars.megh_reco?.quarters as string[]) ?? []).map((q) => ({
+          kind: "megh_calculation" as const,
+          arg: q,
+        })),
       },
       {
         key: "megh_bop_added",

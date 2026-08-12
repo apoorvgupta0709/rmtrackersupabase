@@ -49,7 +49,7 @@ WRAPPED_SECTIONS = {
 # Small enough to read whole, and needed by every tab: the headline cards, the run's
 # status, the drill-down column layouts, the bucket dropdown.
 SCALAR_KEYS = ("summary", "metadata", "mapping_quality", "detail_columns",
-               "governed_buckets", "customer_summary")
+               "governed_buckets", "customer_summary", "megh_reco")
 
 # The pipeline's own QC. Useful for diagnosing a refresh, not for reading a dashboard.
 ADMIN_ONLY_SCALARS = ("qc",)

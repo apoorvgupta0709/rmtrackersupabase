@@ -1347,6 +1347,76 @@ def test_the_quarterly_calculation_is_a_drill_down_and_leaves_megh_out():
     assert "const finalQty = billedQty;" in copies
 
 
+def test_meghs_conversion_cost_model_reproduces_the_owners_own_workbook():
+    """Megh's claim is a different calculation, and this is the half that is certain.
+
+    An ancillary buys a tube and is billed for it, so its claim is the contract price
+    against the billed price. Megh *converts*: what it should have been billed is what it
+    can sell on at, less what converting costs it. The owner's workbook solves that by
+    hand — a goal seek driving cost minus realisation to zero — and because the cost is
+    linear in the rate being solved for there is a closed form.
+
+    Pinned against the owner's own Q4 FY26 and Q1 FY27 workbooks when it was written: all
+    1,093 and 1,211 TVS lines respectively. The figures below are three of those lines,
+    kept here so the model cannot drift without the test saying so.
+    """
+    refresh = load_refresh_module()
+
+    # Four real lines, one per case the workbook contains — long length and cut piece,
+    # a month of carrying and a week of it. Every figure is read off the owner's own
+    # `Column1`, not computed here: a test that recomputes the thing it is testing is a
+    # test of nothing.
+    assert round(refresh.megh_ex_jsr_rate(78650, 30, True), 2) == 71981.97
+    assert round(refresh.megh_ex_jsr_rate(75900, 7, True), 2) == 69879.22
+    assert round(refresh.megh_ex_jsr_rate(75350, 7, False), 2) == 71034.33
+    assert round(refresh.megh_ex_jsr_rate(76850, 0, False), 2) == 72636.58
+    # Nothing to solve for is None, not zero: zero is a rate and this is an absence.
+    assert refresh.megh_ex_jsr_rate(0, 30, True) is None
+    assert refresh.megh_ex_jsr_rate(None, 30, True) is None
+
+    script = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
+    # The claim columns stay empty until Megh's base-price master is a held input.
+    block = script[script.index("megh_reco_lines = trend_all["):]
+    block = block[:block.index("megh_reco_quarters = sorted(")]
+    for blank in ('"proposed_rate_per_kg": None', '"difference_per_kg": None',
+                  '"cn_dn_value": None', '"cn_dn": None'):
+        assert blank in block, blank
+    # And the charged price is taken off the gross invoice value, as the owner's own
+    # workbook does — the two disagree on a handful of lines and the gross is what wins.
+    assert 'gross / MEGH_RECO_GST_FACTOR / kg' in block
+
+    # The fourth conversion code, spelt the way the OEM key spells it.
+    assert refresh.CONVERSION_AGENT_OEM_BY_CODE["943213"] == "Rane"
+
+
+def test_a_quarters_working_says_which_plants_it_stands_on():
+    """Two of the archived sales extracts hold the southern plants only.
+
+    `sales_q4.xlsx` and `sales_q1.xlsx` carry no Jamshedpur and no Khopoli, where
+    `sales_jul.xlsx` and the daily dump carry every plant. For Megh Steel alone that is
+    125 of the 200 invoices in Q1 FY27. A claim built off a quarter like that is missing
+    a third of itself and looks exactly like a complete one, so every working prints the
+    plants it covers.
+
+    What it must not do is guess *why* a plant is absent. A plant missing from one
+    quarter and present in another is either a gap in the extract or a plant that shipped
+    nothing, and 4318 really did stop — so the coverage is stated and not judged.
+    """
+    script = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
+    block = script[script.index("quarter_plants = {}"):]
+    block = block[:block.index("# ---- Megh Steel's own quarterly working")]
+    assert '"missing_plants": missing' in block
+    assert '"missing_share": round(share, 4)' in block
+    assert '"short"' not in block and '"complete"' not in block, (
+        "coverage is stated, not judged: a boolean here would be a guess"
+    )
+
+    copies = (REPO_ROOT / "app" / "dashboard" / "[view]" / "copies.ts").read_text(encoding="utf-8")
+    assert "function coverageLine(" in copies
+    # Both workings carry it, not just the new one.
+    assert copies.count("coverageLine(ctx,") == 2
+
+
 def test_the_browser_prices_a_sku_the_way_the_pipeline_does():
     """The contract formula is written twice and both copies have to agree.
 
