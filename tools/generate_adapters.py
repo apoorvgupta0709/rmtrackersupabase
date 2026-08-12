@@ -63,6 +63,10 @@ def render() -> str:
             f"    sheet: {sheet_value},\n"
             f"    monthSheet: {month_sheet},\n"
             f"    optional: {'true' if spec.optional else 'false'},\n"
+            f"    header: {json.dumps(spec.header)},\n"
+            f"    usecols: {json.dumps(spec.usecols)},\n"
+            f"    keyColumn: {json.dumps(spec.key_column)},\n"
+            f"    required: {json.dumps(list(spec.required))},\n"
             f"  }},"
         )
 
@@ -73,9 +77,13 @@ def render() -> str:
 // source; this is a projection of it, checked in so the browser bundle needs no Python,
 // and asserted equal by the test suite so it cannot go stale.
 //
-// Note what is NOT here: header rows, column windows, dtype pins. Those are read-time
-// decisions and they stay in Python, because a corrected header row should be a re-read
-// of what was uploaded rather than a request for the owner to send the workbook again.
+// The header row and the column window are here, and the dtype pins are not. The reason
+// is what each is for. Nothing is stored by header row — the grid goes to Postgres raw and
+// the read-time decisions stay in Python, so a corrected header row is a re-read of what
+// was uploaded and not a request for the owner to send the workbook again. But the
+// uploader has to *show* what it read, and it cannot name a column without knowing which
+// row the names are on. A dtype pin decides how a value is parsed, which is a read-time
+// decision through and through, so it stays where it was.
 
 export type DumpSlot = {{
   /** Accepted filenames, canonical first; the rest are older names still readable. */
@@ -86,6 +94,20 @@ export type DumpSlot = {{
   monthSheet: boolean;
   /** A dump that may simply not have been sent that day. */
   optional: boolean;
+  /** Which row of the grid carries the column names, or null where there are none. */
+  header: number | null;
+  /** An Excel column window such as `U:AF`, where the sheet is read through one. */
+  usecols: string | null;
+  /** The column that says what a row is about, shown first in the preview. */
+  keyColumn: string | null;
+  /**
+   * The columns the pipeline reads off this sheet, as the file writes them.
+   *
+   * Not exhaustive on purpose: a column not listed is not checked, which weakens the
+   * check without ever refusing a good file. A test asserts every name listed really is
+   * in the corresponding file in `dumps/`.
+   */
+  required: string[];
 }};
 
 export const SLOTS: Record<string, DumpSlot> = {{

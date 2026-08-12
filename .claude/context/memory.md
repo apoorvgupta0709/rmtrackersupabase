@@ -11,8 +11,8 @@ is now three ignore rules deep, one anchored pattern away from being wrong, and 
 repo is served by two public deployments. The rule stands on that, not on the file
 being reachable today.
 
-_Last updated: 2026-08-11 (as-of 7 August build, schedule from v16; drill-downs and
-customer selector ported; second deployment on the VPS)._
+_Last updated: 2026-08-12 (as-of 7 August build, schedule from v16; pricing corrections,
+the quarterly CN/DN working, trend selectors, sticky headers and the upload tab)._
 
 ## What this is
 
@@ -509,8 +509,102 @@ that the package still sits where Claude Code looks — the repo root is
   file must also carry `GITHUB_REPOSITORY`: Vercel supplies it for free, and without it
   the Refresh button answers 501 with advice to check Vercel settings.
 
+- **The SKU pricing tab asks for a customer, and two of its columns are now written.**
+  Each quarter shows three columns — the calculated price, the customer's PO price and the
+  gap — where it used to show the price, the per-metre figure and the contract base per
+  tonne; the last two are in the build-up the price opens and were repeated on the row for
+  no reason. `money()` went with them, and with it the defect that the one tab whose note
+  says no price column is ever subtotalled was subtotalling one.
+- **A SKU's operations are correctable, and the correction is an override.** Every SKU
+  where the view disagrees with a customer's own reconciliation is an operation question,
+  and in all six NMPL cases the schedule's flag said something and it was wrong — so a
+  fallback would have corrected none of them. Kept in `public.sku_operations`, alongside
+  `public.customer_po_prices`; neither is build-scoped, both are read at admin, both are
+  gated on `can_read_view('pricingView')` rather than on `using (true)` as
+  `bucket_assignments` is, because an operation set and a PO price are commercial where a
+  bucket mapping is not.
+- **Unlike an assignment, these apply immediately, and the cell must not say otherwise.**
+  The price is arithmetic over figures already on the row, so the browser redoes it —
+  `app/dashboard/[view]/pricing.ts` holds the formula for the cell, the build-up and the
+  copy, and `tools/check_pricing_formula.mjs` proves it reproduces the pipeline's over
+  every price and every build-up line of a build. Run that against a **fresh** build after
+  touching either side: the committed `data.json` predates the published base per metre and
+  is only checked to a tenth of a paisa.
+- **The price build-up key was not unique, and now includes the bucket.** Metalman
+  schedules code 3768904 at 878 mm as both a 1.6 and a 2.5 wall; the two wrote different
+  workings to one `PRICEBUILD` key, so the 1.6 row opened the 2.5's — another weight,
+  another contract row, a price 44% higher, nothing on screen to say so. The override key
+  is the same four parts, with the length written through `float`/`Number` on both sides so
+  `189` and `189.0` cannot become two keys. The contract `kg/m` is published to six
+  decimals now, not four: it multiplies a rate in thousands.
+- **`config/pricing_overrides.json` is the committed echo of both tables**, exactly as
+  `config/bucket_assignments.json` is. Neither is committed by the refresh workflow — there
+  is no commit step in `refresh.yml` — so both are only updated when somebody runs the
+  refresh locally and commits.
+- **The quarterly CN/DN working is a drill-down, not a section.** A quarter is around eight
+  thousand billing lines and a tab fetches a section whole, so it is written under a `RECO`
+  prefix keyed `RECO|customer|quarter`, and `ViewSpec.prefetchDetails` fetches the picked
+  customer's keys server-side — a copy has to be built inside the click that asked for it,
+  because the clipboard is not writable after an `await`. The document pastes into
+  `Price Working <Q> <customer>.xlsx`, which the `reco` skill reads. Quarters offered are
+  the ones the build holds billing for, not the three the contract prices.
+- **`Quantity` on a sales extract is kilograms whatever the sales unit says.** `qty in no`
+  is pieces and `Domain for z_qty_meter` is metres; `MATERIAL VAL = RATE/UNIT x (quantity in
+  the sales unit)` confirms it on all three. The CN/DN working carries all three columns and
+  leaves rejection blank, because the dashboard cannot know it and a zero reads as "none".
+- **The trend tab groups a customer's SAP names.** The sales file writes a ship-to's own
+  spelling — 26 of them for about thirteen customers, Rajsriya under six — so each row
+  carries `customer_group` beside the raw `customer`, and the tab has two selectors, the
+  ship-to narrowing inside the customer. A code claimed by two Helper Customers keeps its
+  raw name rather than being guessed at, which leaves the Elkayem/Rajsriya Hosur pair and
+  two Sandhar ship-tos ungrouped. "SKU trend by customer" closes on an average month now,
+  not a window total. `ViewSpec.picks` is a list and `TableSpec.pickFields` a map because of
+  this; the unit toggle had to stop rebuilding the URL from scratch, which would have
+  cleared the selection on the first tab to carry both controls.
+- **A long table scrolls inside `.scroll-box`, bounded at 72vh, with a sticky header and
+  totals row.** `overflow-x: auto` alone already makes a box a scroll container in both
+  axes, so a header sticking to `top: 0` in an unbounded one never moves — bounding the
+  height is what makes it stick at all. The header needs an opaque background and its rule
+  drawn as an inset shadow, because `border-collapse: collapse` drops a sticky cell's
+  border. The column filter now **follows** the header instead of closing on scroll: it
+  used to close because the `th` moved away, and with a sticky header that reads as the
+  panel dismissing itself for no reason.
+- **Uploading is a tab, and every source shows what was read off it.** It sits in the strip
+  with the eleven views and is deliberately not a `dashboard_views` row, so it cannot be
+  granted to a viewer; who sees it is a role. Each parsed sheet reports which of the columns
+  the pipeline reads it found, with five rows under the header, and a sheet missing one is
+  **not loaded** — a stored sheet the refresh cannot read fails hours later as a `KeyError`
+  when nobody is holding the workbook. The columns are declared per slot in `sources.py`
+  (`key_column`, `required`), projected into `lib/dumps/adapters.ts`, and named in the
+  browser by `lib/dumps/columns.ts`, which reproduces `name_columns` including the trailing
+  empty-unnamed-column trim. `tools/check_upload_columns.mjs` proves the two agree on all 23
+  slots, and `generate_adapters.py --check` is finally wired into the suite — both the
+  script and the generated header had been claiming a test enforced it and none did.
+- **The upload write path existed only in the live database.** `promote_upload`,
+  `is_uploader` and the three insert policies `lib/dumps/upload.ts` depends on were applied
+  by hand and in no migration, so any branch or fresh project had an uploader who could not
+  upload. Recorded in `20260812130000_...`, written to be a no-op where they already exist.
+- **`lib/dumps/*` and `copies.ts` import each other with an explicit `.ts` suffix**, and
+  `allowImportingTsExtensions` is on. Node's ESM resolver needs the extension, and it is
+  what lets the checks in `tools/` import the app's own modules rather than keeping a second
+  copy of the pricing formula and the column naming.
+
 ## Open threads
 
+- **The two new migrations are not applied and no build carries the new fields yet.**
+  `20260812120000_pricing_operations_and_customer_po_price.sql` and
+  `20260812130000_record_the_upload_path_the_database_already_has.sql` are checked in and
+  unapplied; nothing is applied automatically, there is no `supabase db push` in any
+  workflow. Until both land and a refresh runs, the operations and PO-price cells save
+  nothing and the calculation buttons do not appear — the page copes with the tables being
+  absent rather than erroring, which is why this is quiet.
+- **Megh Steel's CN/DN working is deferred**, waiting on the owner's sheet. Megh is billed
+  per kilogram against a conversion rate and does not follow the contract formula, so it is
+  excluded from the `RECO` rows by segment rather than left to come out wrong, and it gets
+  its own document.
+- **"SKU trend by customer" and "SKU history — average month" now close on the same two
+  figures** and differ only by a Segment and a Length-m column. One of them is probably
+  redundant; not resolved without the owner.
 - **The Admin tab is the only control still missing.** Filters, search, sort and every
   copy button were ported on 10 Aug; the drill-downs, the customer selector and the
   bucket-assignment write on 11 Aug. Grants are therefore still changed by SQL, which is

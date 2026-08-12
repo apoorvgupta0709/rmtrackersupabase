@@ -18,12 +18,26 @@ export default function Picker({
   options,
   value,
   view,
+  clears,
+  optional,
+  hint,
 }: {
   param: string;
   label: string;
   options: string[];
   value: string;
   view: string;
+  /**
+   * Selectors that narrow inside this one, cleared whenever it changes.
+   *
+   * A ship-to belongs to the customer it was picked under. Left set while the customer
+   * moves on, it filters every row away and the tab reads as "this customer bought
+   * nothing" — a wrong answer that looks like a real one.
+   */
+  clears?: string[];
+  /** A narrower: leaving it unset means every value inside the selector above it. */
+  optional?: boolean;
+  hint?: string;
 }) {
   const router = useRouter();
   const search = useSearchParams();
@@ -32,6 +46,7 @@ export default function Picker({
     const query = new URLSearchParams(search.toString());
     if (next) query.set(param, next);
     else query.delete(param);
+    for (const dependent of clears ?? []) query.delete(dependent);
     const rest = query.toString();
     router.replace(`/dashboard/${view}${rest ? `?${rest}` : ""}`);
   };
@@ -48,7 +63,9 @@ export default function Picker({
         aria-label={label}
         className="picker"
       >
-        <option value="">Select {label.toLowerCase()}…</option>
+        <option value="">
+          {optional ? `All \u2014 every ${label.toLowerCase()}` : `Select ${label.toLowerCase()}\u2026`}
+        </option>
         {options.map((option) => (
           <option key={option} value={option}>
             {option}
@@ -56,7 +73,8 @@ export default function Picker({
         ))}
       </select>
       <span className="hint" style={{ fontSize: 12.5 }}>
-        One selection drives every table on this tab, and the copy buttons read it too.
+        {hint
+          ?? "One selection drives every table on this tab, and the copy buttons read it too."}
       </span>
     </div>
   );

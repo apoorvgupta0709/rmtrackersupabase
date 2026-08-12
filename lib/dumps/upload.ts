@@ -1,7 +1,7 @@
 "use client";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { digestOf, type ParsedGrid } from "./parse";
+import { digestOf, type ParsedGrid } from "./parse.ts";
 
 /**
  * Write one parsed sheet into the uploads tables, from the browser.

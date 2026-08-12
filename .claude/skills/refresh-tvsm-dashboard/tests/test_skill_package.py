@@ -530,10 +530,16 @@ def test_customer_sku_history_is_keyed_on_the_customers_own_codes():
     across 45 tracker lines — indistinguishable from having bought nothing.
     """
     script = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
-    history = script[script.index("codes_by_display, displays_by_code = {}, {}"):]
+    # The code/customer maps are built once, above the trend tables that first need them.
+    assert "codes_by_display.setdefault(display, set()).add(code)" in script
+    assert "displays_by_code.setdefault(code, set()).add(display)" in script
+    history = script[script.index("history_keyed = keyed.copy()"):]
     history = history[:history.index("customer_sku_history.sort")]
     assert 'history_keyed["customer_key"].isin(codes)' in history
-    assert "display_by_code" not in history, (
+    # `display_by_code` is the STR bridge and must not appear here. Matched on a word
+    # boundary, because `displays_by_code` and `unique_display_by_code` are different
+    # maps built for the trend grouping and are not what this rule is about.
+    assert not re.search(r"(?<![_a-zA-Z])display_by_code", history), (
         "the history join must read the customer's own codes, not the STR bridge"
     )
     # An empty table has two causes and states neither, so both must reach the page.
@@ -1149,15 +1155,310 @@ def test_the_customer_tab_asks_for_a_customer_before_it_answers():
     customer = views[views.index("customerView: {"):views.index("meghView: {")]
     assert 'param: "customer"' in customer
     # All three of the customer's tables narrow on the one selection.
-    assert customer.count("pickField:") == 3
-    assert 'pickField: "customer_display"' in customer   # lines, and the CRFH book
-    assert 'pickField: "customer"' in customer           # the sales history
+    assert customer.count("pickFields:") == 3
+    assert 'pickFields: { customer: "customer_display" }' in customer  # lines, CRFH book
+    assert 'pickFields: { customer: "customer" }' in customer          # the sales history
 
     page = (REPO_ROOT / "app" / "dashboard" / "[view]" / "page.tsx").read_text(encoding="utf-8")
     # Narrowed before derived, so a join inside `flatten` sees one customer's rows.
-    assert page.index("table.pickField") < page.index("table.flatten")
-    # A table without a pickField — the summary you choose from — is always shown.
-    assert "if (table.pickField && !pick) return false;" in page
+    assert page.index("table.pickFields") < page.index("table.flatten")
+    # A table narrowing on a selector nobody has answered — as against the summary you
+    # choose from, which names none — stays off the page rather than showing everything.
+    assert "const waiting = awaiting.some((p) => table.pickFields?.[p.param]);" in page
+    assert "if (waiting) return false;" in page
+
+
+def test_uploading_is_a_tab_that_cannot_be_granted_to_a_viewer():
+    """It sits in the strip with the eleven views and is deliberately not one of them.
+
+    A `dashboard_views` row can be granted, and a grant is the wrong shape for this: who
+    may load a dump is a role. So the tab is rendered on the role and the page redirects
+    on it, while the database refuses the write regardless — the control not being drawn
+    has never been access control on this project.
+    """
+    views_sql = (REPO_ROOT / "supabase" / "migrations"
+                 / "20260809173652_identity_and_view_grants.sql").read_text(encoding="utf-8")
+    assert "uploadView" not in views_sql and "'upload'" not in views_sql
+
+    layout = (REPO_ROOT / "app" / "dashboard" / "layout.tsx").read_text(encoding="utf-8")
+    assert 'href="/dashboard/upload"' in layout
+    assert "{canUpload && (" in layout
+
+    page = (REPO_ROOT / "app" / "dashboard" / "upload" / "page.tsx").read_text(encoding="utf-8")
+    assert 'user.role !== "admin" && user.role !== "uploader"' in page
+
+    # The old address still answers, so a bookmark or a mail does not dead-end.
+    legacy = (REPO_ROOT / "app" / "upload" / "page.tsx").read_text(encoding="utf-8")
+    assert 'redirect("/dashboard/upload")' in legacy
+
+    # A sheet missing a column the pipeline reads is not written at all.
+    uploader = (REPO_ROOT / "app" / "dashboard" / "upload"
+                / "uploader.tsx").read_text(encoding="utf-8")
+    assert "unreadable" in uploader
+    assert "disabled={!ready || busy || unreadable.length > 0}" in uploader
+
+    # The write path the browser uses has to exist in a migration, not only in the live
+    # database: a Supabase branch or a fresh project has to be able to accept an upload.
+    migrations = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (REPO_ROOT / "supabase" / "migrations").glob("*.sql")
+    )
+    for definition in ("function public.promote_upload(", "function public.is_uploader()",
+                       '"uploaders create batches"',
+                       '"uploaders add rows to their own pending batch"'):
+        assert definition in migrations, definition
+
+
+def test_the_browser_adapters_match_the_pipelines_own_registry():
+    """`lib/dumps/adapters.ts` is generated, and nothing was checking that it still was.
+
+    Both the generator and the generated header claim a test fails when the checked-in
+    copy goes stale, and until now none did — so a slot added to `sources.py` would have
+    gone on being invisible to the uploader with nothing to say so. Now the claim is true.
+    """
+    import shutil
+
+    python = shutil.which("python3") or sys.executable
+    result = subprocess.run(
+        [python, str(REPO_ROOT / "tools" / "generate_adapters.py"), "--check"],
+        capture_output=True, text=True, cwd=REPO_ROOT,
+    )
+    if result.returncode != 0 and "ModuleNotFoundError" in result.stderr:
+        # No pandas on this interpreter: the generator imports the pipeline. Nothing to
+        # prove here rather than a false failure.
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_uploader_names_a_sheets_columns_the_way_the_read_will():
+    """The upload page's column check is only worth having if the names agree.
+
+    A dump whose headers have moved used to be accepted, look fine, and fail hours later
+    inside the refresh as a `KeyError` naming one column — by which time whoever has the
+    file has gone home. The page now says which declared columns it found before anything
+    is stored, and that means naming them the way the read names them: blanks numbered,
+    duplicates suffixed, the column window applied, trailing empty unnamed columns
+    dropped. Written twice, in `columns.ts` and in `sources.py`, so it is compared.
+
+    A cell holding a single space is the case that matters. It is a value to pandas and
+    looks like nothing to a reader, and one of them in the last column of the TVSM sheet
+    is the difference between twenty columns and twenty-one.
+    """
+    import shutil
+    import tempfile
+
+    node = shutil.which("node")
+    if not node:
+        return
+
+    with tempfile.TemporaryDirectory() as tmp:
+        seen_path = Path(tmp) / "columns.json"
+        result = subprocess.run(
+            [str(node), str(REPO_ROOT / "tools" / "check_upload_columns.mjs"),
+             str(REPO_ROOT / "dumps"), str(seen_path)],
+            capture_output=True, text=True, cwd=REPO_ROOT,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        seen = json.loads(seen_path.read_text(encoding="utf-8"))
+
+    assert len(seen) >= 20, f"only {len(seen)} slots parsed"
+
+    pipeline = load_refresh_module()
+    # Loading the pipeline puts its own directory on the import path, which is what makes
+    # the sibling registry importable here by name.
+    import sources
+
+    extra = sources.slots_for_families(
+        pipeline.ORDER_BOOK_SHEETS, pipeline.PRICING_SHEETS, pipeline.SIGNOFF_SHEETS
+    )
+    slots = dict(sources.SLOTS)
+    slots.update(extra)
+    excel = sources.ExcelSources(REPO_ROOT / "dumps", extra_slots=extra)
+
+    for slot, got in sorted(seen.items()):
+        assert not got["missing"], f"{slot}: {got['missing']}"
+        if got["positional"]:
+            continue
+        spec = slots[slot]
+        sheet = got["sheet"] if spec.sheet is sources.CALLER_NAMES_THE_SHEET else None
+        frame = excel.frame(slot, sheet=sheet)
+        assert [str(c) for c in frame.columns] == got["columns"], slot
+        # A preview that shows nothing is not a preview.
+        assert got["sampleRows"] > 0, slot
+
+
+def test_the_quarterly_calculation_is_a_drill_down_and_leaves_megh_out():
+    """The CN/DN working is thousands of billing lines, so it cannot be a section.
+
+    A tab fetches a section whole and the page caps one at 3,000 rows; a quarter is around
+    eight thousand billing lines across all customers. So it is written as `detail_rows`
+    under a `RECO` prefix, fetched by key for the picked customer and quarter alone, and
+    the page prefetches it because a copy has to be built inside the click that asked for
+    it — the clipboard is not writable after an await.
+
+    Megh Steel is left out on purpose rather than by omission: it is billed per kilogram
+    against a conversion rate and its reconciliation does not follow the contract formula.
+    """
+    script = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
+    block = script[script.index("reco_lines = trend["):]
+    block = block[:block.index("reco_quarters = sorted(")]
+    assert 'trend["segment"].eq(TREND_SEGMENT_DIRECT)' in block, "Megh must be left out"
+    assert 'stock_details[f"RECO|{customer}|{quarter}"]' in block
+    # The three quantity columns the working is built on, and the trap in the third.
+    for field in ('"qty_nos"', '"qty_m"', '"qty_kg"', '"billing_rate"', '"sales_unit"'):
+        assert field in block, field
+    assert 'float(r["sales_mt"] or 0) * 1000' in block, "qty in KG comes off Quantity"
+    # An invoice number that arrives as a float matches nothing in the customer's file.
+    assert 'whole_number_text(r["Billing  Document Number"])' in block
+
+    # April starts the financial year, so January to March close the one already named.
+    refresh = load_refresh_module()
+    assert refresh.financial_quarter("2026-01") == "Q4 FY26"
+    assert refresh.financial_quarter("2025-10") == "Q3 FY26"
+    assert refresh.financial_quarter("2026-04") == "Q1 FY27"
+    assert refresh.financial_quarter("2026-07") == "Q2 FY27"
+    assert refresh.financial_quarter(None) is None
+
+    views = (REPO_ROOT / "app" / "dashboard" / "[view]" / "views.ts").read_text(encoding="utf-8")
+    pricing = views[views.index("pricingView: {"):views.index("stockView: {")]
+    # Only the quarters the build holds billing for, and the customer comes from the
+    # tab's selector rather than a control of its own.
+    assert "reco_quarters" in pricing and 'param: "customer"' in pricing
+    assert 'kind: "calculation" as const' in pricing
+    assert "prefetchDetails:" in pricing
+
+    page = (REPO_ROOT / "app" / "dashboard" / "[view]" / "page.tsx").read_text(encoding="utf-8")
+    # Paged: PostgREST caps a response at a thousand rows and one customer's quarter can
+    # be well past that, and a claim short by a third looks complete.
+    assert "async function fetchDetail(" in page
+    assert "spec.prefetchDetails?.(picks, scalars)" in page
+
+    copies = (REPO_ROOT / "app" / "dashboard" / "[view]" / "copies.ts").read_text(encoding="utf-8")
+    for column in ("QTY IN NOS", "QTY IN M", "QTY IN KG", "BILLING RATE", "PO RATE",
+                   "DIFFERENCE OF PRICE", "REJECTION", "FINAL QTY", "CN/DN VALUE", "CN/DN"):
+        assert f'"{column}"' in copies, column
+    # Rejection is blank, never zero: the dashboard cannot know it, and a zero reads as
+    # "none" rather than "not filled in yet".
+    assert "const finalQty = billedQty;" in copies
+
+
+def test_the_browser_prices_a_sku_the_way_the_pipeline_does():
+    """The contract formula is written twice and both copies have to agree.
+
+    The price column, the build-up behind it and the PO rate the quarterly calculation
+    quotes are all recomputed in the browser, so a reader who corrects a SKU's operations
+    sees the price move without waiting for a refresh. That is a second implementation of
+    the pipeline's arithmetic, and two implementations drift silently: the page would show
+    one number, tomorrow's build another, and each would look right on its own.
+
+    `tools/check_pricing_formula.mjs` runs the TypeScript against the pipeline's own
+    output and compares every price and every build-up line. It also checks that the key
+    an override is recorded against names exactly one SKU — it did not until the governed
+    bucket was made part of it.
+
+    Run here against `data.json`, which is the frozen 7 August oracle and therefore
+    predates both the published base per metre and the bucket in the key. So this run
+    proves the prices and the key; **the build-up comparison needs a build newer than the
+    oracle** and the tool says how many it skipped. Run it against a fresh build after any
+    change to the formula on either side:
+
+        python .claude/skills/refresh-tvsm-dashboard/scripts/refresh_dashboard.py \\
+            --input-dir dumps --output-dir /tmp/build --as-of <date>
+        node tools/check_pricing_formula.mjs /tmp/build/data.json
+    """
+    import shutil
+
+    node = shutil.which("node")
+    if not node:
+        return
+
+    result = subprocess.run(
+        [str(node), str(REPO_ROOT / "tools" / "check_pricing_formula.mjs"),
+         str(REPO_ROOT / "data.json")],
+        capture_output=True, text=True, cwd=REPO_ROOT,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "The page and the build agree" in result.stdout, result.stdout
+    # A pass that checked nothing is not a pass: name the counts it must reach.
+    assert re.search(r"agree: 1,?125 prices", result.stdout), result.stdout
+    assert "375 keyable SKUs" in result.stdout, result.stdout
+
+
+def test_an_owner_correction_overrides_the_schedules_operation_flags():
+    """The pricing tab's operation flags are right most of the time and wrong some of it.
+
+    Every SKU where this view disagrees with a customer's own reconciliation is an
+    operation question — a fin-cut ladder charged on a `PE` line the schedule does not
+    flag, a fin cut charged per `FC` that the customer waived. So the correction is an
+    **override** and not a fallback: a fallback would fix none of those cases, because in
+    every one of them the flags said something.
+    """
+    script = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
+    # Read at the start of a run and written back, so a clean clone rebuilds the same way.
+    assert "PRICING_OVERRIDES_FILE" in script
+    assert "def load_pricing_overrides(" in script
+    assert (SKILL_ROOT / "config" / "pricing_overrides.json").exists()
+
+    block = script[script.index("def pricing_operation_override("):]
+    block = block[:block.index("def norm_code(")]
+    assert 'overrides or {}).get("operations", {}).get(key)' in block
+
+    applied = script[script.index('operations["Fin cut"] = PRICING_OPERATION_RATES'):]
+    applied = applied[:applied.index("operations_per_m = (")]
+    # The override replaces the set rather than adding to it.
+    assert "operations = {" in applied and "for name in corrected" in applied
+
+    # And the key names one SKU: customer, governed bucket, material code, length.
+    key = script[script.index("def pricing_override_key("):]
+    key = key[:key.index("def pricing_operation_override(")] if \
+        "def pricing_operation_override(" in key[key.index("\n"):] else key[:2000]
+    assert "row['bucket']" in script
+    assert 'f"PRICEBUILD|{row[\'customer\']}|{row[\'bucket\']}|{row[\'material_code\']}"' in script
+
+
+def test_the_trend_groups_a_customers_sap_names_and_closes_on_an_average_month():
+    """The sales file names a ship-to, not a customer, and a total is not a rate.
+
+    Twenty-six SAP spellings cover about thirteen customers — Rajsriya arrives under six
+    — so a selector offering the raw names asks the reader to know which spelling is the
+    plant they meant. Each row therefore also carries the Helper Customer its SAP code
+    belongs to, and a code claimed by two Helper Customers keeps its raw name rather than
+    being guessed at. The table then closes on the tonnage over the months that actually
+    moved, because a window total sitting beside seven month columns reads as a monthly
+    figure.
+    """
+    script = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
+    block = script[script.index("trend_customer_skus = []"):]
+    block = block[:block.index("trend_customer_skus.sort")]
+    for field in ('"customer_group"', '"customer"', '"months_active"',
+                  '"avg_active_month_mt"', '"avg_active_month_nos"'):
+        assert field in block, field
+    # Averaged over the months that moved, never over the window.
+    assert "round(total_mt / len(months), 3) if months else None" in block
+    # A shared code is not resolved: only codes with exactly one Helper Customer are.
+    assert "if len(displays) == 1" in script
+    assert 'trend["customer_key"].map(unique_display_by_code).fillna(' in script
+
+    views = (REPO_ROOT / "app" / "dashboard" / "[view]" / "views.ts").read_text(encoding="utf-8")
+    trend = views[views.index("trendView: {"):views.index("pricingView: {")]
+    # Two selectors, the ship-to narrowing inside the customer.
+    assert 'param: "customer"' in trend and 'param: "shipto"' in trend
+    assert 'within: "customer"' in trend
+    assert 'pickFields: { customer: "customer_group", shipto: "customer" }' in trend
+    # The window total is off the table; the average and its denominator are on it.
+    skus = trend[trend.index('key: "trend_customer_skus"'):trend.index('key: "trend_customer_sku_history"')]
+    assert "unitTotal(ctx.unit)" not in skus
+    assert 'cntNoTotal("months_active", "Months")' in skus
+    assert "averageOver:" in skus
+
+    # The average still divides the window total, which is on the row but not a column,
+    # so the totals row must sum that field itself rather than read it out of `totals`.
+    table = (REPO_ROOT / "app" / "dashboard" / "[view]" / "table.tsx").read_text(encoding="utf-8")
+    assert "num(get(rows[i], averageOver.totalField))" in table
+
+    # A unit switch that rebuilt the URL from scratch would clear the customer.
+    page = (REPO_ROOT / "app" / "dashboard" / "[view]" / "page.tsx").read_text(encoding="utf-8")
+    assert 'withParam(query, "unit", option)' in page
 
 
 def test_the_crfh_book_is_split_out_for_the_two_customers_that_ask_for_it():

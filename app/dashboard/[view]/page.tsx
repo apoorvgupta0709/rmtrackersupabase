@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { currentBuildId, currentUser, supabaseServer } from "@/lib/supabase/server";
-import DataTable from "./table";
+import DataTable, { type PricingContext } from "./table";
 import Picker from "./pick";
 import { VIEWS, type TableSpec, type Unit } from "./views";
 
@@ -49,6 +49,56 @@ async function fetchSection(
   return { rows, capped: (more ?? []).length > 0 };
 }
 
+/**
+ * One drill-down's rows, whole.
+ *
+ * Paged for the same reason `fetchSection` is: PostgREST caps a response at a thousand
+ * rows and says nothing about it, and a quarter of billing for a large customer is well
+ * past that. A CN/DN claim built from the first thousand of seventeen hundred invoices
+ * would look complete and be short by a third.
+ */
+async function fetchDetail(
+  supabase: Awaited<ReturnType<typeof supabaseServer>>,
+  buildId: string,
+  key: string,
+): Promise<Rows> {
+  const rows: Rows = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data } = await supabase
+      .from("detail_rows")
+      .select("row")
+      // The prefix explicitly: it leads the primary key and it is what the policy checks
+      // a grant against. The build id likewise — an admin may read every build, so an
+      // unfiltered query would merge them.
+      .eq("build_id", buildId)
+      .eq("prefix", key.split("|", 1)[0])
+      .eq("detail_key", key)
+      .order("seq")
+      .range(from, from + PAGE - 1);
+    const page = (data ?? []).map((d) => d.row as Record<string, unknown>);
+    rows.push(...page);
+    if (page.length < PAGE) return rows;
+  }
+}
+
+/**
+ * The query string with one parameter changed and the rest kept.
+ *
+ * The unit toggle used to rebuild the URL from `?unit=` alone, which was harmless only
+ * because no view had both a unit switch and a selector. The trend tab now has both, and
+ * switching Tonnes/Pieces would have silently cleared the customer.
+ */
+function withParam(
+  query: Record<string, string | undefined>,
+  key: string,
+  value: string,
+): string {
+  const next = new URLSearchParams();
+  for (const [k, v] of Object.entries(query)) if (v !== undefined && k !== key) next.set(k, v);
+  next.set(key, value);
+  return next.toString();
+}
+
 export default async function ViewPage({
   params,
   searchParams,
@@ -62,7 +112,18 @@ export default async function ViewPage({
 
   const query = await searchParams;
   const unit: Unit = query.unit === "nos" ? "nos" : "mt";
-  const pick = spec.pick ? (query[spec.pick.param] ?? "") : "";
+
+  // Every selector's value, and which of them the tables are actually waiting on. A
+  // selector declared `within` another is a narrower: unset means "all of them inside the
+  // outer selection", where an unset outer selector means the tab has not been asked a
+  // question yet and shows no narrowed table at all.
+  const pickSpecs = spec.picks ?? [];
+  const picks: Record<string, string> = Object.fromEntries(
+    pickSpecs.map((p) => [p.param, query[p.param] ?? ""]),
+  );
+  const narrower = new Set(pickSpecs.filter((p) => p.within).map((p) => p.param));
+  const awaiting = pickSpecs.filter((p) => !p.within && !picks[p.param]);
+  const pick = pickSpecs.length ? picks[pickSpecs[0].param] : "";
 
   const supabase = await supabaseServer();
   const buildId = await currentBuildId(supabase);
@@ -98,6 +159,7 @@ export default async function ViewPage({
     unit,
     scalars,
     pick: pick || undefined,
+    picks,
   });
 
   // Two tables can be built from one section — the STR plan's buckets and the lines
@@ -130,8 +192,16 @@ export default async function ViewPage({
     // Narrow before deriving, so a `flatten` that joins across sections sees only the
     // rows the reader asked for — the history's "on schedule" column is this customer's
     // schedule, not everybody's.
-    if (table.pickField) {
-      rows = pick ? rows.filter((row) => String(row[table.pickField!] ?? "") === pick) : [];
+    for (const [param, field] of Object.entries(table.pickFields ?? {})) {
+      const value = picks[param] ?? "";
+      if (!value) {
+        // An unanswered narrower means every value inside the outer selection; an
+        // unanswered outer selector means the table has nothing to show yet.
+        if (narrower.has(param)) continue;
+        rows = [];
+        break;
+      }
+      rows = rows.filter((row) => String(row[field] ?? "") === value);
     }
     if (table.flatten) rows = table.flatten(rows, { sections: sectionRows, pick: pick || undefined });
     return { rows, capped };
@@ -143,7 +213,8 @@ export default async function ViewPage({
   const shown = tables
     .map((table) => ({ table, ...rowsFor(table) }))
     .filter(({ table, rows }) => {
-      if (table.pickField && !pick) return false;
+      const waiting = awaiting.some((p) => table.pickFields?.[p.param]);
+      if (waiting) return false;
       return !(table.hideWhenEmpty && rows.length === 0);
     });
 
@@ -154,6 +225,13 @@ export default async function ViewPage({
   // build's date, this tab's scalars, and the sections already fetched for it — the PCR
   // walks the code repository while pricing off the priced-SKU section beside it. Only
   // sections this tab already holds are passed, so no format costs an extra query.
+  // Drill-down rows a copy format needs, fetched here because a format cannot fetch: the
+  // clipboard is only writable inside the click that asked for it. Nothing is read until
+  // a customer is picked, so a tab that is only being looked at costs no extra query.
+  for (const { key, as } of spec.prefetchDetails?.(picks, scalars) ?? []) {
+    sectionRows[as] = await fetchDetail(supabase, buildId, key);
+  }
+
   const copyContext = {
     asOf: String(scalars.metadata?.as_of ?? ""),
     scalars,
@@ -177,6 +255,39 @@ export default async function ViewPage({
     canAssign = me?.role === "admin";
   }
 
+  // Corrections to the contract price, and what they are computed against. Fetched only
+  // where a column asks for them, and not build-scoped for the same reason an assignment
+  // is not: a SKU's operations and a customer's PO price are facts about the SKU, and a
+  // build is replaced wholesale every refresh.
+  const editable = tables.some((t) => t.columns.some((c) => c.edit));
+  let pricing: PricingContext | undefined;
+  if (editable) {
+    const [{ data: operationRows }, { data: priceRows }, me] = await Promise.all([
+      supabase.from("sku_operations").select("customer,bucket,material_code,length_mm,operations"),
+      supabase.from("customer_po_prices").select("customer,bucket,material_code,length_mm,quarter,price,unit"),
+      currentUser(),
+    ]);
+    const operations: Record<string, string[]> = {};
+    for (const row of operationRows ?? []) {
+      operations[`${row.customer}|${row.bucket}|${row.material_code}|${Number(row.length_mm)}`] =
+        (row.operations as string[]) ?? [];
+    }
+    const poPrices: Record<string, { price: number; unit: string }> = {};
+    for (const row of priceRows ?? []) {
+      if (row.price === null) continue;
+      const key =
+        `${row.customer}|${row.bucket}|${row.material_code}|${Number(row.length_mm)}|${row.quarter}`;
+      poPrices[key] = { price: Number(row.price), unit: String(row.unit ?? "") };
+    }
+    pricing = {
+      rates: (scalars.sku_pricing?.operation_rates_inr_per_ton as Record<string, number>) ?? {},
+      quarters: (scalars.sku_pricing?.quarters as string[]) ?? [],
+      operations,
+      poPrices,
+      canEdit: me?.role === "admin",
+    };
+  }
+
   // What each assignable column may be set to. `governed_buckets` is the build's own list
   // of what `Bucketting` governs, so a bucket added upstream is offered the next day
   // without a code change; the Megh keys come from the plan the same way.
@@ -189,17 +300,23 @@ export default async function ViewPage({
     ].sort(),
   };
 
-  // The options the selector offers, drawn from the section rather than declared, so a
-  // customer that arrives in a build appears without a code change.
-  const pickOptions = spec.pick
-    ? [
-        ...new Set(
-          (sectionRows[spec.pick.from.section] ?? [])
-            .map((row) => String(row[spec.pick!.from.field] ?? ""))
-            .filter(Boolean),
-        ),
-      ].sort((a, b) => a.localeCompare(b, "en", { numeric: true, sensitivity: "base" }))
-    : [];
+  // The options each selector offers, drawn from the section rather than declared, so a
+  // customer that arrives in a build appears without a code change. A narrower offers only
+  // what survives its outer selection — a ship-to list spanning every customer would be
+  // the 26-name list the grouping exists to avoid.
+  const collate = (a: string, b: string) =>
+    a.localeCompare(b, "en", { numeric: true, sensitivity: "base" });
+  const pickOptions: Record<string, string[]> = {};
+  for (const p of pickSpecs) {
+    const outer = p.within ? pickSpecs.find((q) => q.param === p.within) : undefined;
+    const outerValue = outer ? picks[outer.param] : "";
+    const source = (sectionRows[p.from.section] ?? []).filter(
+      (row) => !outer || !outerValue || String(row[outer.from.field] ?? "") === outerValue,
+    );
+    pickOptions[p.param] = [
+      ...new Set(source.map((row) => String(row[p.from.field] ?? "")).filter(Boolean)),
+    ].sort(collate);
+  }
 
   return (
     <>
@@ -217,7 +334,7 @@ export default async function ViewPage({
           {(["mt", "nos"] as Unit[]).map((option) => (
             <Link
               key={option}
-              href={`/dashboard/${view}?unit=${option}`}
+              href={`/dashboard/${view}?${withParam(query, "unit", option)}`}
               className="label"
               style={{
                 padding: "5px 10px",
@@ -237,15 +354,26 @@ export default async function ViewPage({
         </div>
       )}
 
-      {spec.pick && (
-        <Picker
-          param={spec.pick.param}
-          label={spec.pick.label}
-          options={pickOptions}
-          value={pick}
-          view={view}
-        />
-      )}
+      {pickSpecs
+        // A narrower has nothing to narrow until its outer selector is answered.
+        .filter((p) => !p.within || picks[p.within])
+        .map((p) => (
+          <Picker
+            key={p.param}
+            param={p.param}
+            label={p.label}
+            options={pickOptions[p.param] ?? []}
+            value={picks[p.param] ?? ""}
+            view={view}
+            optional={Boolean(p.within)}
+            clears={pickSpecs.filter((q) => q.within === p.param).map((q) => q.param)}
+            hint={
+              p.within
+                ? "Leave this on All to read every ship-to the customer buys under."
+                : undefined
+            }
+          />
+        ))}
 
       {facts.length > 0 && (
         <div
@@ -269,18 +397,18 @@ export default async function ViewPage({
         </div>
       )}
 
-      {!anyRows && !(spec.pick && !pick) && (
+      {!anyRows && awaiting.length === 0 && (
         <div className="notice" style={{ marginTop: 20, maxWidth: 720 }}>
           Nothing on this tab. Either no build is published yet, or this tab is not granted
           to your account — an ungranted tab returns no rows rather than hiding them.
         </div>
       )}
 
-      {spec.pick && !pick && (
-        <div className="notice" style={{ marginTop: 20, maxWidth: 720 }}>
-          {spec.pick.prompt}
+      {awaiting.map((p) => (
+        <div key={p.param} className="notice" style={{ marginTop: 20, maxWidth: 720 }}>
+          {p.prompt}
         </div>
-      )}
+      ))}
 
       {shown.map(({ table, rows, capped }) => (
         <DataTable
@@ -298,6 +426,7 @@ export default async function ViewPage({
           assignments={assignments}
           assignOptions={assignOptions}
           canAssign={canAssign}
+          pricing={pricing}
         />
       ))}
     </>

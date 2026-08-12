@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
-import { SLOTS } from "./adapters";
-import { isMonthSheet, recognise, type Recognition } from "./recognise";
+import { SLOTS } from "./adapters.ts";
+import { isMonthSheet, recognise, type Recognition } from "./recognise.ts";
 
 /**
  * Turn an uploaded .xlsx into the cell grids the pipeline reads.
@@ -65,7 +65,7 @@ function encode(cell: XLSX.CellObject | undefined): Cell {
   return String(v);
 }
 
-function gridFor(worksheet: XLSX.WorkSheet): { rows: Cell[][]; nCols: number } {
+export function gridFor(worksheet: XLSX.WorkSheet): { rows: Cell[][]; nCols: number } {
   const ref = worksheet["!ref"];
   if (!ref) return { rows: [], nCols: 0 };
   const range = XLSX.utils.decode_range(ref);

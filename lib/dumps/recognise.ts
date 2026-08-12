@@ -20,7 +20,7 @@
  *     slot has happened before from a filename alone, and nothing downstream catches it.
  */
 
-import { SLOTS } from "./adapters";
+import { SLOTS } from "./adapters.ts";
 
 /** `RM Tracker_18092025.XLSX` -> `rm tracker 18092025`. */
 export function normalise(filename: string): string {

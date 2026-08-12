@@ -69,6 +69,33 @@ class ReadSpec:
     usecols: str | None = None
     dtype: dict | None = None
     optional: bool = False
+    # The column that says what a row is about — the material code, the size key, the
+    # invoice. Shown first in the uploader's preview, because it is the one a reader
+    # checks to know the right file arrived.
+    key_column: str | None = None
+    # The columns the pipeline reads off this sheet, exactly as the file writes them —
+    # double spaces, trailing spaces, non-breaking spaces and all.
+    #
+    # This exists for the uploader, not for the read: a workbook whose headers have moved
+    # is accepted today and fails hours later, mid-pipeline, as a `KeyError` naming one
+    # column. Declared here, the browser can say which columns it found and which it did
+    # not before anything is stored. It is deliberately **not** exhaustive — a column not
+    # listed is simply not checked, which weakens the check without breaking an upload —
+    # and a test asserts every name listed really is in the corresponding file in `dumps/`,
+    # so a typo here cannot turn into a good file being refused.
+    required: tuple[str, ...] = ()
+
+
+# What every sales extract has to carry. The three quantity columns are all needed and
+# all easy to confuse: `qty in no` is pieces, `Domain for z_qty_meter` is metres, and
+# `Quantity` is kilograms whatever the sales unit says.
+SALES_COLUMNS = (
+    "CUSTOMER  CD", "CUSTOMER  NAME", "MATERAIL NUMBER", "Material   Description",
+    "Length for TATA Tubes Material", "MATERIAL GROUP", "BILLING  DATE",
+    "qty in no", "Quantity", "Domain for z_qty_meter",
+    "RATE/UNIT", "SALES  UNIT", "Billing  Document Number", "Billing Item",
+    "DESP P LANT", "SHIP TO PARTY C", "SHIPTO PARTY DISC",
+)
 
 
 def _sales_like(filename: str, *, optional: bool = False) -> ReadSpec:
@@ -81,21 +108,41 @@ def _sales_like(filename: str, *, optional: bool = False) -> ReadSpec:
     `str` on every sales file rather than only on the daily dump.
     """
     return ReadSpec((filename,), "Sheet1", 0,
-                    dtype={"MATERAIL NUMBER": str}, optional=optional)
+                    dtype={"MATERAIL NUMBER": str}, optional=optional,
+                    key_column="MATERAIL NUMBER", required=SALES_COLUMNS)
 
 
 SLOTS: dict[str, ReadSpec] = {
     # The governing mapping workbook. Three sheets, three different shapes.
-    "bucketting": ReadSpec(MODEL_FILES, "Bucketting", 1, usecols="U:AF"),
-    "oem_key": ReadSpec(MODEL_FILES, "OEM_key_1_rev codes", 0, usecols="A:C"),
-    "schedule": ReadSpec(MODEL_FILES, CALLER_NAMES_THE_SHEET, 2),
+    "bucketting": ReadSpec(
+        MODEL_FILES, "Bucketting", 1, usecols="U:AF",
+        key_column="Bucket",
+        required=("Bucket", "CTL Bucket", "Material Codes", "Annealed"),
+    ),
+    "oem_key": ReadSpec(
+        MODEL_FILES, "OEM_key_1_rev codes", 0, usecols="A:C",
+        key_column="Customer ", required=("Customer ", "OEM"),
+    ),
+    "schedule": ReadSpec(
+        MODEL_FILES, CALLER_NAMES_THE_SHEET, 2,
+        key_column="Bucket",
+        required=(
+            "Bucket", "CTL Bucket", "MATERIAL NO", "MATERIAL DES", "Helper Customer",
+            "CUSTOMER CODE", "CUSTOMER NAME", "ACTUAL OD", "TICKNESS", "LENGTH",
+            "UoM", "SCHEDULE IN MT", "SCHEDULE in nos",
+            # The three value-add flags the pricing tab reads. `Chamferring ` really does
+            # end in a space, and dropping it silently prices every SKU without it.
+            "FC/NFC", "Chamferring ", "Angle Cut",
+        ),
+    ),
     "schedule_supplement": ReadSpec(("schedule_supplement.xlsx",), optional=True),
 
     "sales": _sales_like("sales.xlsx"),
     # An optional longer sales window for the code repository. The daily dump is the
     # current month only, too short to see every code a customer has been billed under.
     "sales_history": ReadSpec(("sales_history.xlsx",), 0, 0,
-                              dtype={"MATERAIL NUMBER": str}, optional=True),
+                              dtype={"MATERAIL NUMBER": str}, optional=True,
+                              key_column="MATERAIL NUMBER", required=SALES_COLUMNS),
     # Archived sales driving the past-sales trend. Each closed month is archived this
     # way; the trend takes each month from exactly one source, daily dump winning.
     "sales_q4": _sales_like("sales_q4.xlsx", optional=True),
@@ -104,19 +151,53 @@ SLOTS: dict[str, ReadSpec] = {
 
     # `TRANSIT STOCK` is never read off this file — the transit figure comes from the
     # transfer dump, and reading both counts it twice.
-    "stock": ReadSpec(("stock.xlsx",), "PLANT STOCKS", 1),
+    "stock": ReadSpec(
+        ("stock.xlsx",), "PLANT STOCKS", 1,
+        key_column="Material",
+        required=(
+            "Plant", "Material", "Material Description", "CUSTOMER NAME",
+            "CTL/LL", "LENGTH", "Ageing days", "KG", "MT", "NOS",
+        ),
+    ),
     # The header carries a non-breaking space in `Material No`; the caller replaces it
     # after the read, so the dtype key must carry it too or the pin misses.
-    "wip": ReadSpec(("wip.xlsx",), 0, 0, dtype={"Material\xa0No": str}),
-    "rfd": ReadSpec(("rfd_4731.xlsx", "rfd.xlsx"), "Sheet5", 1),
-    "zmat": ReadSpec(("zmat.xlsx",), "Sheet1", 0),
+    # Two of this sheet's headers carry a non-breaking space, and both are load-bearing:
+    # the caller replaces them after the read, so a dtype pin or a check written with an
+    # ordinary space simply misses.
+    "wip": ReadSpec(("wip.xlsx",), 0, 0, dtype={"Material\xa0No": str},
+                    key_column="Material\xa0No",
+                    required=("Material\xa0No", "Material Description",
+                              "Total\xa0Stock")),
+    "rfd": ReadSpec(("rfd_4731.xlsx", "rfd.xlsx"), "Sheet5", 1,
+                    key_column="CTL Code",
+                    required=("CTL Code", "CTL ", "RFD Qty.", "WEIGHT")),
+    "zmat": ReadSpec(("zmat.xlsx",), "Sheet1", 0,
+                     key_column="Column1",
+                     required=("Column1", "MATERIAL DESCRIPTION", "MATERIAL TYPE")),
 
-    "vsm_tvsm": ReadSpec(("rm_tracker_tvsm.xlsx",), "TVSM", 2),
-    "vsm_stock": ReadSpec(("rm_tracker_tvsm.xlsx",), "vsm stock", 2),
+    "vsm_tvsm": ReadSpec(("rm_tracker_tvsm.xlsx",), "TVSM", 2,
+                         key_column="key",
+                         required=("key", "VSM Requirement", "VSM Sales", "VSM Stock")),
+    "vsm_stock": ReadSpec(
+        ("rm_tracker_tvsm.xlsx",), "vsm stock", 2,
+        key_column="key",
+        required=("key", "O D", "Thk.", "Length", "Grade", "FC/NFC", "Schedule", "Stock"),
+    ),
 
-    "receivables": ReadSpec(("yf65.xlsx",), "Sheet1", 0, optional=True),
+    "receivables": ReadSpec(
+        ("yf65.xlsx",), "Sheet1", 0, optional=True,
+        key_column="Billing Doc",
+        required=("Billing Doc", "Customer Code", "Customer Name", "Doc Type",
+                  "Document Date", "Nature", "Open Amount"),
+    ),
+    # The caller collapses runs of whitespace in these headers before reading them, so
+    # the names here are the file's own — `CUSTOMER  CD` with two spaces, not one.
     "transfers": ReadSpec(("transfer.xlsx",), 0, 0,
-                          dtype={"MATERAIL NUMBER": str}, optional=True),
+                          dtype={"MATERAIL NUMBER": str}, optional=True,
+                          key_column="MATERAIL NUMBER",
+                          required=("MATERAIL NUMBER", "Material   Description",
+                                    "DESP P LANT", "CUSTOMER  CD", "Invoice Type",
+                                    "GR DATE", "Quantity", "qty in no")),
 }
 
 # Files whose sheets are enumerated by a spec dict in the pipeline rather than listed
@@ -144,20 +225,42 @@ def slots_for_families(order_book_sheets, pricing_sheets, signoff_sheets):
         # spec list alternatives.
         candidates = spec["code_column"]
         candidates = (candidates,) if isinstance(candidates, str) else (candidates or ())
+        # Only the columns the sheet is read *through* are required. The code column is
+        # deliberately left out: it is a list of alternatives and the pipeline already
+        # resolves whichever of them is present, with a recorded fault where none is.
+        required = tuple(
+            column for column in (
+                spec.get("quantity_column"), spec.get("remarks_column"),
+            ) if column
+        )
         slots[f"orders:{sheet}"] = ReadSpec(
             ("orders.xlsx",), sheet, spec["header"],
             dtype={column: str for column in candidates} or None, optional=True,
+            # Only where the sheet names one column and not a list of alternatives: the
+            # list exists because the three planning sheets disagree about the name, and
+            # naming the first of them would name one this sheet does not have.
+            key_column=candidates[0] if len(candidates) == 1 else None,
+            required=required,
         )
 
     for route, spec in pricing_sheets.items():
         # Contract sheets are read positionally — the quarters are column offsets — so
-        # they are read with no header at all.
+        # they are read with no header at all, and there is nothing to check by name.
         slots[f"contract:{route}"] = ReadSpec(
             ("contract.xlsx",), spec["sheet"], None, optional=True,
         )
 
-    for sheet in signoff_sheets:
-        slots[f"signoff:{sheet}"] = ReadSpec(("signoff.xlsx",), sheet, 0, optional=True)
+    for sheet, spec in signoff_sheets.items():
+        required = tuple(
+            column for column in (
+                spec.get("code"), spec.get("quantity"),
+                spec.get("flag"), spec.get("signed"), spec.get("unsigned"),
+            ) if column
+        )
+        slots[f"signoff:{sheet}"] = ReadSpec(
+            ("signoff.xlsx",), sheet, 0, optional=True,
+            key_column=spec.get("code"), required=required,
+        )
 
     return slots
 

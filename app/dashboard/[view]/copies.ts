@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * The four copy formats that are not "the table as a grid".
+ * The copy formats that are not "the table as a grid".
  *
  * Each of these is written to be pasted somewhere specific by someone who is not looking
  * at this dashboard — a dispatch team's sheet, a customer's WhatsApp thread, an STR
@@ -15,7 +15,7 @@
  * document rather than a dump of the tab.
  */
 
-export type CopyKind = "clearance" | "dispatch" | "str" | "pcr";
+export type CopyKind = "clearance" | "dispatch" | "str" | "pcr" | "calculation";
 
 /** A copy button, as a view declares it. Serializable: it crosses the server boundary. */
 export type CopySpec = { kind: CopyKind; arg?: string };
@@ -26,6 +26,8 @@ export type CopyContext = {
   /** Sections already fetched for this tab, for a format that spans two of them. */
   sections: Record<string, Record<string, unknown>[]>;
 };
+
+import { rateInSalesUnit } from "./pricing.ts";
 
 type Row = Record<string, unknown>;
 export type CopyResult = { text: string } | { error: string };
@@ -325,6 +327,145 @@ function pcr(rows: Row[], ctx: CopyContext, quarter?: string): CopyResult {
   return { text: tsv(lines) };
 }
 
+/* ---- The quarterly CN/DN calculation --------------------------------------- */
+
+/**
+ * A quarter of billing for one customer, priced against the contract, in the shape the
+ * price-difference reconciliation is built in.
+ *
+ * This is the working file that used to be typed up by hand as
+ * `Price Working <Q> <customer>.xlsx` before the reco script could be run against it. It
+ * pastes straight into that sheet.
+ *
+ * Three things about it are load-bearing:
+ *
+ *  - **The rows it prices from are the ones on screen**, which are the priced SKUs *as
+ *    corrected*. An operation added a minute ago is in this document, and so is a PO price
+ *    typed a minute ago, without waiting for a refresh.
+ *  - **The PO rate is converted into the unit the line was billed in.** The contract
+ *    quotes by the metre; SAP bills by the piece, the metre or the kilogram. Quoting a
+ *    per-metre price against a kilogram quantity is how a claim comes out an order of
+ *    magnitude wrong, so every line states the unit it was worked in.
+ *  - **Rejection is left blank.** The dashboard cannot know what a customer rejected, and
+ *    a zero would read as "none" rather than as "not filled in yet". Final qty therefore
+ *    equals the billed qty until somebody types a rejection into the sheet.
+ *
+ * Megh Steel is not in it. It is billed per kilogram against a conversion rate and its
+ * reconciliation does not follow the contract formula, so it gets its own document.
+ */
+const CALCULATION_COLUMNS = [
+  "CUSTOMER", "CUSTOMER CODE", "BILLING DOCUMENT", "BILLING ITEM",
+  "MATERIAL CODE", "MATERIAL DESCRIPTION", "SALES UNIT",
+  "QTY IN NOS", "QTY IN M", "QTY IN KG",
+  "BILLING RATE", "PO RATE", "DIFFERENCE OF PRICE",
+  "REJECTION", "FINAL QTY", "CN/DN VALUE", "CN/DN", "BASIS",
+];
+
+function calculation(rows: Row[], ctx: CopyContext, quarter?: string): CopyResult {
+  const q = quarter ?? (ctx.scalars.sku_pricing?.reco_quarters ?? []).slice(-1)[0];
+  if (!q) {
+    return { error: "This build holds no quarter of billing, so there is nothing to price." };
+  }
+  const lines = ctx.sections[`reco:${q}`] ?? [];
+  if (!lines.length) {
+    return {
+      error:
+        `No billing lines for this customer in ${q}. Either it bought nothing that `
+        + "quarter, or the sales dump covering it has not been archived.",
+    };
+  }
+
+  /**
+   * The priced SKUs to quote against.
+   *
+   * The visible rows first, because those are the ones carrying corrections made since
+   * the build — but every one of the customer's priced rows behind them, because this
+   * document is sent to someone. A search box still filled in would otherwise drop a SKU
+   * out of a CN/DN claim silently, and the line would go out reading "no priced SKU for
+   * this code" as though the schedule had never carried it. Same rule the dispatch plan
+   * and the clearance list follow, and for the same reason.
+   */
+  const customer = String(lines[0]?.customer ?? "");
+  const behind = (ctx.sections.sku_pricing ?? [])
+    .filter((r) => String(r.customer ?? "") === customer);
+  const byCode = new Map<string, Row>();
+  const byCtl = new Map<string, Row>();
+  for (const r of [...rows, ...behind]) {
+    const code = String(r.material_code ?? "");
+    if (code && !byCode.has(code)) byCode.set(code, r);
+    const ctl = String(r.ctl_bucket ?? "");
+    if (ctl && !byCtl.has(ctl)) byCtl.set(ctl, r);
+  }
+
+  const out: (string | number)[][] = [
+    ["PRICE DIFFERENCE WORKING", `as of ${ctx.asOf}`, q],
+    CALCULATION_COLUMNS,
+  ];
+
+  for (const line of lines) {
+    const unit = String(line.sales_unit ?? "").trim().toUpperCase();
+    const priced = byCode.get(String(line.material_code ?? ""))
+      ?? byCtl.get(String(line.ctl_bucket ?? ""));
+
+    // Whatever the line was billed in is what everything else on it is stated in.
+    const billedQty = unit === "M" ? n(line.qty_m) : unit === "KG" ? n(line.qty_kg) : n(line.qty_nos);
+    const billingRate = line.billing_rate === null || line.billing_rate === undefined
+      ? null : n(line.billing_rate);
+
+    let poRate: number | null = null;
+    let basis = "no priced SKU for this code";
+    if (priced) {
+      const lengthM = n(priced.price_length_m) || null;
+      const kgPerM = n(priced.kg_per_m) || null;
+      const typed = priced[`${q} customer price`];
+      const calculated = priced[`${q} per m`];
+      if (typed !== null && typed !== undefined) {
+        // A typed PO price is in the SKU's own unit, so it comes back to a per-metre
+        // figure before being converted into the unit this line was billed in.
+        const perM = String(priced.unit) === "INR/m" ? n(typed) : lengthM ? n(typed) / lengthM : null;
+        poRate = perM === null ? null : rateInSalesUnit(perM, unit, lengthM, kgPerM);
+        basis = `customer PO price ${q}`;
+      } else if (calculated !== null && calculated !== undefined) {
+        poRate = rateInSalesUnit(n(calculated), unit, lengthM, kgPerM);
+        const operations = Array.isArray(priced.operations) ? (priced.operations as string[]) : [];
+        basis = `${priced.contract_key} + ${operations.join(", ") || "no value adds"}`;
+      } else {
+        basis = `no ${q} contract price for this SKU`;
+      }
+      if (poRate === null && basis.startsWith("customer") === false) {
+        basis = `${basis} — cannot be quoted in ${unit || "this unit"}`;
+      }
+    }
+
+    const difference = poRate === null || billingRate === null ? null : poRate - billingRate;
+    // Rejection is blank, so the final quantity is the billed one until it is filled in.
+    const finalQty = billedQty;
+    const value = difference === null ? null : difference * finalQty;
+
+    out.push([
+      String(line.customer ?? ""),
+      String(line.customer_code ?? ""),
+      String(line.invoice_no ?? ""),
+      String(line.billing_item ?? ""),
+      String(line.material_code ?? ""),
+      String(line.description ?? ""),
+      unit,
+      plain(line.qty_nos, 0),
+      plain(line.qty_m, 3),
+      plain(line.qty_kg, 3),
+      plain(billingRate, 4),
+      plain(poRate, 4),
+      plain(difference, 4),
+      "",
+      plain(finalQty, 3),
+      plain(value, 2),
+      value === null || Math.abs(value) < 0.005 ? "" : value < 0 ? "CN" : "DN",
+      basis,
+    ]);
+  }
+  return { text: tsv(out) };
+}
+
 /* ---- The registry --------------------------------------------------------- */
 
 export const COPY_FORMATS: Record<
@@ -335,4 +476,8 @@ export const COPY_FORMATS: Record<
   dispatch: { label: () => "Copy dispatch plan", build: dispatch },
   str: { label: () => "Copy STR list", build: strList },
   pcr: { label: (arg) => (arg ? `Raise PCR · ${arg}` : "Raise PCR"), build: pcr },
+  calculation: {
+    label: (arg) => (arg ? `Copy calculation · ${arg}` : "Copy calculation"),
+    build: calculation,
+  },
 };

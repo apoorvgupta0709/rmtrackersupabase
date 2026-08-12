@@ -10,6 +10,11 @@
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
+    // The Node-run checks in `tools/` import these modules directly, and Node's ESM
+    // resolver needs the extension in the specifier. Safe with `noEmit`: nothing here is
+    // compiled by tsc, Next resolves either form, and it is what lets one copy of the
+    // pricing formula serve the app and the check that proves it matches the pipeline.
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",

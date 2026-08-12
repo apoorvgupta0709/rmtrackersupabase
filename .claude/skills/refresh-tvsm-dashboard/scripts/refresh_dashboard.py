@@ -31,6 +31,9 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 # reach the database. Committed with the build it produced, which is what lets a clean
 # clone with no credentials reproduce that build byte for byte.
 ASSIGNMENTS_FILE = SKILL_ROOT / "config" / "bucket_assignments.json"
+# The same arrangement for what the owner corrects on the SKU pricing tab: which
+# value-added operations a SKU really carries, and what the customer's PO prices it at.
+PRICING_OVERRIDES_FILE = SKILL_ROOT / "config" / "pricing_overrides.json"
 
 
 def load_bucket_assignments(path: Path = ASSIGNMENTS_FILE, *, refresh: bool = True) -> dict:
@@ -82,6 +85,152 @@ def load_bucket_assignments(path: Path = ASSIGNMENTS_FILE, *, refresh: bool = Tr
         )
         print(f"  assignments: {sum(len(v) for v in fresh.values())} recorded, file updated")
     return fresh
+
+
+def load_pricing_overrides(
+    path: Path = PRICING_OVERRIDES_FILE, *, refresh: bool = True
+) -> dict:
+    """What the owner has corrected on the SKU pricing tab, freshest first.
+
+    Same arrangement as `load_bucket_assignments`, and for the same reason: the decision
+    is made in the browser, kept in a table that is not scoped to a build, read here at
+    the start of a run, and written back into the repository so a clean clone with no
+    credentials reproduces the same build.
+
+    Two kinds, keyed the same way — `customer|bucket|material code|length in mm`, the same
+    four parts the price build-up key is composed from:
+
+      - `operations`: the set of value-added processes the SKU really carries, which
+        **overrides** the schedule's flags rather than filling in for them. Every SKU
+        where this view disagrees with a customer's own reconciliation is a case where the
+        flags are wrong, so a fallback would correct none of them.
+      - `po_prices`: what the customer's PO says, per quarter. It changes no calculated
+        price; it is quoted as the PO rate in the quarterly CN/DN document.
+    """
+    held = {"operations": {}, "po_prices": {}}
+    if path.exists():
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        held = {kind: stored.get(kind, {}) for kind in held}
+
+    if not refresh:
+        return held
+
+    try:
+        from supabase_rest import SupabaseRest  # noqa: PLC0415 — optional at build time
+
+        client = SupabaseRest(env_file=SKILL_ROOT.parents[2] / ".env.local")
+        operation_rows = client.select(
+            "sku_operations",
+            "select=customer,bucket,material_code,length_mm,operations"
+            "&order=customer,bucket,material_code,length_mm",
+        )
+        price_rows = client.select(
+            "customer_po_prices",
+            "select=customer,bucket,material_code,length_mm,quarter,price,unit"
+            "&order=customer,bucket,material_code,length_mm,quarter",
+        )
+    except Exception as error:  # noqa: BLE001 — any failure means "use what is committed"
+        print(f"  pricing overrides: keeping the committed set ({type(error).__name__})")
+        return held
+
+    fresh = {"operations": {}, "po_prices": {}}
+    for row in operation_rows:
+        fresh["operations"][pricing_override_key(row)] = sorted(row.get("operations") or [])
+    for row in price_rows:
+        if row.get("price") is None:
+            continue
+        key = f"{pricing_override_key(row)}|{row['quarter']}"
+        fresh["po_prices"][key] = {
+            "price": float(row["price"]),
+            "unit": row.get("unit") or "",
+        }
+
+    if fresh != held:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(fresh, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(
+            f"  pricing overrides: {len(fresh['operations'])} operation sets, "
+            f"{len(fresh['po_prices'])} PO prices, file updated"
+        )
+    return fresh
+
+
+def pricing_operation_override(overrides, customer, bucket, material_code, length_mm):
+    """The corrected operation set for one priced SKU, or None where none is recorded.
+
+    None and `[]` are different answers and must stay so: none means the schedule's flags
+    govern, `[]` means somebody looked and said this SKU carries no value adds.
+    """
+    key = pricing_override_key({
+        "customer": customer,
+        "bucket": bucket,
+        "material_code": None if material_code is None or pd.isna(material_code)
+                         else str(material_code),
+        "length_mm": length_mm,
+    })
+    return (overrides or {}).get("operations", {}).get(key)
+
+
+def pricing_override_key(row) -> str:
+    """`customer|material code|length in mm`, written the way the browser writes it.
+
+    The length goes through `float` on both sides before it is printed, so `189` from a
+    build and `189.0` from a Postgres `numeric` are the same key rather than two. An
+    integral length prints without its decimal point, which is what JavaScript's
+    `String(Number(x))` produces — the two must agree or no override ever matches.
+    """
+    length = float(row["length_mm"])
+    written = f"{length:g}"
+    return (
+        f"{row['customer']}|{row['bucket']}|{row.get('material_code') or ''}|{written}"
+    )
+
+
+def none_if_nan(value):
+    """A blank cell as `None`, so it crosses into JSON as null rather than the text "nan"."""
+    return None if pd.isna(value) else value
+
+
+def whole_number_text(value) -> str | None:
+    """An identifier that arrived as a number, back as the text it is.
+
+    `Billing  Document Number` and `Billing Item` are integers in SAP and floats out of
+    pandas, so an invoice reaches a customer's reconciliation as `4731002954.0` and
+    matches nothing. A value that is not a whole number is left as written.
+    """
+    if pd.isna(value):
+        return None
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    if isinstance(value, int):
+        return str(value)
+    return str(value).strip() or None
+
+
+def financial_quarter(billing_month) -> str | None:
+    """`2026-01` -> `Q4 FY26`. The financial year runs April to March.
+
+    Written to match the contract sheet's own quarter labels exactly, because the pricing
+    tab, the price build-up key and this all have to name the same quarter the same way.
+    """
+    if billing_month is None or pd.isna(billing_month):
+        return None
+    try:
+        year, month = (int(part) for part in str(billing_month).split("-")[:2])
+    except ValueError:
+        return None
+    if not 1 <= month <= 12:
+        return None
+    # April starts a new financial year, so January to March close the one already named.
+    quarter = (month - 4) // 3 + 1 if month >= 4 else 4
+    fy = year + 1 if month >= 4 else year
+    return f"Q{quarter} FY{fy % 100:02d}"
+
+
+def financial_quarter_order(label: str) -> tuple[int, int]:
+    """`Q4 FY26` -> `(26, 4)`, so a list of quarters sorts into calendar order."""
+    quarter, fy = label.split(" FY")
+    return int(fy), int(quarter[1:])
 
 
 def norm_code(value):
@@ -442,6 +591,20 @@ OVERDUE_DETAIL_COLUMNS = [
     {"label": "Overdue age (days)", "field": "age_days", "kind": "num"},
     {"label": "Amount", "field": "qty", "kind": "qty"},
 ]
+# The quarterly price-difference working, as the panel shows it. The three quantity
+# columns are summed and the rate is not: a column of rates added together is a number
+# that means nothing, and this document is copied into a claim.
+RECO_DETAIL_COLUMNS = [
+    {"label": "Invoice", "field": "invoice_no"},
+    {"label": "Item", "field": "billing_item"},
+    {"label": "Material code", "field": "material_code"},
+    {"label": "Description", "field": "description"},
+    {"label": "Sales unit", "field": "sales_unit"},
+    {"label": "Qty nos", "field": "qty_nos", "kind": "num", "add": True},
+    {"label": "Qty M", "field": "qty_m", "kind": "num", "add": True},
+    {"label": "Qty KG", "field": "qty_kg", "kind": "num", "add": True},
+    {"label": "Billing rate", "field": "billing_rate", "kind": "num"},
+]
 PRICE_BUILD_DETAIL_COLUMNS = [
     {"label": "Component", "field": "operation"},
     {"label": "INR / MT", "field": "inr_per_mt", "kind": "num"},
@@ -786,7 +949,8 @@ def build_sources(input_dir: Path) -> Sources:
 
 
 def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
-         sources: Sources | None = None, assignments: dict | None = None):
+         sources: Sources | None = None, assignments: dict | None = None,
+         pricing_overrides: dict | None = None):
     input_dir = input_dir.resolve()
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -795,6 +959,8 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     # tests do — and then nothing is read and nothing is written.
     if assignments is None:
         assignments = load_bucket_assignments()
+    if pricing_overrides is None:
+        pricing_overrides = load_pricing_overrides()
     # Where the input frames come from. The dumps folder by default; `scripts/sources.py`
     # carries the read spec for every slot so that a second backend serves the same
     # frames without restating twenty-one sheet names and header rows.
@@ -4069,6 +4235,7 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     # contract addressable from the schedule at all.
     pricing_rows = []
     pricing_unpriced = []
+    pricing_corrections = 0
     pricing_available = bool(contract_sheets)
     pricing_note = None if pricing_available else "No contract price sheet was supplied."
     contract_index = {}
@@ -4202,6 +4369,14 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             description = (
                 None if pd.isna(r["MATERIAL DES"]) else str(r["MATERIAL DES"]).strip()
             )
+            length_mm = pd.to_numeric(r["LENGTH"], errors="coerce")
+            length_m = None if pd.isna(length_mm) else float(length_mm) / 1000
+            # The same cut-off the rest of the dashboard uses: at or above 3.5 m the
+            # tube is a long length, sold by the metre; below it, a cut piece.
+            is_long = length_m is not None and length_m >= LONG_LENGTH_MIN_M
+            unit = "INR/m" if is_long else "INR/nos"
+            length_written = None if length_m is None else round(length_m * 1000, 1)
+
             operations = {}
             if r["fin_cut"]:
                 operations["Fin cut"] = PRICING_OPERATION_RATES["Fin cut"]
@@ -4213,16 +4388,26 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             if r["material_key"] in annealed_codes or description_annealed:
                 label = f"Annealing {match['route']}"
                 operations[label] = PRICING_OPERATION_RATES[label]
+            # The owner's correction **overrides** the flags rather than filling in where
+            # they are silent. Every SKU where this view disagrees with a customer's own
+            # reconciliation is a case where the flags said something and it was wrong — a
+            # fin-cut ladder on a `PE` line the schedule does not flag, a fin cut charged
+            # per `FC` that the customer waived — so a fallback would correct none of them.
+            if length_written is not None:
+                corrected = pricing_operation_override(
+                    pricing_overrides, r["customer_display"], bucket,
+                    r["material_key"], length_written,
+                )
+                if corrected is not None:
+                    operations = {
+                        name: PRICING_OPERATION_RATES[name]
+                        for name in corrected if name in PRICING_OPERATION_RATES
+                    }
+                    pricing_corrections += 1
             operations_per_m = (
                 sum(rate * kg_per_m / 1000 for rate in operations.values())
                 if kg_per_m else 0.0
             )
-            length_mm = pd.to_numeric(r["LENGTH"], errors="coerce")
-            length_m = None if pd.isna(length_mm) else float(length_mm) / 1000
-            # The same cut-off the rest of the dashboard uses: at or above 3.5 m the
-            # tube is a long length, sold by the metre; below it, a cut piece.
-            is_long = length_m is not None and length_m >= LONG_LENGTH_MIN_M
-            unit = "INR/m" if is_long else "INR/nos"
             row = {
                 "customer": r["customer_display"],
                 "material_code": r["material_key"],
@@ -4233,10 +4418,14 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                 "contract_type": match["contract_type"],
                 "route": match["route"],
                 "matched_via": via,
-                "length_mm": None if length_m is None else round(length_m * 1000, 1),
+                "length_mm": length_written,
                 "kind": "LL" if is_long else "CTL",
                 "unit": unit,
-                "kg_per_m": None if kg_per_m is None else round(kg_per_m, 4),
+                # Six decimals, not four: the contract quotes a weight like 5.269825 and
+                # it multiplies a rate in thousands, so a fourth-decimal truncation shows
+                # up in the paisa of a price the customer's own reconciliation is checked
+                # against. The column renders to two either way.
+                "kg_per_m": None if kg_per_m is None else round(kg_per_m, 6),
                 "operations": sorted(operations),
                 "operations_per_m": round(operations_per_m, 4),
                 "schedule_mt": round(float(r["schedule_mt"] or 0), 3),
@@ -4248,7 +4437,14 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                 if per_m is None:
                     row[quarter] = None
                     row[f"{quarter} per m"] = None
+                    row[f"{quarter} base per m"] = None
                     continue
+                # The contract's own base, published rather than left to be recovered by
+                # subtracting the operations back out of the total. The browser reprices a
+                # corrected SKU from this figure, and a base recovered from two separately
+                # rounded numbers is out by up to a hundredth of a paisa — enough to make
+                # the page and the build disagree in the fourth decimal of a build-up.
+                row[f"{quarter} base per m"] = round(per_m, 6)
                 total_per_m = per_m + operations_per_m
                 row[f"{quarter} per m"] = round(total_per_m, 4)
                 row[f"{quarter} base per ton"] = base.get("per_ton")
@@ -4291,8 +4487,13 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                     }
                     for name, rate in sorted(operations.items())
                 ]
+                # The bucket is part of the key, not decoration. Without it, code
+                # 3768904 at 878 mm — which Metalman schedules as both a 1.6 and a 2.5
+                # wall — wrote two different build-ups to one key, and the 1.6 row opened
+                # the 2.5's working: a different weight, a different contract row and a
+                # price 44% higher, with nothing on screen to say so.
                 key = (
-                    f"PRICEBUILD|{row['customer']}|{row['material_code']}"
+                    f"PRICEBUILD|{row['customer']}|{row['bucket']}|{row['material_code']}"
                     f"|{row['length_mm']}|{quarter}"
                 )
                 stock_details[key] = lines
@@ -5017,6 +5218,38 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                 rows["segment"].eq(TREND_SEGMENT_MEGH), "sales_mt"].sum()), 3),
         })
 
+    # Which Helper Customer each SAP code belongs to, and which codes a customer holds.
+    # Built here rather than beside the history below because the trend tables need it
+    # first, to group the sales file's names.
+    codes_by_display, displays_by_code = {}, {}
+    for _, row in schedule_group.iterrows():
+        display = row["customer_display"]
+        for code in row["customer_codes"]:
+            codes_by_display.setdefault(display, set()).add(code)
+            displays_by_code.setdefault(code, set()).add(display)
+
+    # The customer as the *business* names it, beside the customer as SAP names it.
+    #
+    # The sales file writes a ship-to's own spelling, so one customer arrives under
+    # several: Rajsriya under six, Sandhar under four, Elkayem under three — 26 names for
+    # about thirteen customers. A selector offering all 26 asks the reader to know which
+    # of them is the plant they meant, which is not a question the dashboard should be
+    # asking. So each row also carries the Helper Customer its SAP code belongs to.
+    #
+    # A code used under more than one Helper Customer cannot be resolved and keeps its raw
+    # name as its own group — the same rule the history below follows, and for the same
+    # reason: guessing which of two customers a shared code belongs to is worse than
+    # showing it under the name the sales file actually used. So do parties with no
+    # schedule at all, Megh Steel and TVS Motor among them.
+    unique_display_by_code = {
+        code: next(iter(displays))
+        for code, displays in displays_by_code.items()
+        if len(displays) == 1
+    }
+    trend["customer_group"] = (
+        trend["customer_key"].map(unique_display_by_code).fillna(trend["customer_display"])
+    )
+
     # Table two: one ancillary at a time, its SKUs month by month. Megh Steel is in the
     # same list, because "who bought what" is the same question for both.
     trend_customers = sorted({c for c in trend["customer_display"].dropna()})
@@ -5024,8 +5257,15 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     sku_months = month_map(keyed, ["customer_display", "ctl_bucket"])
     sku_months_nos = month_map(
         keyed, ["customer_display", "ctl_bucket"], value="sales_nos", digits=0)
-    trend_customer_skus = [
-        {
+    trend_customer_skus = []
+    for (customer, sku), group in keyed.groupby(["customer_display", "ctl_bucket"]):
+        first = group.iloc[0]
+        months = sku_months.get((customer, sku), {})
+        months_nos = sku_months_nos.get((customer, sku), {})
+        total_mt = round(float(group["sales_mt"].sum()), 3)
+        total_nos = round(float(group["sales_nos"].sum()), 0)
+        trend_customer_skus.append({
+            "customer_group": first["customer_group"],
             "customer": customer,
             "sku": sku,
             "bucket": first["bucket"],
@@ -5037,15 +5277,82 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                 str(c) for c in group["material_key"].dropna()
             })) or None,
             "segment": first["segment"],
-            "months": sku_months.get((customer, sku), {}),
-            "months_nos": sku_months_nos.get((customer, sku), {}),
-            "total_mt": round(float(group["sales_mt"].sum()), 3),
-            "total_nos": round(float(group["sales_nos"].sum()), 0),
-        }
-        for (customer, sku), group in keyed.groupby(["customer_display", "ctl_bucket"])
-        for first in [group.iloc[0]]
-    ]
-    trend_customer_skus.sort(key=lambda r: (r["customer"], -r["total_mt"]))
+            "months": months,
+            "months_nos": months_nos,
+            "total_mt": total_mt,
+            "total_nos": total_nos,
+            # The window total is kept on the row because the average is taken off it,
+            # but the table closes on the average: a SKU bought in three months of eight
+            # has a three-month rate, and its eight-month total reads as a monthly one.
+            "months_active": len(months),
+            "avg_active_month_mt": round(total_mt / len(months), 3) if months else None,
+            "avg_active_month_nos": round(total_nos / len(months), 0) if months else None,
+        })
+    trend_customer_skus.sort(key=lambda r: (r["customer_group"], r["customer"], -r["total_mt"]))
+
+    # ---- The quarterly price-difference working -----------------------------------
+    #
+    # Every billing line of a quarter, for one customer, in the shape the CN/DN
+    # reconciliation is built in. Until now this was typed up by hand into
+    # `Price Working <Q> <customer>.xlsx` and only then fed to the reco script.
+    #
+    # It is written as a **drill-down**, not a section. A quarter is around eight thousand
+    # billing lines across all customers and a tab fetches a section whole; `detail_rows`
+    # is fetched one key at a time and gated on its prefix, so the page reads only the
+    # customer and quarter actually asked for.
+    #
+    # Three of the sales file's quantity columns are easy to confuse and all three are
+    # needed: `qty in no` is pieces, `Domain for z_qty_meter` is metres, and `Quantity`
+    # is **always kilograms** whatever the sales unit says — confirmed against all three
+    # units by `MATERIAL VAL = RATE/UNIT x (quantity in the sales unit)`.
+    #
+    # Megh Steel is left out on purpose: it is billed per kilogram against a conversion
+    # rate and its reconciliation does not follow the contract-price formula, so it gets
+    # its own document rather than being quietly mixed into this one.
+    reco_lines = trend[trend["segment"].eq(TREND_SEGMENT_DIRECT)]
+    reco_quarters = set()
+    reco_grouped = {}
+    for _, r in reco_lines.iterrows():
+        quarter = financial_quarter(r["billing_month"])
+        if quarter is None:
+            continue
+        reco_quarters.add(quarter)
+        length_m = pd.to_numeric(r["length_m"], errors="coerce")
+        reco_grouped.setdefault((r["customer_group"], quarter), []).append({
+            "customer": r["customer_group"],
+            "sap_name": r["customer_display"],
+            "customer_code": r["customer_key"],
+            # Text, not a number. SAP writes both as integers and pandas reads them as
+            # floats, so an invoice would otherwise land in the customer's sheet as
+            # `4731002954.0` and match nothing in their file.
+            "invoice_no": whole_number_text(r["Billing  Document Number"]),
+            "billing_item": whole_number_text(r["Billing Item"]),
+            "material_code": r["material_key"],
+            "description": none_if_nan(r["Material   Description"]),
+            "sales_unit": (
+                None if pd.isna(r["SALES  UNIT"]) else str(r["SALES  UNIT"]).strip()
+            ),
+            "qty_nos": round(float(r["sales_nos"] or 0), 0),
+            "qty_m": round(float(r["sales_m"] or 0), 3),
+            "qty_kg": round(float(r["sales_mt"] or 0) * 1000, 3),
+            "billing_rate": (
+                None if pd.isna(r["RATE/UNIT"]) else round(float(r["RATE/UNIT"]), 4)
+            ),
+            # What the copy joins to a priced SKU on, so the PO rate can be quoted.
+            "bucket": none_if_nan(r["bucket"]),
+            "ctl_bucket": none_if_nan(r["ctl_bucket"]),
+            "length_mm": None if pd.isna(length_m) else round(float(length_m) * 1000, 1),
+            "billing_month": r["billing_month"],
+            "unit": "INR",
+        })
+    for (customer, quarter), lines in reco_grouped.items():
+        lines.sort(key=lambda x: (str(x["invoice_no"] or ""), str(x["billing_item"] or "")))
+        stock_details[f"RECO|{customer}|{quarter}"] = lines
+    # Only the quarters this build actually holds billing for. The pricing tab quotes
+    # three contract quarters and the sales window covers two and a bit of them; offering
+    # a quarter with no invoices would hand somebody an empty document that looks like a
+    # nil claim rather than a missing dump.
+    reco_quarters = sorted(reco_quarters, key=financial_quarter_order)
 
     # The same history, re-keyed to the names the customer tracker uses, so a buying
     # meeting can ask "is this month normal for this SKU" without leaving the tab.
@@ -5059,13 +5366,8 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     # 31 July build, and dropping them cost Balaji Press Product and ELKAYEM AUTO Hosur
     # their whole history: 45 tracker lines showing an empty table that reads as "bought
     # nothing" rather than "cannot tell the two apart". A customer can also hold several
-    # codes legitimately — ELKAYEM Hosur buys under two.
-    codes_by_display, displays_by_code = {}, {}
-    for _, row in schedule_group.iterrows():
-        display = row["customer_display"]
-        for code in row["customer_codes"]:
-            codes_by_display.setdefault(display, set()).add(code)
-            displays_by_code.setdefault(code, set()).add(display)
+    # codes legitimately — ELKAYEM Hosur buys under two. `codes_by_display` and
+    # `displays_by_code` are built above, where the trend tables first need them.
     history_keyed = keyed.copy()
     display_rows = []
     for display, codes in codes_by_display.items():
@@ -5665,6 +5967,15 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                 sum(r["schedule_mt"] for r in pricing_unpriced), 3
             ),
             "rows_with_value_adds": sum(1 for r in pricing_rows if r["operations"]),
+            # SKUs whose operations the owner has corrected on the tab. Worth watching:
+            # a correction that stops matching — because a length changed, or a customer
+            # was renamed — goes quiet rather than erroring, and this is where it shows.
+            "rows_with_corrected_operations": pricing_corrections,
+            # The quarterly CN/DN working, as drill-downs: one key per customer per
+            # quarter, and how many billing lines they carry between them.
+            "reco_quarters": reco_quarters,
+            "reco_keys": len(reco_grouped),
+            "reco_lines": sum(len(v) for v in reco_grouped.values()),
             "matched_ignoring_bore": sum(
                 1 for r in pricing_rows if r["matched_via"] != "size"
             ),
@@ -5805,6 +6116,12 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             "available": pricing_available,
             "note": pricing_note,
             "quarters": list(PRICING_QUARTERS),
+            # The quarters the CN/DN calculation can actually be produced for: the ones
+            # this build holds billing lines for, which is not the same list. The contract
+            # covers three quarters and the sales window covers two and a bit of them, so
+            # offering all three would hand somebody an empty document that reads as a nil
+            # claim rather than as a missing dump.
+            "reco_quarters": reco_quarters,
             "operation_rates_inr_per_ton": dict(PRICING_OPERATION_RATES),
         },
         "megh_tracker": megh_rows,
@@ -5838,6 +6155,7 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             "SKUHISTORY": SKU_HISTORY_DETAIL_COLUMNS,
             "LLHISTORY": LL_HISTORY_DETAIL_COLUMNS,
             "PRICEBUILD": PRICE_BUILD_DETAIL_COLUMNS,
+            "RECO": RECO_DETAIL_COLUMNS,
             "TRANSFER": TRANSFER_DETAIL_COLUMNS,
             "ORDERS": ORDER_DETAIL_COLUMNS,
             "MEGHORDERPLAN": ORDER_DETAIL_COLUMNS,

@@ -5,9 +5,13 @@
 // source; this is a projection of it, checked in so the browser bundle needs no Python,
 // and asserted equal by the test suite so it cannot go stale.
 //
-// Note what is NOT here: header rows, column windows, dtype pins. Those are read-time
-// decisions and they stay in Python, because a corrected header row should be a re-read
-// of what was uploaded rather than a request for the owner to send the workbook again.
+// The header row and the column window are here, and the dtype pins are not. The reason
+// is what each is for. Nothing is stored by header row — the grid goes to Postgres raw and
+// the read-time decisions stay in Python, so a corrected header row is a re-read of what
+// was uploaded and not a request for the owner to send the workbook again. But the
+// uploader has to *show* what it read, and it cannot name a column without knowing which
+// row the names are on. A dtype pin decides how a value is parsed, which is a read-time
+// decision through and through, so it stays where it was.
 
 export type DumpSlot = {
   /** Accepted filenames, canonical first; the rest are older names still readable. */
@@ -18,6 +22,20 @@ export type DumpSlot = {
   monthSheet: boolean;
   /** A dump that may simply not have been sent that day. */
   optional: boolean;
+  /** Which row of the grid carries the column names, or null where there are none. */
+  header: number | null;
+  /** An Excel column window such as `U:AF`, where the sheet is read through one. */
+  usecols: string | null;
+  /** The column that says what a row is about, shown first in the preview. */
+  keyColumn: string | null;
+  /**
+   * The columns the pipeline reads off this sheet, as the file writes them.
+   *
+   * Not exhaustive on purpose: a column not listed is not checked, which weakens the
+   * check without ever refusing a good file. A test asserts every name listed really is
+   * in the corresponding file in `dumps/`.
+   */
+  required: string[];
 };
 
 export const SLOTS: Record<string, DumpSlot> = {
@@ -26,150 +44,250 @@ export const SLOTS: Record<string, DumpSlot> = {
     sheet: "Bucketting",
     monthSheet: false,
     optional: false,
+    header: 1,
+    usecols: "U:AF",
+    keyColumn: "Bucket",
+    required: ["Bucket", "CTL Bucket", "Material Codes", "Annealed"],
   },
   "contract:CEW": {
     files: ["contract.xlsx"],
     sheet: "Tata_CEW - Q1 FY27",
     monthSheet: false,
     optional: true,
+    header: null,
+    usecols: null,
+    keyColumn: null,
+    required: [],
   },
   "contract:ERW": {
     files: ["contract.xlsx"],
     sheet: "Tata _ERW-Q4 FY26",
     monthSheet: false,
     optional: true,
+    header: null,
+    usecols: null,
+    keyColumn: null,
+    required: [],
   },
   "oem_key": {
     files: ["rm_tracker_model.xlsx", "july0626_rm_tracker_v1.xlsx"],
     sheet: "OEM_key_1_rev codes",
     monthSheet: false,
     optional: false,
+    header: 0,
+    usecols: "A:C",
+    keyColumn: "Customer ",
+    required: ["Customer ", "OEM"],
   },
   "orders:hk_so": {
     files: ["orders.xlsx"],
     sheet: "hk_so",
     monthSheet: false,
     optional: true,
+    header: 1,
+    usecols: null,
+    keyColumn: "Material Number",
+    required: ["BAL FOR PROD/ROLL(MT)", "Remarks"],
   },
   "orders:hk_str": {
     files: ["orders.xlsx"],
     sheet: "hk_str",
     monthSheet: false,
     optional: true,
+    header: 0,
+    usecols: null,
+    keyColumn: null,
+    required: ["Actual BTP (MT)", "REMARKS"],
   },
   "orders:jsr": {
     files: ["orders.xlsx"],
     sheet: "jsr",
     monthSheet: false,
     optional: true,
+    header: 0,
+    usecols: null,
+    keyColumn: "MATL_NO",
+    required: ["Bal to Desp", "Remarks"],
   },
   "receivables": {
     files: ["yf65.xlsx"],
     sheet: "Sheet1",
     monthSheet: false,
     optional: true,
+    header: 0,
+    usecols: null,
+    keyColumn: "Billing Doc",
+    required: ["Billing Doc", "Customer Code", "Customer Name", "Doc Type", "Document Date", "Nature", "Open Amount"],
   },
   "rfd": {
     files: ["rfd_4731.xlsx", "rfd.xlsx"],
     sheet: "Sheet5",
     monthSheet: false,
     optional: false,
+    header: 1,
+    usecols: null,
+    keyColumn: "CTL Code",
+    required: ["CTL Code", "CTL ", "RFD Qty.", "WEIGHT"],
   },
   "sales": {
     files: ["sales.xlsx"],
     sheet: "Sheet1",
     monthSheet: false,
     optional: false,
+    header: 0,
+    usecols: null,
+    keyColumn: "MATERAIL NUMBER",
+    required: ["CUSTOMER  CD", "CUSTOMER  NAME", "MATERAIL NUMBER", "Material   Description", "Length for TATA Tubes Material", "MATERIAL GROUP", "BILLING  DATE", "qty in no", "Quantity", "Domain for z_qty_meter", "RATE/UNIT", "SALES  UNIT", "Billing  Document Number", "Billing Item", "DESP P LANT", "SHIP TO PARTY C", "SHIPTO PARTY DISC"],
   },
   "sales_history": {
     files: ["sales_history.xlsx"],
     sheet: null,
     monthSheet: false,
     optional: true,
+    header: 0,
+    usecols: null,
+    keyColumn: "MATERAIL NUMBER",
+    required: ["CUSTOMER  CD", "CUSTOMER  NAME", "MATERAIL NUMBER", "Material   Description", "Length for TATA Tubes Material", "MATERIAL GROUP", "BILLING  DATE", "qty in no", "Quantity", "Domain for z_qty_meter", "RATE/UNIT", "SALES  UNIT", "Billing  Document Number", "Billing Item", "DESP P LANT", "SHIP TO PARTY C", "SHIPTO PARTY DISC"],
   },
   "sales_jul": {
     files: ["sales_jul.xlsx"],
     sheet: "Sheet1",
     monthSheet: false,
     optional: true,
+    header: 0,
+    usecols: null,
+    keyColumn: "MATERAIL NUMBER",
+    required: ["CUSTOMER  CD", "CUSTOMER  NAME", "MATERAIL NUMBER", "Material   Description", "Length for TATA Tubes Material", "MATERIAL GROUP", "BILLING  DATE", "qty in no", "Quantity", "Domain for z_qty_meter", "RATE/UNIT", "SALES  UNIT", "Billing  Document Number", "Billing Item", "DESP P LANT", "SHIP TO PARTY C", "SHIPTO PARTY DISC"],
   },
   "sales_q1": {
     files: ["sales_q1.xlsx"],
     sheet: "Sheet1",
     monthSheet: false,
     optional: true,
+    header: 0,
+    usecols: null,
+    keyColumn: "MATERAIL NUMBER",
+    required: ["CUSTOMER  CD", "CUSTOMER  NAME", "MATERAIL NUMBER", "Material   Description", "Length for TATA Tubes Material", "MATERIAL GROUP", "BILLING  DATE", "qty in no", "Quantity", "Domain for z_qty_meter", "RATE/UNIT", "SALES  UNIT", "Billing  Document Number", "Billing Item", "DESP P LANT", "SHIP TO PARTY C", "SHIPTO PARTY DISC"],
   },
   "sales_q4": {
     files: ["sales_q4.xlsx"],
     sheet: "Sheet1",
     monthSheet: false,
     optional: true,
+    header: 0,
+    usecols: null,
+    keyColumn: "MATERAIL NUMBER",
+    required: ["CUSTOMER  CD", "CUSTOMER  NAME", "MATERAIL NUMBER", "Material   Description", "Length for TATA Tubes Material", "MATERIAL GROUP", "BILLING  DATE", "qty in no", "Quantity", "Domain for z_qty_meter", "RATE/UNIT", "SALES  UNIT", "Billing  Document Number", "Billing Item", "DESP P LANT", "SHIP TO PARTY C", "SHIPTO PARTY DISC"],
   },
   "schedule": {
     files: ["rm_tracker_model.xlsx", "july0626_rm_tracker_v1.xlsx"],
     sheet: null,
     monthSheet: true,
     optional: false,
+    header: 2,
+    usecols: null,
+    keyColumn: "Bucket",
+    required: ["Bucket", "CTL Bucket", "MATERIAL NO", "MATERIAL DES", "Helper Customer", "CUSTOMER CODE", "CUSTOMER NAME", "ACTUAL OD", "TICKNESS", "LENGTH", "UoM", "SCHEDULE IN MT", "SCHEDULE in nos", "FC/NFC", "Chamferring ", "Angle Cut"],
   },
   "schedule_supplement": {
     files: ["schedule_supplement.xlsx"],
     sheet: null,
     monthSheet: false,
     optional: true,
+    header: 0,
+    usecols: null,
+    keyColumn: null,
+    required: [],
   },
   "signoff:hosur": {
     files: ["signoff.xlsx"],
     sheet: "hosur",
     monthSheet: false,
     optional: true,
+    header: 0,
+    usecols: null,
+    keyColumn: "Material",
+    required: ["Material", "Order Qty in MT", "SIGN OFF"],
   },
   "signoff:jsr": {
     files: ["signoff.xlsx"],
     sheet: "jsr",
     monthSheet: false,
     optional: true,
+    header: 0,
+    usecols: null,
+    keyColumn: "MATL_NO",
+    required: ["MATL_NO", "Bal to Desp", "Sign Off"],
   },
   "signoff:khopoli": {
     files: ["signoff.xlsx"],
     sheet: "khopoli",
     monthSheet: false,
     optional: true,
+    header: 0,
+    usecols: null,
+    keyColumn: "Material",
+    required: ["Material", "Sign Off", "Non Sign Off"],
   },
   "stock": {
     files: ["stock.xlsx"],
     sheet: "PLANT STOCKS",
     monthSheet: false,
     optional: false,
+    header: 1,
+    usecols: null,
+    keyColumn: "Material",
+    required: ["Plant", "Material", "Material Description", "CUSTOMER NAME", "CTL/LL", "LENGTH", "Ageing days", "KG", "MT", "NOS"],
   },
   "transfers": {
     files: ["transfer.xlsx"],
     sheet: null,
     monthSheet: false,
     optional: true,
+    header: 0,
+    usecols: null,
+    keyColumn: "MATERAIL NUMBER",
+    required: ["MATERAIL NUMBER", "Material   Description", "DESP P LANT", "CUSTOMER  CD", "Invoice Type", "GR DATE", "Quantity", "qty in no"],
   },
   "vsm_stock": {
     files: ["rm_tracker_tvsm.xlsx"],
     sheet: "vsm stock",
     monthSheet: false,
     optional: false,
+    header: 2,
+    usecols: null,
+    keyColumn: "key",
+    required: ["key", "O D", "Thk.", "Length", "Grade", "FC/NFC", "Schedule", "Stock"],
   },
   "vsm_tvsm": {
     files: ["rm_tracker_tvsm.xlsx"],
     sheet: "TVSM",
     monthSheet: false,
     optional: false,
+    header: 2,
+    usecols: null,
+    keyColumn: "key",
+    required: ["key", "VSM Requirement", "VSM Sales", "VSM Stock"],
   },
   "wip": {
     files: ["wip.xlsx"],
     sheet: null,
     monthSheet: false,
     optional: false,
+    header: 0,
+    usecols: null,
+    keyColumn: "Material\u00a0No",
+    required: ["Material\u00a0No", "Material Description", "Total\u00a0Stock"],
   },
   "zmat": {
     files: ["zmat.xlsx"],
     sheet: "Sheet1",
     monthSheet: false,
     optional: false,
+    header: 0,
+    usecols: null,
+    keyColumn: "Column1",
+    required: ["Column1", "MATERIAL DESCRIPTION", "MATERIAL TYPE"],
   },
 };
 

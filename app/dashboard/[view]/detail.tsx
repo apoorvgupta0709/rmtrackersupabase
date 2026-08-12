@@ -41,8 +41,15 @@ export type DetailColumn = {
 
 export type DetailLayouts = Record<string, DetailColumn[]>;
 
-/** What a figure opens: the key to fetch, and what to call the panel it opens into. */
-export type Detail = { key: string; title: string };
+/**
+ * What a figure opens: the key to fetch, and what to call the panel it opens into.
+ *
+ * `rows` short-circuits the fetch, and is used for exactly one thing: a price whose
+ * operations the reader has corrected. The stored breakup is the pipeline's and will not
+ * carry the correction until it reruns, so a panel that fetched it would explain a
+ * different number from the one the reader just clicked. Everything else fetches.
+ */
+export type Detail = { key: string; title: string; rows?: Record<string, unknown>[] };
 
 /**
  * The layout for a prefix the pipeline declares nothing for. Sixteen of the thirty-four
@@ -176,6 +183,13 @@ export default function DetailPanel({
     // A different figure was opened: drop the last one's remarks rather than letting them
     // sit behind the new rows until their own read returns.
     setRemarks(new Map());
+    // Rows handed in are not cached: they are this reader's correction, not the build's
+    // answer, and caching them would serve the correction to the next figure opened
+    // against the same key after it had been reverted.
+    if (detail.rows) {
+      setState({ phase: "ready", rows: detail.rows });
+      return;
+    }
     const slot = `${buildId}|${detail.key}`;
     if (cache.has(slot)) {
       setState({ phase: "ready", rows: cache.get(slot)! });
@@ -212,7 +226,7 @@ export default function DetailPanel({
     return () => {
       live = false;
     };
-  }, [buildId, detail.key, prefix]);
+  }, [buildId, detail.key, detail.rows, prefix]);
 
   // Escape closes the panel and goes no further: the column filter listens for the same
   // key, and one press should not dismiss two things.
@@ -375,7 +389,7 @@ export default function DetailPanel({
           )}
 
           {state.phase === "ready" && rows.length > 0 && (
-            <div className="scroll-x">
+            <div className="scroll-box">
               <table>
                 <thead>
                   <tr>
@@ -419,17 +433,7 @@ export default function DetailPanel({
                   <tfoot>
                     <tr>
                       {columns.map((c, i) => (
-                        <td
-                          key={c.field}
-                          className={isNumeric(c) ? "num" : undefined}
-                          style={{
-                            borderTop: "1px solid var(--rule-strong)",
-                            fontFamily: "var(--mono)",
-                            fontWeight: 600,
-                            background: "var(--paper)",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
+                        <td key={c.field} className={isNumeric(c) ? "num" : undefined}>
                           {footer[i]}
                         </td>
                       ))}

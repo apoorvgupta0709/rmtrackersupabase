@@ -37,11 +37,14 @@ export type TableSpec = {
    */
   flatten?: (rows: Row[], from: { sections: Record<string, Row[]>; pick?: string }) => Row[];
   /**
-   * The field the view's selector narrows this table on. A table naming one shows
-   * nothing until a selection is made; a table without one is always shown, which is
-   * how the list you choose from stays on screen.
+   * The field each of the view's selectors narrows this table on, by parameter name.
+   *
+   * A table naming a *required* selector shows nothing until a selection is made; a
+   * table naming none is always shown, which is how the list you choose from stays on
+   * screen. A selector declared `within` another is a narrower: leaving it unset means
+   * every value inside the outer selection, not nothing yet.
    */
-  pickField?: string;
+  pickFields?: Record<string, string>;
   /** Leave the table off the page entirely when it has no rows, rather than saying so. */
   hideWhenEmpty?: boolean;
   columns: Column[];
@@ -62,12 +65,14 @@ export type Ctx = {
   quarters: string[];
   unit: Unit;
   scalars: Record<string, any>;
-  /** What the view's selector is set to, so a table can say so in its own note. */
+  /** What the view's first selector is set to, so a table can say so in its own note. */
   pick?: string;
+  /** Every selector's value by parameter name, for a tab with more than one. */
+  picks?: Record<string, string>;
 };
 
 /**
- * One selector for the whole tab, held in the URL.
+ * A selector for the whole tab, held in the URL.
  *
  * The customer tracker asks a question about one customer — its lines, its CRFH book,
  * its history — and three tables each with a dropdown of their own is three controls
@@ -82,8 +87,18 @@ export type PickSpec = {
   label: string;
   /** The section and field the options are drawn from. */
   from: { section: string; field: string };
-  /** Shown in place of the tables until a choice is made. */
-  prompt: string;
+  /** Shown in place of the tables until a choice is made. Unused on a narrower. */
+  prompt?: string;
+  /**
+   * The parameter this one narrows inside, making it a second, finer selector.
+   *
+   * A customer's sales arrive under one SAP name per ship-to, so "which customer" and
+   * "which of its plants" are two questions and the second only has answers once the
+   * first is settled. A narrower's options are drawn from the rows the outer selection
+   * left, and leaving it unset means all of them — unlike an outer selector, where
+   * unset means the tables have not been asked a question yet.
+   */
+  within?: string;
 };
 
 export type ViewSpec = {
@@ -93,7 +108,19 @@ export type ViewSpec = {
   scalars: string[];
   /** Offer the tonnes/pieces switch. One control drives every table on the tab. */
   unitToggle?: boolean;
-  pick?: PickSpec;
+  picks?: PickSpec[];
+  /**
+   * Drill-down rows to fetch for the current selection and hand to the copy formats.
+   *
+   * A copy has to be built inside the click that asked for it — the clipboard is only
+   * writable from a user gesture — so a format cannot go and fetch what it needs. The
+   * quarterly CN/DN working is thousands of billing lines and lives in `detail_rows`
+   * rather than in a section for exactly that reason, so the page fetches this reader's
+   * keys up front. It runs on the server, where a function is fine, and returns nothing
+   * at all until a customer is picked.
+   */
+  prefetchDetails?: (picks: Record<string, string>, s: Record<string, any>) =>
+    { key: string; as: string }[];
   facts?: (s: Record<string, any>) => Fact[];
   tables: (ctx: Ctx) => TableSpec[];
 };
@@ -111,7 +138,10 @@ const inr = (field: string, label: string): Column => ({ field, label, kind: "in
 const days = (field: string, label: string): Column => ({ field, label, kind: "days" });
 const pct = (field: string, label: string): Column => ({ field, label, kind: "pct" });
 const rate = (field: string, label: string): Column => ({ field, label, kind: "rate" });
-const money = (field: string, label: string): Column => ({ field, label, kind: "money" });
+// `money` used to live here, whole rupees with `total: true`, and its only caller was the
+// pricing tab's base-per-tonne column — so the one tab whose note says no price column is
+// ever subtotalled was subtotalling one. That column is gone, and so is the helper: a
+// price is a `rate`, which carries no sum.
 const bool = (field: string, label: string): Column => ({ field, label, kind: "bool" });
 const list = (field: string, label: string): Column => ({ field, label, kind: "list", wide: true });
 
@@ -283,14 +313,16 @@ export const VIEWS: Record<string, ViewSpec> = {
       + "stock pools are shared between the customers drawing on them, so they carry no "
       + "total: adding them down the column would count the same tube several times.",
     scalars: ["sales_trend"],
-    pick: {
-      param: "customer",
-      label: "Customer",
-      from: { section: "customer_lines", field: "customer_display" },
-      prompt:
-        "Select a customer above to see its schedule lines, its CRFH book and its sales "
-        + "history. The summary below lists every customer on this build.",
-    },
+    picks: [
+      {
+        param: "customer",
+        label: "Customer",
+        from: { section: "customer_lines", field: "customer_display" },
+        prompt:
+          "Select a customer above to see its schedule lines, its CRFH book and its sales "
+          + "history. The summary below lists every customer on this build.",
+      },
+    ],
     tables: (ctx) => [
       {
         key: "customer_summary",
@@ -342,7 +374,7 @@ export const VIEWS: Record<string, ViewSpec> = {
         key: "customer_lines",
         section: "customer_lines",
         title: "Schedule lines",
-        pickField: "customer_display",
+        pickFields: { customer: "customer_display" },
         // The two customers below keep their CRFH range as its own book, so it is lifted
         // out of this table rather than mixed into the tube lines.
         flatten: (rows) => rows.filter((row) => !isCrfh(row)),
@@ -359,7 +391,7 @@ export const VIEWS: Record<string, ViewSpec> = {
         key: "customer_lines_crfh",
         section: "customer_lines",
         title: "CRFH line items",
-        pickField: "customer_display",
+        pickFields: { customer: "customer_display" },
         flatten: (rows) => rows.filter(isCrfh),
         hideWhenEmpty: true,
         note:
@@ -371,7 +403,7 @@ export const VIEWS: Record<string, ViewSpec> = {
         key: "customer_sku_history",
         section: "trend_customer_sku_history",
         title: "Sales history — every SKU this customer has bought",
-        pickField: "customer",
+        pickFields: { customer: "customer" },
         // On schedule is a join, not a field: the SKU is on this month's tracker if the
         // customer's own lines carry its CTL bucket. Filter that column to `no` for what
         // has quietly stopped being ordered, which is the question this table exists for.
@@ -856,6 +888,22 @@ export const VIEWS: Record<string, ViewSpec> = {
       + "because the OEM key calls it Direct.",
     scalars: ["sales_trend"],
     unitToggle: true,
+    picks: [
+      {
+        param: "customer",
+        label: "Customer",
+        from: { section: "trend_customer_skus", field: "customer_group" },
+        prompt:
+          "Select a customer above to see its SKUs month by month. The bucket, history and "
+          + "plant tables below cover every customer and stay as they are.",
+      },
+      {
+        param: "shipto",
+        label: "SAP name",
+        within: "customer",
+        from: { section: "trend_customer_skus", field: "customer" },
+      },
+    ],
     facts: (s) => {
       const t = s.sales_trend ?? {};
       return [
@@ -893,9 +941,16 @@ export const VIEWS: Record<string, ViewSpec> = {
         title: "SKU trend by customer",
         note:
           "Keyed on CTL bucket, because a length is a SKU to these customers. A cut length "
-          + "is planned in pieces, so switch the unit above to read it the way it is ordered.",
+          + "is planned in pieces, so switch the unit above to read it the way it is ordered. "
+          + "Closes on an average month — the tonnage over the months that actually moved — "
+          + "because a window total beside seven month columns reads as a monthly rate. "
+          + "The SAP name is the ship-to's own spelling; where two customers share a SAP "
+          + "code it is also the group, since guessing which of them bought is worse than "
+          + "listing it under the name the sales file used.",
+        pickFields: { customer: "customer_group", shipto: "customer" },
         columns: [
-          txt("customer", "Customer", true),
+          txt("customer_group", "Customer", true),
+          txt("customer", "SAP name", true),
           txt("sku", "SKU", true),
           txt("bucket", "Bucket", true),
           txt("length_type", "Length"),
@@ -903,8 +958,16 @@ export const VIEWS: Record<string, ViewSpec> = {
           txt("segment", "Segment"),
           txt("material_codes", "Material codes", true),
           ...monthColumns(ctx.months, ctx.unit),
-          unitTotal(ctx.unit),
+          cntNoTotal("months_active", "Months"),
+          ctx.unit === "mt"
+            ? { field: "avg_active_month_mt", label: "Avg month MT", kind: "mt" }
+            : { field: "avg_active_month_nos", label: "Avg month nos", kind: "nos" },
         ],
+        averageOver: {
+          monthsField: "months_active",
+          avgField: ctx.unit === "mt" ? "avg_active_month_mt" : "avg_active_month_nos",
+          totalField: ctx.unit === "mt" ? "total_mt" : "total_nos",
+        },
       },
       {
         key: "trend_customer_sku_history",
@@ -965,6 +1028,24 @@ export const VIEWS: Record<string, ViewSpec> = {
       + "one table, so no quarter column is ever subtotalled; only schedule tonnage carries "
       + "a sum.",
     scalars: ["sku_pricing", "code_repository"],
+    picks: [
+      {
+        param: "customer",
+        label: "Customer",
+        from: { section: "sku_pricing", field: "customer" },
+        prompt:
+          "Select a customer above to see the SKUs priced for it. The code repository "
+          + "below covers every customer, because a price change request is raised on the "
+          + "code and one code can be billed to several of them.",
+      },
+    ],
+    prefetchDetails: (picks, s) =>
+      picks.customer
+        ? ((s.sku_pricing?.reco_quarters as string[]) ?? []).map((q) => ({
+            key: `RECO|${picks.customer}|${q}`,
+            as: `reco:${q}`,
+          }))
+        : [],
     facts: (s) => {
       const rates = s.sku_pricing?.operation_rates_inr_per_ton ?? {};
       const window = s.code_repository?.window ?? {};
@@ -982,8 +1063,10 @@ export const VIEWS: Record<string, ViewSpec> = {
         title: "Priced SKUs",
         note:
           "Priced off the contract Key — dimension1-dimension2-thickness — with ERW 2 taking "
-          + "the -HST variant wherever the size has one. Per-m and base-per-ton are the audit "
-          + "trail behind the unit price beside them.",
+          + "the -HST variant wherever the size has one. Each quarter shows the price in the "
+          + "SKU's own unit; the per-metre figure and the contract's base per tonne are in "
+          + "the build-up the price opens, rather than repeated as two more columns.",
+        pickFields: { customer: "customer" },
         columns: [
           txt("customer", "Customer", true),
           txt("material_code", "Material code"),
@@ -996,22 +1079,40 @@ export const VIEWS: Record<string, ViewSpec> = {
           txt("unit", "Unit"),
           { field: "length_mm", label: "Length mm", kind: "rate" },
           { field: "kg_per_m", label: "kg/m", kind: "rate" },
-          list("operations", "Operations"),
+          // Editable: the schedule's flags are right most of the time and wrong some of
+          // it, and every SKU where this view disagrees with the customer's own
+          // reconciliation is an operation question. Adding one adds its rung to the
+          // build-up and moves the price beside it, here and at the next refresh.
+          { ...list("operations", "Operations"), edit: { kind: "operations" } },
           mt("schedule_mt", "Schedule MT"),
           nos("schedule_qty", "Schedule qty"),
           // The price build-up is per quarter, so the key is read out of the row's own
           // map of them rather than off a single field: a SKU repriced in Q4 has a
-          // different working behind each column.
+          // different working behind each column. Three columns per quarter: what the
+          // contract prices it at, what the customer's PO says, and the gap.
           ...ctx.quarters.flatMap((q): Column[] => [
-            drill(
-              rate(q, `${q} price`),
-              `{detail_keys.${q}}`,
-              `{bucket} · ${q} · price build-up`,
-            ),
-            rate(`${q} per m`, `${q} per m`),
-            money(`${q} base per ton`, `${q} base/t`),
+            {
+              ...drill(
+                rate(q, `${q} price`),
+                `{detail_keys.${q}}`,
+                `{bucket} · ${q} · price build-up`,
+              ),
+              priceQuarter: q,
+            },
+            {
+              ...rate(`${q} customer price`, `${q} PO price`),
+              edit: { kind: "po_price", quarter: q },
+            },
+            rate(`${q} diff`, `${q} diff`),
           ]),
         ],
+        // One button per quarter the build holds billing for, and the customer comes from
+        // the selector above rather than from a control of its own — the rule the
+        // clearance list and the dispatch plan already follow.
+        copies: ((ctx.scalars.sku_pricing?.reco_quarters as string[]) ?? []).map((q) => ({
+          kind: "calculation" as const,
+          arg: q,
+        })),
       },
       {
         key: "sku_pricing_unpriced",
@@ -1020,6 +1121,7 @@ export const VIEWS: Record<string, ViewSpec> = {
         note:
           "Two reasons, both reported rather than dropped: the line reaches no governed "
           + "bucket at all, or the bucket is governed and the contract has no row for it.",
+        pickFields: { customer: "customer" },
         columns: [
           txt("customer", "Customer", true),
           txt("bucket", "Bucket", true),

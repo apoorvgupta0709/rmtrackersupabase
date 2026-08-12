@@ -31,6 +31,11 @@ import AssignCell from "./assign";
 import { writeClipboard } from "./clipboard";
 import { COPY_FORMATS, type CopyContext, type CopySpec } from "./copies";
 import DetailPanel, { type Detail, type DetailLayouts } from "./detail";
+import { OperationsCell, PoPriceCell } from "./edit";
+import {
+  basePerM, buildUp, operationsPerM, priceFor, publishedOperations, skuKey,
+  type OperationRates,
+} from "./pricing";
 
 export type Kind =
   | "text" | "mt" | "nos" | "int" | "inr" | "days" | "pct" | "rate" | "money"
@@ -76,6 +81,19 @@ export type AssignSpec = {
   options: string;
 };
 
+/**
+ * A column the reader writes, whose answer changes a figure on the same row now.
+ *
+ * The counterpart to `assign`, and different from it in the way that matters: a bucket
+ * assignment decides which tracker a code's tonnage lands on, so it cannot take effect
+ * until the pipeline recomputes everything downstream and the cell says so. A SKU's
+ * operations and a customer's PO price feed one arithmetic each, over numbers already on
+ * the row, so the browser redoes them and the price beside the control moves.
+ */
+export type EditSpec =
+  | { kind: "operations" }
+  | { kind: "po_price"; quarter: string };
+
 export type Column = {
   field: string;
   label: string;
@@ -89,7 +107,63 @@ export type Column = {
   detail?: DetailSpec;
   /** This column is a decision the reader makes, not a figure the build carries. */
   assign?: AssignSpec;
+  /** This column is editable, and editing it recomputes the row. */
+  edit?: EditSpec;
+  /** The quarter a price column prices, so its build-up can be recomputed too. */
+  priceQuarter?: string;
 };
+
+/** What the pricing tab needs to recompute a price the reader has corrected. */
+export type PricingContext = {
+  /** INR per tonne, from the build's own `operation_rates_inr_per_ton`. */
+  rates: OperationRates;
+  quarters: string[];
+  /** Corrections already recorded, by `customer|bucket|material code|length`. */
+  operations: Record<string, string[]>;
+  /** PO prices already recorded, by `customer|bucket|material code|length|quarter`. */
+  poPrices: Record<string, { price: number; unit: string }>;
+  /** Whether this reader may record one. The database enforces it either way. */
+  canEdit: boolean;
+};
+
+type Corrections = {
+  operations: Record<string, string[]>;
+  poPrices: Record<string, { price: number; unit: string }>;
+};
+
+/**
+ * One row with the reader's corrections applied.
+ *
+ * The base price per metre is recovered from the *published* figures, never from the
+ * corrected ones, or a second edit would compound on the first.
+ */
+function corrected(
+  row: Record<string, unknown>,
+  pricing: PricingContext,
+  held: Corrections,
+): Record<string, unknown> {
+  const key = skuKey(row);
+  const override = key ? held.operations[key] : undefined;
+  const operations = override ?? publishedOperations(row);
+  const out: Record<string, unknown> = {
+    ...row,
+    operations,
+    operations_per_m: operationsPerM(operations, pricing.rates, row.kg_per_m),
+    operations_corrected: override !== undefined,
+  };
+  for (const quarter of pricing.quarters) {
+    const price = priceFor(row, quarter, operations, pricing.rates);
+    out[quarter] = price === null ? null : Math.round(price * 100) / 100;
+    const base = basePerM(row, quarter);
+    out[`${quarter} per m`] =
+      base === null ? null : base + operationsPerM(operations, pricing.rates, row.kg_per_m);
+    const po = key ? held.poPrices[`${key}|${quarter}`] : undefined;
+    out[`${quarter} customer price`] = po ? po.price : null;
+    out[`${quarter} diff`] =
+      po && price !== null ? Math.round((po.price - price) * 100) / 100 : null;
+  }
+  return out;
+}
 
 /** Closes the table on an average month rather than on a window total. */
 export type AverageOver = { monthsField: string; avgField: string; totalField: string };
@@ -186,19 +260,20 @@ const forPaste = (text: string, column: Column) =>
  * there is no room beneath, so no list is ever off screen.
  */
 function FilterPopup({
-  anchor,
+  cell,
   values,
   chosen,
   onChange,
   onClose,
 }: {
-  anchor: DOMRect;
+  cell: HTMLTableCellElement;
   values: string[];
   chosen: Set<string> | undefined;
   onChange: (next: Set<string> | null) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
+  const [anchor, setAnchor] = useState<DOMRect>(() => cell.getBoundingClientRect());
   const box = useRef<HTMLDivElement>(null);
 
   // Values hidden by the search box keep whatever state they had, so searching narrows
@@ -241,20 +316,34 @@ function FilterPopup({
     const key = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
-    // Scrolling the table sideways would leave the panel pointing at nothing, so it
-    // closes rather than drifting away from the header it belongs to.
-    const scroll = () => onClose();
+    /**
+     * Follow the header rather than dismissing on scroll.
+     *
+     * This used to close the panel, because scrolling the table sideways left it pointing
+     * at nothing. The header is sticky now, so a vertical scroll does not move the cell at
+     * all and closing would look like the panel dismissing itself for no reason. So
+     * re-measure instead, in the capture phase so the `overflow: auto` box counts too, and
+     * close only when the cell has genuinely gone — a re-render that replaces the row, or
+     * a filter that removes the column.
+     */
+    const track = () => {
+      if (!cell.isConnected) {
+        onClose();
+        return;
+      }
+      setAnchor(cell.getBoundingClientRect());
+    };
     document.addEventListener("mousedown", away);
     document.addEventListener("keydown", key);
-    window.addEventListener("scroll", scroll, true);
-    window.addEventListener("resize", scroll);
+    window.addEventListener("scroll", track, true);
+    window.addEventListener("resize", track);
     return () => {
       document.removeEventListener("mousedown", away);
       document.removeEventListener("keydown", key);
-      window.removeEventListener("scroll", scroll, true);
-      window.removeEventListener("resize", scroll);
+      window.removeEventListener("scroll", track, true);
+      window.removeEventListener("resize", track);
     };
-  }, [onClose]);
+  }, [cell, onClose]);
 
   const margin = 8;
   const width = 274;
@@ -316,7 +405,7 @@ export default function DataTable({
   title,
   note,
   columns,
-  rows,
+  rows: published,
   averageOver,
   capped,
   copies,
@@ -326,6 +415,7 @@ export default function DataTable({
   assignments,
   assignOptions,
   canAssign,
+  pricing,
 }: {
   title: string;
   note?: string;
@@ -345,11 +435,81 @@ export default function DataTable({
   assignOptions?: Record<string, string[]>;
   /** Whether this reader may record a decision. The database enforces it either way. */
   canAssign?: boolean;
+  /** Corrections to the contract price, and what they are computed against. */
+  pricing?: PricingContext;
 }) {
+  /**
+   * The rows as corrected, not as published.
+   *
+   * A price is arithmetic over figures already on the row, so an operation added or
+   * removed is redone here rather than waited on. Deriving whole rows — rather than
+   * teaching each price column to recompute itself — is what keeps the rest of this
+   * component from having to know anything about pricing: the filters, the text sort, the
+   * totals row, the copy buttons and the detail templates all read the corrected figure
+   * because they read the row.
+   */
+  const [corrections, setCorrections] = useState<Corrections>(() => ({
+    operations: pricing?.operations ?? {},
+    poPrices: pricing?.poPrices ?? {},
+  }));
+  const rows = useMemo(
+    () => (pricing ? published.map((row) => corrected(row, pricing, corrections)) : published),
+    [published, pricing, corrections],
+  );
+
+  /** The SKU an override is recorded against, or null where the row cannot be keyed. */
+  const skuOf = (row: Record<string, unknown>) => {
+    const length = Number(row.length_mm);
+    if (!Number.isFinite(length)) return null;
+    return {
+      customer: String(row.customer ?? ""),
+      bucket: String(row.bucket ?? ""),
+      material_code: String(row.material_code ?? ""),
+      length_mm: length,
+    };
+  };
+
+  const setOperations = (row: Record<string, unknown>, next: string[] | null) => {
+    const key = skuKey(row);
+    if (!key) return;
+    setCorrections((held) => {
+      const operations = { ...held.operations };
+      if (next === null) delete operations[key];
+      else operations[key] = next;
+      return { ...held, operations };
+    });
+  };
+
+  const setPoPrice = (
+    row: Record<string, unknown>,
+    quarter: string,
+    next: { price: number; unit: string } | null,
+  ) => {
+    const key = skuKey(row);
+    if (!key) return;
+    setCorrections((held) => {
+      const poPrices = { ...held.poPrices };
+      if (next === null) delete poPrices[`${key}|${quarter}`];
+      else poPrices[`${key}|${quarter}`] = next;
+      return { ...held, poPrices };
+    });
+  };
+
+  /**
+   * The price build-up for a corrected SKU, or nothing — in which case the panel fetches
+   * the pipeline's own rows, so an untouched price always opens the published working.
+   */
+  const correctedBuildUp = (row: Record<string, unknown>, column: Column) => {
+    if (!pricing || !column.priceQuarter || !row.operations_corrected) return undefined;
+    return buildUp(
+      row, column.priceQuarter, publishedOperations(row), pricing.rates,
+    ) as unknown as Record<string, unknown>[];
+  };
+
   const [search, setSearch] = useState("");
   const [picked, setPicked] = useState<Record<number, string[]>>({});
   const [sort, setSort] = useState<Sort | null>(null);
-  const [open, setOpen] = useState<{ index: number; anchor: DOMRect } | null>(null);
+  const [open, setOpen] = useState<{ index: number; cell: HTMLTableCellElement } | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   /**
    * What the last copy attempt did, and which button did it.
@@ -480,8 +640,15 @@ export default function DataTable({
     const moved = monthFields.filter((f) =>
       visible.some((i) => num(get(rows[i], f)) !== 0),
     ).length;
+    // Sum the total field here rather than reading it out of `totals`: a table that has
+    // dropped its window-total column still has the field on the row, and reading a
+    // missing key would have made every average zero rather than obviously broken.
+    const totalOver = visible.reduce(
+      (sum, i) => sum + num(get(rows[i], averageOver.totalField)),
+      0,
+    );
     totals[averageOver.monthsField] = moved;
-    totals[averageOver.avgField] = moved ? (totals[averageOver.totalField] ?? 0) / moved : 0;
+    totals[averageOver.avgField] = moved ? totalOver / moved : 0;
   }
 
   const count = visible.length.toLocaleString("en-IN");
@@ -621,132 +788,156 @@ export default function DataTable({
           case the policies returned no rows rather than hiding them.
         </div>
       ) : (
-        <div className="sheet scroll-x" style={{ marginTop: 10 }}>
-          <table>
-            <thead>
-              <tr>
-                {columns.map((c, index) => {
-                  const on = chosen.has(index);
-                  return (
-                    <th
-                      key={c.field}
-                      className={isNumeric(c) ? "num" : undefined}
-                      data-filtered={on ? "1" : undefined}
-                      aria-sort={
-                        sort?.index === index
-                          ? sort.dir === 1 ? "ascending" : "descending"
-                          : undefined
-                      }
-                    >
-                      <span className="th-inner">
-                        <button
-                          type="button"
-                          className="th-label"
-                          onClick={() => cycleSort(index)}
-                          title={`Sort by ${c.label}`}
-                        >
-                          {c.label}
-                          {sort?.index === index && (
-                            <span className="th-sort">{sort.dir === 1 ? "▲" : "▼"}</span>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          className="th-filter"
-                          title={`Filter ${c.label}`}
-                          aria-label={`Filter ${c.label}`}
-                          onClick={(e) => {
-                            // Measure inside the handler, not inside the state updater:
-                            // React clears `currentTarget` once the handler returns, and
-                            // a lazy updater runs after that.
-                            const cell = e.currentTarget.closest("th");
-                            if (!cell) return;
-                            const anchor = cell.getBoundingClientRect();
-                            setOpen((state) =>
-                              state?.index === index ? null : { index, anchor },
-                            );
-                          }}
-                        >
-                          ≡
-                        </button>
-                      </span>
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((i) => (
-                <tr key={i}>
+        <div className="sheet" style={{ marginTop: 10 }}>
+          <div className="scroll-box">
+            <table>
+              <thead>
+                <tr>
                   {columns.map((c, index) => {
-                    // The button carries the same text the cell would have shown, so the
-                    // filters, the text sort and the copy — all of which read the
-                    // rendered string — cannot tell a clickable column from a plain one.
-                    const guarded =
-                      c.detail?.when !== undefined && !get(rows[i], c.detail.when);
-                    const key = c.detail && !guarded ? fill(c.detail.key, rows[i]) : null;
+                    const on = chosen.has(index);
                     return (
-                      <td
+                      <th
                         key={c.field}
                         className={isNumeric(c) ? "num" : undefined}
-                        style={
-                          c.wide
-                            ? { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" }
+                        data-filtered={on ? "1" : undefined}
+                        aria-sort={
+                          sort?.index === index
+                            ? sort.dir === 1 ? "ascending" : "descending"
                             : undefined
                         }
-                        title={c.wide ? String(get(rows[i], c.field) ?? "") : undefined}
                       >
-                        {c.assign ? (
-                          <AssignCell
-                            scope={c.assign.scope}
-                            code={String(get(rows[i], c.assign.codeField) ?? "")}
-                            options={assignOptions?.[c.assign.options] ?? []}
-                            initial={
-                              assignments?.[
-                                `${c.assign.scope}|${get(rows[i], c.assign.codeField)}`
-                              ] ?? ""
-                            }
-                            canAssign={canAssign ?? false}
-                          />
-                        ) : key && c.detail ? (
+                        <span className="th-inner">
                           <button
                             type="button"
-                            className="drill"
-                            onClick={() =>
-                              setDetail({ key, title: fill(c.detail!.title, rows[i]) ?? c.label })
-                            }
+                            className="th-label"
+                            onClick={() => cycleSort(index)}
+                            title={`Sort by ${c.label}`}
                           >
-                            {display[i][index]}
+                            {c.label}
+                            {sort?.index === index && (
+                              <span className="th-sort">{sort.dir === 1 ? "▲" : "▼"}</span>
+                            )}
                           </button>
-                        ) : (
-                          display[i][index]
-                        )}
-                      </td>
+                          <button
+                            type="button"
+                            className="th-filter"
+                            title={`Filter ${c.label}`}
+                            aria-label={`Filter ${c.label}`}
+                            onClick={(e) => {
+                              // Read `currentTarget` inside the handler, not inside the
+                              // state updater: React clears it once the handler returns,
+                              // and a lazy updater runs after that. The cell itself is
+                              // stored rather than its rect, so the panel can follow a
+                              // sticky header instead of dismissing when the page scrolls.
+                              const cell = e.currentTarget.closest("th");
+                              if (!cell) return;
+                              setOpen((state) =>
+                                state?.index === index ? null : { index, cell },
+                              );
+                            }}
+                          >
+                            ≡
+                          </button>
+                        </span>
+                      </th>
                     );
                   })}
                 </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                {columns.map((c, i) => (
-                  <td
-                    key={c.field}
-                    className={isNumeric(c) ? "num" : undefined}
-                    style={{
-                      borderTop: "1px solid var(--rule-strong)",
-                      fontFamily: "var(--mono)",
-                      fontWeight: 600,
-                      background: "var(--paper)",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {footer[i]}
-                  </td>
+              </thead>
+              <tbody>
+                {visible.map((i) => (
+                  <tr key={i}>
+                    {columns.map((c, index) => {
+                      // The button carries the same text the cell would have shown, so the
+                      // filters, the text sort and the copy — all of which read the
+                      // rendered string — cannot tell a clickable column from a plain one.
+                      const guarded =
+                        c.detail?.when !== undefined && !get(rows[i], c.detail.when);
+                      const key = c.detail && !guarded ? fill(c.detail.key, rows[i]) : null;
+                      return (
+                        <td
+                          key={c.field}
+                          className={isNumeric(c) ? "num" : undefined}
+                          style={
+                            c.wide
+                              ? { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" }
+                              : undefined
+                          }
+                          title={c.wide ? String(get(rows[i], c.field) ?? "") : undefined}
+                        >
+                          {c.assign ? (
+                            <AssignCell
+                              scope={c.assign.scope}
+                              code={String(get(rows[i], c.assign.codeField) ?? "")}
+                              options={assignOptions?.[c.assign.options] ?? []}
+                              initial={
+                                assignments?.[
+                                  `${c.assign.scope}|${get(rows[i], c.assign.codeField)}`
+                                ] ?? ""
+                              }
+                              canAssign={canAssign ?? false}
+                            />
+                          ) : c.edit?.kind === "operations" && pricing ? (
+                            <OperationsCell
+                              sku={skuOf(rows[i])}
+                              operations={publishedOperations(rows[i])}
+                              offered={Object.keys(pricing.rates).sort()}
+                              corrected={Boolean(rows[i].operations_corrected)}
+                              canEdit={pricing.canEdit}
+                              onChange={(next) => setOperations(rows[i], next)}
+                            />
+                          ) : c.edit?.kind === "po_price" && pricing ? (
+                            <PoPriceCell
+                              sku={skuOf(rows[i])}
+                              quarter={c.edit.quarter}
+                              unit={String(rows[i].unit ?? "")}
+                              price={
+                                typeof rows[i][c.field] === "number"
+                                  ? (rows[i][c.field] as number)
+                                  : null
+                              }
+                              canEdit={pricing.canEdit}
+                              onChange={(next) =>
+                                setPoPrice(rows[i], (c.edit as { quarter: string }).quarter, next)
+                              }
+                            />
+                          ) : key && c.detail ? (
+                            <button
+                              type="button"
+                              className="drill"
+                              onClick={() =>
+                                setDetail({
+                                  key,
+                                  title: fill(c.detail!.title, rows[i]) ?? c.label,
+                                  // A corrected SKU's build-up is recomputed here rather
+                                  // than fetched: the stored rows are the pipeline's, and
+                                  // they will not carry the correction until it reruns.
+                                  rows: correctedBuildUp(rows[i], c),
+                                })
+                              }
+                            >
+                              {display[i][index]}
+                            </button>
+                          ) : (
+                            display[i][index]
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
                 ))}
-              </tr>
-            </tfoot>
-          </table>
+              </tbody>
+              <tfoot>
+                <tr>
+                  {columns.map((c, i) => (
+                    <td key={c.field} className={isNumeric(c) ? "num" : undefined}>
+                      {footer[i]}
+                    </td>
+                  ))}
+                </tr>
+              </tfoot>
+            </table>
+          </div>
         </div>
       )}
 
@@ -763,7 +954,7 @@ export default function DataTable({
 
       {open && (
         <FilterPopup
-          anchor={open.anchor}
+          cell={open.cell}
           values={options}
           chosen={chosen.get(open.index)}
           onChange={(next) => setColumn(open.index, next)}

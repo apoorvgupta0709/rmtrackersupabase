@@ -71,11 +71,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
           <span style={{ flex: 1 }} />
           <span className="label">{user.email}</span>
-          {canUpload && (
-            <Link href="/upload" className="label" style={{ color: "var(--furnace)" }}>
-              Upload dumps
-            </Link>
-          )}
           <SignOut />
         </div>
 
@@ -99,6 +94,27 @@ export default async function DashboardLayout({ children }: { children: React.Re
               {view.label}
             </Link>
           ))}
+          {/*
+            Upload sits in the strip with the eleven views but is deliberately **not** one
+            of them: it is not a row in `dashboard_views`, so it cannot be granted to a
+            viewer by mistake. Who sees it is a role, not a grant, and the database
+            refuses the write either way.
+          */}
+          {canUpload && (
+            <Link
+              href="/dashboard/upload"
+              className="label"
+              style={{
+                padding: "10px 14px 12px",
+                color: "var(--furnace)",
+                textDecoration: "none",
+                borderBottom: "2px solid transparent",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Upload dumps
+            </Link>
+          )}
         </nav>
       </header>
 
