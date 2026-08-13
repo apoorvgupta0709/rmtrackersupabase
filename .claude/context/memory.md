@@ -688,10 +688,13 @@ that the package still sits where Claude Code looks — the repo root is
   repository window, both CN/DN workings and the Megh tab's month-by-month sales. Now an
   upload rather than a pipeline change: the ledger keys on the invoice line, so a fuller
   extract merges its missing lines into the closed months instead of replacing them.
-- **`20260813060000_tsl_sales_ledger.sql` is not applied.** Until it is, a refresh that
-  runs `refresh_from_supabase.py` will fail at absorption — there is no `tsl_sales` to
-  write to. The offline `dumps/` path is unaffected, since `ExcelSources` assembles the
-  same ledger from the four sales slots in memory.
+- **The ledger is applied but not yet filled.** `tsl_sales` was created on 13 Aug and
+  holds nothing until the first refresh absorbs. That first run folds in **every** sales
+  batch, superseded ones included, because none carries `absorbed_at` yet: the three
+  August snapshots are supersets of one another, so the key collapses them, and the
+  ledger should settle at roughly 22,235 lines — 7,932 Q4, 7,948 Q1, 4,941 July and
+  1,414 August, each less its grand-total row. A first refresh landing far short of that
+  means absorption is reading `current` batches rather than un-absorbed ones.
 - **The `Schedule` column of the current `vsm stock` sheet is entirely empty.** All 119
   rows read zero, so every Megh SKU shows 0 schedule, coverage days is blank on all 73
   rows, and the Schedule figure opens nothing. Stock and In Transit are populated, so it
