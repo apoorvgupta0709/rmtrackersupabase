@@ -277,6 +277,79 @@ def test_megh_only_plan_keys_are_not_read_as_governed_buckets():
     assert 'frame["material_key"].map(code_to_vsm_key)' in script
 
 
+def test_the_megh_sku_key_is_the_bucket_with_its_length_appended():
+    """The plan states the key; the pipeline no longer invents one.
+
+    The old key was `OD-ID-thickness-length-grade-cuttype`, and its cut token came from
+    the governed bucket's end condition. Where the plan and Bucketting disagree there —
+    the plan keys 22.23 x 2.0 at 5.4 m as `…-ERW 1-FC` while Bucketting governs its own
+    material code 2431251 to `…-ERW 1-PE` — the two sides built different keys, never
+    met, and the tonnage left the tab for the unmapped queue.
+    """
+    refresh = load_refresh_module()
+    assert refresh.bucket_vsm_key("22.23-0-2-ERW 1-PE", 5.951) == "22.23-0-2-ERW 1-PE-5.951"
+    # A trailing space on the bucket must not fork the key, here as everywhere else.
+    assert refresh.bucket_vsm_key("22.23-0-2-ERW 1-PE ", 5.951) == "22.23-0-2-ERW 1-PE-5.951"
+    assert refresh.bucket_vsm_key(None, 5.951) is None
+    assert refresh.bucket_vsm_key("22.23-0-2-ERW 1-PE", None) is None
+
+
+def test_the_plans_length_key_is_corrected_only_where_it_could_not_join():
+    """Both corrections leave the sheet as written and move only the derived key."""
+    refresh = load_refresh_module()
+    # A stray space renders identically and joins to nothing.
+    assert refresh.norm_length_key("25.4-0-2.5-ERW 1-FC -5.95") == "25.4-0-2.5-ERW 1-FC-5.95"
+    # Millimetres, where stock, sales and WIP all normalise to metres.
+    assert refresh.norm_length_key(
+        "59-30-1.6-ERW 1-FIN CUT-572.5") == "59-30-1.6-ERW 1-FIN CUT-0.5725"
+    assert refresh.norm_length_key(
+        "Megh-34.93-0-1.2-ERW 1-FC-0.620") == "Megh-34.93-0-1.2-ERW 1-FC-0.62"
+    # Keys already in the join's own shape are left exactly alone.
+    assert refresh.norm_length_key("12.7-0-1.2-ERW 1-PE-6") == "12.7-0-1.2-ERW 1-PE-6"
+    assert refresh.norm_length_key("Megh-12.7-0-1.4-5.67") == "Megh-12.7-0-1.4-5.67"
+    # A key stating no length keeps its own shape rather than acquiring an invented one.
+    assert refresh.norm_length_key("50-50-1.6-ERW 1-PE") == "50-50-1.6-ERW 1-PE"
+    # An empty cell is no key. `str(value or "")` would publish the string "nan" here,
+    # because a float NaN is truthy.
+    assert refresh.norm_length_key(float("nan")) is None
+    assert refresh.norm_length_key("") is None
+    assert refresh.norm_length_key(None) is None
+
+
+def test_the_other_length_family_is_the_key_without_its_length():
+    """Both sides of the join derive the family the same way — off the key itself."""
+    refresh = load_refresh_module()
+    assert refresh.key_family("22.23-0-2-ERW 1-PE-5.951") == "22.23-0-2-ERW 1-PE"
+    # A grade carrying its own spaces and digits must not be mistaken for a length.
+    assert refresh.key_family("38.1-0-1.6-ERW 2 MAHS-FC-6") == "38.1-0-1.6-ERW 2 MAHS-FC"
+    # A Megh-only size has no governed bucket, and the family says so rather than
+    # inventing one for other-length stock to be looked up under.
+    assert refresh.key_family("Megh-12.7-0-1.4-5.67") == "Megh-12.7-0-1.4"
+
+
+def test_the_megh_prefix_is_read_off_the_length_key():
+    """The prefix marks a size going onward to RE or HMSIL rather than to TVSM.
+
+    Four rows on the 18 September plan carry it on `length key` while their `key`
+    column still names a governed TVS bucket (`34.93-0-1.2-ERW 1-FC`). The prefix is
+    the statement of where the material goes, so it decides. No row prefixes `key`
+    without also prefixing `length key`, so nothing is lost by reading the one.
+    """
+    script = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
+    assert 'plan_length_key = vsm_stock["length key"].map(norm_length_key)' in script
+    assert "plan_length_key.where(plan_length_key.notna(), plan_key)" in script
+
+
+def test_the_vsm_stock_read_requires_the_plans_length_key():
+    """A tracker without the column stops the run rather than resurrecting the guess."""
+    script = SKILL_ROOT / "scripts" / "sources.py"
+    spec = importlib.util.spec_from_file_location("sources", script)
+    sources = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(sources)
+    assert "length key" in sources.SLOTS["vsm_stock"].required
+
+
 def test_bop_list_matches_the_config_and_claims_each_sku_once():
     """A listed line takes one SKU, and a SKU is claimed by one line.
 

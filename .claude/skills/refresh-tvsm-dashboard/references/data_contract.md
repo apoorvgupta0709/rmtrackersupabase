@@ -956,16 +956,37 @@ Megh Steel is a conversion agent: TSL sells it mother tube, which it cuts and su
 onward to TVS ancillaries. The tab is driven by the RM tracker's `vsm stock` sheet
 (header row 3), which is the operating plan for what Megh converts.
 
-Use only rows with a non-zero `Schedule` or `Stock` — 94 of 118 on the 29 July set,
-collapsing to 86 SKUs. The SKU key is:
+Use only rows with a non-zero `Schedule` or `Stock` — 89 of 120 on the 18 September set,
+collapsing to 89 SKUs. **The plan states the SKU key; the pipeline does not derive one.**
+It is the sheet's own `length key` column:
 
 ```text
-SKU = OD - ID - thickness - length - grade - cut type
-cut type = FC when FC/NFC is fin cut, otherwise NFC
+SKU = governed bucket + "-" + finished length in metres
 ```
 
-`ID` is absent from the sheet and is always 0. Normalize OD, thickness and length with
-the same helpers used elsewhere so the key matches keys derived from stock and sales.
+so `22.23-0-2-ERW 1-PE-5.951`, and for a `Megh-` size the prefixed key with its length,
+`Megh-12.7-0-1.4-5.67`. Every frame joining to a Megh SKU builds the same shape through
+`bucket_vsm_key(bucket, length)`.
+
+The column is taken as written, with two corrections in `norm_length_key` and no others,
+because without them the row could not join at all: whitespace collapses, so
+`25.4-0-2.5-ERW 1-FC -5.95` meets the key everything else builds; and a trailing length
+above `VSM_LENGTH_MM_ABOVE_M` is millimetres — the plan writes 572.5 beside 5.95 — and is
+rendered in metres, since stock, sales and WIP all normalise to metres. The sheet is left
+as written; only the derived join key moves.
+
+**This replaces a key the pipeline used to assemble** as
+`OD-ID-thickness-length-grade-cuttype`, whose cut token came from the governed bucket's
+end condition. Wherever the plan and `Bucketting` disagreed there, the two sides built
+different keys and never met: the plan keys 22.23 x 2.0 at 5.4 m as `…-ERW 1-FC` while
+`Bucketting` governs that row's own material code `2431251` to `…-ERW 1-PE`. Taking the
+key from the plan removed 32.349 MT from the unmapped queue on the 18 September set —
+mapped Megh sales 87.569 → 119.918 MT, unmapped 86.141 → 53.792, the two still summing to
+the 173.711 MT the sales file holds.
+
+A tracked row stating no key at all is an exception, not a silent drop: it reads
+`lookup error`, renders on no tab, and is listed in `megh_sku_mapping.csv` with what it
+needs. One such row on this set — 25.4 x 3.5 x 5.6 m carrying 3.356 MT of stock.
 
 Never key these SKUs on `CTL Bucket`. That key collapses every length at or above
 3.5 m to one LL marker while Megh buys specific lengths, and returns zero for every
@@ -1001,7 +1022,19 @@ Restrict the two allocatable columns to long length. A cut piece cannot be re-cu
 Megh SKU, so offering CTL stock against one would overstate what is available. The
 family key for "other length" is the SKU key without its length component.
 
-### 5e.2 Key the plan off its governed bucket, not its dimension cells
+### 5e.2 Key the plan off its own `length key`
+
+**Superseded by the plan's `length key` column, and kept because it says why the key has
+to come from one place.** The disagreements below are exactly what a derived key ran
+into; the owner's column ends them by stating the answer. What still holds: the `Megh-`
+prefix marks a size supplied onward to RE or HMSIL rather than to TVSM, and it is read
+off the **length key**, not `key` — four rows on the 18 September plan carry it there
+while their `key` column still names a governed bucket (`34.93-0-1.2-ERW 1-FC`). The
+prefix states where the material goes, so it decides: those rows hold no TVS bucket and
+stop counting toward TVSM coverage. No row prefixes `key` without also prefixing
+`length key`.
+
+#### The disagreements a derived key ran into
 
 `vsm stock` carries both a governed `key` (the Bucketting bucket) and its own `O D`,
 `Thk.`, `Grade` and `FC/NFC` cells, and **the two disagree in five different ways**.
