@@ -48,7 +48,9 @@ def main() -> int:
                         help="YYYY-MM-DD; defaults to today UTC, as the pipeline does")
     parser.add_argument("--run-url", default=None, help="link back to the Action run")
     parser.add_argument("--dry-run", action="store_true",
-                        help="run the pipeline but write no build")
+                        help="run the pipeline but write no build. Sales batches are "
+                             "still absorbed into the ledger: that is an input rather "
+                             "than an output, and it is idempotent")
     args = parser.parse_args()
 
     as_of = args.as_of or datetime.now(timezone.utc).date().isoformat()
@@ -63,6 +65,17 @@ def main() -> int:
 
     held = sorted(source.batches)
     print(f"as of {as_of}; {len(held)} slots uploaded: {', '.join(held)}", flush=True)
+
+    # Fold every un-absorbed sales batch into the ledger before the pipeline reads it.
+    #
+    # This has to happen here rather than inside `sales_ledger()`, because a read that
+    # quietly writes is worse than an explicit step — but it is exactly the step that is
+    # easy to leave out, and leaving it out is not a quiet failure: the ledger reads
+    # empty and the pipeline dies on the first sales column it touches. A test asserts
+    # this call exists and comes before `pipeline.main`.
+    absorbed = source.absorb_sales()
+    print(f"absorbed {sum(absorbed.values())} new sales lines "
+          f"from {len(absorbed)} batch(es)", flush=True)
 
     # The pipeline still writes its file outputs — data.json, the CSVs, the QC summary.
     # They are the artefact worth attaching to the run when a build has to be explained.

@@ -1166,6 +1166,21 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     # Material-code columns are read as text — the reason is on the `_sales_like` spec
     # in `scripts/sources.py`, beside the pin that enforces it.
     sales_ledger = src.sales_ledger()
+    # An empty ledger is stopped here, where it can still be explained.
+    #
+    # Left to run, it surfaces 300 lines further on as `KeyError: 'CUSTOMER  CD'` — a
+    # column present in every sales file, which was never the problem. The frame simply
+    # had no columns at all. Same principle as `SupabaseRowCountMismatch`: a read that
+    # came back wrong must not reach the pipeline, and must say which read it was.
+    if sales_ledger.empty:
+        raise SystemExit(
+            "No sales lines. The ledger is empty, so every sales figure on every tab "
+            "would read zero — this stops rather than publishing a dashboard of "
+            "nothing. On the Postgres backend it means absorption has not run: "
+            "`PostgresSources.absorb_sales()` is what fills `tsl_sales` from the "
+            "uploaded batches, and `refresh_from_supabase.py` calls it before the "
+            "pipeline. Reading `dumps/`, it means no sales extract was found."
+        )
     # The month being published, taken out of the ledger rather than read from its own
     # file. It is the same set of lines the daily dump held — that dump covers exactly one
     # month — less the sheet's own grand total row, which has no billing document and so

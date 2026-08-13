@@ -1445,6 +1445,44 @@ class _FakeRest:
         self.updated.append((table, query, patch))
 
 
+def test_the_refresh_absorbs_before_it_reads_the_ledger():
+    """A method nothing calls is a method that does nothing.
+
+    This is the defect that shipped: `absorb_sales` was written, unit-tested against a
+    fake client, and never wired in. Every test passed — the one below included — because
+    each exercised a piece, and the missing thing was the line joining them. The offline
+    `dumps/` run could not catch it either: `ExcelSources` assembles the ledger from files
+    and has no call site to forget. So the call itself is what is asserted here, and its
+    position: absorption after the pipeline would be as useless as none at all.
+    """
+    script = (SKILL_ROOT / "scripts" / "refresh_from_supabase.py").read_text(
+        encoding="utf-8"
+    )
+    assert "absorb_sales()" in script, (
+        "nothing fills tsl_sales, so the ledger reads empty and the pipeline dies on "
+        "the first sales column it touches"
+    )
+    assert script.index("absorb_sales()") < script.index("pipeline.main("), (
+        "the ledger is the pipeline's input; absorbing after it runs is too late"
+    )
+
+
+def test_an_empty_sales_ledger_stops_the_refresh():
+    """And says which read came back empty, rather than which column went missing.
+
+    Unguarded, this surfaced as `KeyError: 'CUSTOMER  CD'` three hundred lines downstream
+    — a column that is in every sales file and was never the problem. The frame had no
+    columns at all.
+    """
+    script = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
+    guard = script[script.index("    sales_ledger = src.sales_ledger()"):]
+    guard = guard[:guard.index("published_month")]
+    assert "if sales_ledger.empty:" in guard, "an empty ledger must not reach derive_sales"
+    assert "absorb_sales" in guard, (
+        "the message has to name what fills the ledger, or it explains nothing"
+    )
+
+
 def test_absorbing_a_sales_batch_adds_only_lines_the_ledger_has_never_seen():
     """The ledger's whole contract, exercised without a database.
 
