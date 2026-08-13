@@ -703,13 +703,14 @@ that the package still sits where Claude Code looks — the repo root is
   and so are not recoverable from them. HMSIL does not goal-seek at all — its proposed
   rate is set some other way.
 
-- **The two new migrations are not applied and no build carries the new fields yet.**
-  `20260812120000_pricing_operations_and_customer_po_price.sql` and
-  `20260812130000_record_the_upload_path_the_database_already_has.sql` are checked in and
-  unapplied; nothing is applied automatically, there is no `supabase db push` in any
-  workflow. Until both land and a refresh runs, the operations and PO-price cells save
-  nothing and the calculation buttons do not appear — the page copes with the tables being
-  absent rather than erroring, which is why this is quiet.
+- **Migration filenames in the repo have drifted from the versions actually applied**, so
+  neither list can be read off the other. Production carries 13, checked 13 Aug: the
+  pricing and upload-path ones the previous session recorded as unapplied are in fact
+  applied, as `20260812073426` and `20260812073526`; `megh_reco_prefix_grant` landed as
+  `20260812165102` against a repo file named `..._megh_reco_and_the_fourth_conversion_code`;
+  and `20260809185703 uploader_write_policies` is applied with **no repo file at all**.
+  Nothing is applied automatically — there is no `supabase db push` in any workflow — so
+  check with `list_migrations` rather than by reading `supabase/migrations/`.
 - **"SKU trend by customer" and "SKU history — average month" now close on the same two
   figures** and differ only by a Segment and a Length-m column. One of them is probably
   redundant; not resolved without the owner.
