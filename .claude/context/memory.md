@@ -278,6 +278,18 @@ the rows whose history is worth reading. Guarding on a nulled key instead would 
 any build that wrote the key unconditionally, as this one used to, would turn every unsold
 size into a button onto nothing.
 
+**A method nothing calls does nothing, and every test passed anyway.** `absorb_sales`
+shipped written, unit-tested against a fake client, and never wired into
+`refresh_from_supabase.py`; the first cloud refresh died on `KeyError: 'CUSTOMER  CD'` — a
+column present in every sales file, and never the problem, because the frame had no
+columns at all. Nothing caught it: the offline `dumps/` run uses `ExcelSources`, which
+builds the ledger from files and so has no call site to forget, and the unit test called
+the method directly rather than reaching it through `main`. Every piece worked and the one
+line joining them was missing. **Where a backend-specific step is the only thing standing
+between an upload and the pipeline, assert the call site and its ordering** — which is
+what `test_the_refresh_absorbs_before_it_reads_the_ledger` does. Testing the method proves
+nothing about whether anything invokes it.
+
 Owner: Apoorv Gupta (apoorvgupta.dce@gmail.com; work mail apoorv.gupta@tatasteel.com,
 which forwards the dumps). Direct publication to `main` is authorized. The repo is
 also the skill's home. **Everything Claude reads lives under `.claude/`** — the project
@@ -710,13 +722,20 @@ that the package still sits where Claude Code looks — the repo root is
   repository window, both CN/DN workings and the Megh tab's month-by-month sales. Now an
   upload rather than a pipeline change: the ledger keys on the invoice line, so a fuller
   extract merges its missing lines into the closed months instead of replacing them.
-- **The ledger is applied but not yet filled.** `tsl_sales` was created on 13 Aug and
-  holds nothing until the first refresh absorbs. That first run folds in **every** sales
-  batch, superseded ones included, because none carries `absorbed_at` yet: the three
-  August snapshots are supersets of one another, so the key collapses them, and the
-  ledger should settle at roughly 22,235 lines — 7,932 Q4, 7,948 Q1, 4,941 July and
-  1,414 August, each less its grand-total row. A first refresh landing far short of that
-  means absorption is reading `current` batches rather than un-absorbed ones.
+- **The ledger is live: 22,419 lines, January to August.** Filled 13 Aug at 22,233; the
+  14 Aug work canonicalised its material codes and plants, which added no lines. All sales
+  batches absorbed, the three August snapshots collapsing exactly as the key promises. Its
+  month-by-month plant coverage is the clearest statement of the southern-plants gap there
+  is: Jan–Apr `789, 4318, 4731, 8406`, May–Jun the same less 4318, then **July and August
+  carrying 56 and 788** where no earlier month does. (Plant codes read canonical now —
+  `056` and `0788` were the same two plants.)
+- **The first absorption is slow and later ones are free.** Roughly a minute per batch —
+  each is paged out of `raw_rows` a thousand at a time and inserted back — so that first
+  run spent about seven minutes on ten batches before the pipeline even started, and the
+  whole refresh took ten. Every run after it absorbs only what has been uploaded since.
+  A refresh that looks hung after an upload of several archives is probably this. zmat is
+  the outlier the other way: 64,074 rows in 43s, because its table is typed rather than
+  JSONB.
 - ~~The `Schedule` column of the `vsm stock` sheet is empty.~~ **Resolved 13 Aug** by the
   owner's `RM_Tracker_18092025.xlsx`, which carries 1,696.5 MT of schedule across 89
   tracked rows where the previous file read zero on all 119.
