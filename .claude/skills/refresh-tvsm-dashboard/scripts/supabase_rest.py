@@ -86,17 +86,26 @@ class SupabaseRest:
     def select(self, table: str, query: str = "select=*"):
         return self._request("GET", f"{table}?{query}")
 
-    def insert(self, table: str, rows, *, chunk: int = 2000, returning: bool = False):
+    def insert(self, table: str, rows, *, chunk: int = 2000, returning: bool = False,
+               prefer: str | None = None, on_conflict: str | None = None):
         """Insert in chunks, because one request holding a whole dump times out.
 
         2,000 is what the throughput probe used; zmat's 65,178 rows go in 33 requests.
+
+        `on_conflict` with `prefer="resolution=ignore-duplicates,..."` is how the sales
+        ledger absorbs a dump: a line it already holds is left exactly as it was, so a
+        re-sent day adds nothing and a backfill adds only what was missing. Note the two
+        must be given together — PostgREST treats a resolution without a conflict target
+        as an ordinary insert and raises on the first duplicate key.
         """
         if isinstance(rows, dict):
             rows = [rows]
-        prefer = "return=representation" if returning else "return=minimal"
+        if prefer is None:
+            prefer = "return=representation" if returning else "return=minimal"
+        path = table if on_conflict is None else f"{table}?on_conflict={on_conflict}"
         out = []
         for start in range(0, len(rows), chunk):
-            result = self._request("POST", table, rows[start:start + chunk], prefer)
+            result = self._request("POST", path, rows[start:start + chunk], prefer)
             if returning:
                 out.extend(result)
         return out

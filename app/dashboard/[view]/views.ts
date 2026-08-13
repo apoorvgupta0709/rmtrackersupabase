@@ -472,19 +472,25 @@ export const VIEWS: Record<string, ViewSpec> = {
         section: "megh_tracker",
         title: "Megh SKU tracker",
         note:
-          "Stock, schedule and cover per SKU on the vsm stock plan. Coverage days is a "
-          + "rate per row and carries no total. A row badged off plan is a bought-out "
-          + "size the plan has no line for — the plan is what is short, not the match.",
+          "Every size on the vsm stock plan, read across: what it is, then every quantity "
+          + "it answers to. An empty bucket is an answer, not a gap — the size goes onward "
+          + "to RE or HMSIL, which Bucketting does not govern, or it is a bought-out size "
+          + "the plan has no line for and is listed in the table below. Sales to Megh "
+          + "opens the months behind it; every other figure opens its own split.",
         columns: [
-          txt("sku", "SKU", true),
-          txt("family", "Family", true),
-          txt("end_oem", "End OEM"),
-          bool("in_plan", "On plan"),
-          bool("bop", "BOP"),
+          // The size first, as the sheet states it, then the two keys that govern it.
+          // The plan key itself is no longer a column — the dimensions are what is read —
+          // but it is still on the row and still what every breakup below is keyed on.
+          list("materials", "Material codes"),
+          txt("od", "OD"),
+          txt("inner_d", "ID"),
+          txt("thickness", "Thickness"),
           { field: "length_m", label: "Length m", kind: "rate" },
           txt("grade", "Grade"),
           txt("cut_type", "Cut type"),
-          list("materials", "Material codes"),
+          txt("bucket", "Bucket", true),
+          txt("end_oem", "End OEM"),
+          bool("bop", "BOP"),
           // Every figure on this tab is guarded by itself. The plan writes a key onto
           // each row whether or not the SKU has any of that thing, and the breakup for
           // a zero was never built — 64 of the 73 SKUs sold nothing this month. So a
@@ -495,63 +501,67 @@ export const VIEWS: Record<string, ViewSpec> = {
             "{sku} · schedule",
             "schedule_mt",
           ),
-          drill(
-            mt("sales_mt", "Sales MT"),
-            "{sales_detail_key}",
-            "{sku} · sales to Megh",
-            "sales_mt",
-          ),
           // Ground and in transit are the two halves of one pool. They were their own
           // columns and are now the breakup behind it: what is asked of this figure is
           // "how much is there", and the split is the follow-up question.
           drill(
-            mt("total_stock_mt", "Stock at VSM MT"),
+            mt("total_stock_mt", "VSM stock MT"),
             "{stock_detail_key}",
             "{sku} · ground plus in transit",
             "total_stock_mt",
           ),
           drill(
-            mt("stock_at_length_mt", "At length MT"),
-            "{at_length_detail_key}",
-            "{sku} · long length at required size",
-            "stock_at_length_mt",
-          ),
-          drill(
-            mt("other_length_stock_mt", "Other length MT"),
-            "{other_length_detail_key}",
-            "{sku} · long length, other sizes",
-            "other_length_stock_mt",
-          ),
-          drill(
-            mt("orders_logged_mt", "Ordered MT"),
+            mt("orders_logged_mt", "Orders as per OMS MT"),
             "{orders_detail_key}",
             "{sku} · orders logged as per OMS",
             "orders_logged_mt",
           ),
           drill(
-            mt("orders_planning_mt", "Sales-planning orders MT"),
+            mt("orders_planning_mt", "Orders as per sales planning MT"),
             "{orders_plan_detail_key}",
             "{sku} · orders logged as per sales planning, plant by plant",
           ),
           // Both halves of the split open the same breakup, which carries the three
           // quantity columns side by side; only the heading says which half was clicked.
           drill(
-            mt("signoff_mt", "Signed MT"),
+            mt("signoff_mt", "Signed off MT"),
             "{signoff_detail_key}",
             "{sku} · signed off",
             "signoff_mt",
           ),
           drill(
-            mt("non_signoff_mt", "Not signed MT"),
+            mt("non_signoff_mt", "Not signed off MT"),
             "{signoff_detail_key}",
             "{sku} · not signed off",
             "non_signoff_mt",
           ),
-          days("coverage_days", "Cover days"),
-          days("coverage_days_post_order", "Cover days post order"),
-          cntNoTotal("bop_nos", "BOP nos"),
-          txt("bop_stated_size", "BOP stated size"),
-          txt("plan_note", "Plan note", true),
+          // Unlike every other figure here, this one opens a history rather than a
+          // split: material codes down, months across, and the published month's own
+          // column adding to the figure that was clicked.
+          //
+          // Guarded on the months behind it, not on `sales_mt` as the figures above it
+          // are. Those open one month's split, so a zero has nothing behind it; this
+          // opens a window, and a size that sold 40 MT in March and nothing this month is
+          // exactly the row whose history is worth reading — 38 of the 48 rows with a
+          // history read zero for the published month.
+          drill(
+            mt("sales_mt", "Sales to Megh MT"),
+            "{sales_detail_key}",
+            "{sku} · sales to Megh, month by month",
+            "sales_months",
+          ),
+          drill(
+            mt("stock_at_length_mt", "TSL stock in VSM length MT"),
+            "{at_length_detail_key}",
+            "{sku} · long length at required size",
+            "stock_at_length_mt",
+          ),
+          drill(
+            mt("other_length_stock_mt", "TSL stock in non-VSM length MT"),
+            "{other_length_detail_key}",
+            "{sku} · long length, other sizes",
+            "other_length_stock_mt",
+          ),
         ],
         // One document per quarter, all four OEMs in it with the OEM first — the way
         // the owner's own workbook divides into sheets, and the way it splits again on a

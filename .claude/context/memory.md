@@ -232,6 +232,30 @@ The **Megh length-bucketing** on the Megh tab is the plan's own length-specific
 mapping, built because `Bucketting` does not carry every code the plan names.
 Its "Codes not in Bucketting" column is a live queue for the owner.
 
+**The Megh SKU tracker is read as a size sheet**, on the owner's instruction: material
+codes, OD, ID, thickness, length, grade, cut type, bucket, end OEM and BOP, then the nine
+quantities, each of which opens its own breakup. Nineteen columns. The plan key, family,
+on-plan, cover days, cover days post order, BOP nos, BOP stated size and plan note came
+off. **The SKU is no longer a column but is still on every row**, and every drill-down key
+and title is still built from it — `MEGHSCHEDULE|{sku}`, `{sku} · signed off` — which is
+why dropping the column broke nothing and why `tools/check_detail_keys.mjs` is what proves
+that after any such change. An **empty bucket is an answer, not a gap**: 21 of the 73 rows
+go onward to RE or HMSIL, which Bucketting does not govern, and two are the off-plan
+bought-out sizes that have no plan row to read one off.
+
+**Sales to Megh opens months, not plants.** Alone among the figures on that tab it answers
+"how has this size sold over time" rather than "where is this month's tonnage", so its
+breakup is a small table: a material code per row, a month per column, and the footer
+adding each month down its own column — which means **the published month's column totals
+to the very figure that was clicked**. That tie is the test. Two things it depends on:
+every month column says `add: True`, because `kind: "mt"` is not summable on its own; and
+`MEGHSALES` stays out of `AVERAGE_BY_MONTH`, which is right where the rows are months and
+wrong where they are codes. It is guarded on `sales_months`, not on `sales_mt` — **38 of
+the 48 sizes with a history sold nothing in the published month**, and those are precisely
+the rows whose history is worth reading. Guarding on a nulled key instead would be weaker:
+any build that wrote the key unconditionally, as this one used to, would turn every unsold
+size into a button onto nothing.
+
 Owner: Apoorv Gupta (apoorvgupta.dce@gmail.com; work mail apoorv.gupta@tatasteel.com,
 which forwards the dumps). Direct publication to `main` is authorized. The repo is
 also the skill's home. **Everything Claude reads lives under `.claude/`** — the project
@@ -628,12 +652,51 @@ that the package still sits where Claude Code looks — the repo root is
   the extract or a plant that shipped nothing, 4318 really did stop, and a boolean there
   would be a guess in a fact's clothing. Re-archiving those two extracts with every plant
   is the fix, and until then Q4 FY26 and Q1 FY27 are short on both workings.
+- **TSL sales is one accumulating table, `public.tsl_sales`, keyed on billing document
+  and billing item.** Sales is the one input that accumulates where every other dump
+  supersedes, because a billed line is a fact with a date on it and the daily dump holds
+  only the month in progress. `raw_batches` still ingests every sales extract unchanged;
+  each is then absorbed once into the ledger, adding only lines it has never seen, and
+  `raw_batches.absorbed_at` records that. Absorption runs over every *un-absorbed* batch
+  and not over the current one — `promote_upload` supersedes the previous batch, so two
+  uploads between refreshes would lose the first — and `prune_uploads` now refuses to
+  delete a sales batch that has not been absorbed.
+  - **The key was verified before it was relied on**: unique in all four extracts, 786 /
+    4,941 / 7,948 / 7,932 rows with zero duplicate pairs and zero collisions between any
+    two files. Both halves are **text**, through `whole_number_text`: a daily dump carries
+    a grand-total row and so reads float, a quarterly archive has none and reads int, and
+    untexted the same invoice keys as `4731002954.0` and `4731002954` and is stored twice.
+  - **The grand-total row is dropped, not deduplicated.** Every daily dump ends with one —
+    no customer, no date, no billing document, and `Quantity` 968,438 kg against a month's
+    real 786 lines. The key is required, so the row is discarded for having none.
+  - **The one-month-one-source rule is retired.** It deduplicated whole months because it
+    had no finer key, which made a *partial* backfill impossible: an extract that finally
+    carried Jamshedpur for a closed month could only replace that month or be ignored.
+    The line key lets it merge. Re-archiving q4 and q1 is still the fix for the plant gap,
+    but it is now an upload rather than a re-cut of the pipeline.
+  - **Ledger order is settled chronologically, in `sources.sales_ledger_order`.** Several
+    published fields are read off `group.iloc[0]` — `trend_customer_skus` takes its length,
+    bucket and segment that way — so frame order decides them. Left alone the file backend
+    would order by what sits in `dumps/` and the Postgres one by primary key, and the two
+    would disagree about the length shown against a long-length SKU. `sales_orders` sorts
+    `kind="stable"` for the same reason; the default quicksort is not.
 
 ## Open threads
 
 - **Re-archive `sales_q4.xlsx` and `sales_q1.xlsx` with all plants.** Until then every
   figure drawn from January to June is southern-plants-only — the trend, the code
-  repository window and both CN/DN workings.
+  repository window, both CN/DN workings and the Megh tab's month-by-month sales. Now an
+  upload rather than a pipeline change: the ledger keys on the invoice line, so a fuller
+  extract merges its missing lines into the closed months instead of replacing them.
+- **`20260813060000_tsl_sales_ledger.sql` is not applied.** Until it is, a refresh that
+  runs `refresh_from_supabase.py` will fail at absorption — there is no `tsl_sales` to
+  write to. The offline `dumps/` path is unaffected, since `ExcelSources` assembles the
+  same ledger from the four sales slots in memory.
+- **The `Schedule` column of the current `vsm stock` sheet is entirely empty.** All 119
+  rows read zero, so every Megh SKU shows 0 schedule, coverage days is blank on all 73
+  rows, and the Schedule figure opens nothing. Stock and In Transit are populated, so it
+  is that one column of `RM Tracker_18092025.xlsx` rather than the file. Not a code
+  fault and it predates the column rework — it wants a fresher `rm_tracker_tvsm.xlsx`.
 - **Megh's base-price master is the one input the reco still wants.** Send the workbook
   the `Key2` / `VSM Base Price` VLOOKUP points at and the TVS half fills in; RE, HMSIL
   and Rane also need their own cost constants, which are pasted values in the sheets sent

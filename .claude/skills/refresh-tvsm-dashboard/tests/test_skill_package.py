@@ -589,24 +589,75 @@ def test_the_package_sits_where_claude_code_discovers_it():
         assert stale not in ignored, f"{stale} no longer exists; drop it from .vercelignore"
 
 
-def test_the_trend_takes_each_month_from_exactly_one_source():
-    """A month held by two sources must not be counted twice, and must not be lost.
+def test_a_sales_line_held_by_two_extracts_is_counted_once():
+    """A line in two sources must not be counted twice, and must not be lost.
 
     Both halves failed on the same day. The daily dump only covers the month in
     progress, so on 1 August July existed in no source at all and 3,344.836 MT — the
     most recent complete month — dropped out of a six-month view. Archiving the closed
     month's dump fixes that only if the overlap it creates is handled: while the daily
     dump still covers a month, the archive of that month is sitting beside it.
+
+    This used to be answered by letting each source claim the months no earlier source
+    had. That deduplicated whole months because there was no finer key to hand, and it
+    made a *partial* backfill impossible: an extract that finally carried Jamshedpur for
+    a closed month could only replace that month or be ignored, never merge into it. The
+    ledger keys on the billing line instead, so this is now a property of the key — and
+    is tested as behaviour rather than as the shape of the code.
     """
-    # The file list itself is asserted against the config above; this test is about
-    # how the months those files carry are combined.
-    script = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
-    assert 'trend_sources_ordered = [("sales.xlsx", sales)]' in script, (
-        "the daily dump must be first, so it wins for the month it covers"
-    )
-    assert 'fresh = frame[~frame["billing_month"].isin(claimed_months)]' in script
-    # The old unconditional concat is what double counted.
-    assert "trend_all = pd.concat(trend_history + [sales], ignore_index=True)\n" not in script
+    load_refresh_module()
+    import pandas as pd
+    import sources
+
+    def extract(*docs):
+        return pd.DataFrame([
+            {"Billing  Document Number": doc, "Billing Item": item,
+             "BILLING  DATE": date, "Quantity": qty}
+            for doc, item, date, qty in docs
+        ])
+
+    class TwoExtracts(sources.Sources):
+        def available(self, slot):
+            return slot in ("sales", "sales_jul")
+
+        def frame(self, slot, *, sheet=None):
+            # The same invoice line in both, as a re-sent day really arrives: the daily
+            # dump still covers the month whose archive is sitting beside it. Plus one
+            # line only the archive has, which is what a backfill looks like.
+            if slot == "sales":
+                return extract((4731002954.0, 10.0, "2026-07-31", 1000.0))
+            return extract((4731002954, 10, "2026-07-31", 1000.0),
+                           (4731002955, 20, "2026-07-30", 500.0))
+
+    ledger = TwoExtracts().sales_ledger()
+    assert len(ledger) == 2, "the shared line must appear once and the archive's line must survive"
+    assert float(ledger["Quantity"].sum()) == 1500.0, "no line counted twice"
+    # Float out of one extract and int out of the other is the normal case, not an edge
+    # one: a daily dump carries a grand-total row and so reads float, an archive has none
+    # and reads int. Untexted, the same invoice keys two ways and is stored twice.
+    assert set(ledger["billing_document"]) == {"4731002954", "4731002955"}
+
+
+def test_the_sales_grand_total_row_never_enters_the_ledger():
+    """Every daily dump ends with the sheet's own total, and it must not be a line.
+
+    No customer, no date, no material, no billing document — and `Quantity` holding the
+    sum of the column, 968,438 kg against a month's real 786 lines on the 7 August file.
+    A ledger that deduplicated on a blank key would keep one of them.
+    """
+    load_refresh_module()
+    import pandas as pd
+    import sources
+
+    frame = pd.DataFrame([
+        {"Billing  Document Number": 4731002954.0, "Billing Item": 10.0,
+         "BILLING  DATE": "2026-08-01", "Quantity": 1000.0},
+        {"Billing  Document Number": None, "Billing Item": None,
+         "BILLING  DATE": None, "Quantity": 968438.483},
+    ])
+    kept = sources.sales_line_keys(frame)
+    assert len(kept) == 1
+    assert float(kept["Quantity"].sum()) == 1000.0
 
 
 def test_customer_code_oem_reads_the_whole_sales_history():
@@ -620,8 +671,14 @@ def test_customer_code_oem_reads_the_whole_sales_history():
     script = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
     block = script[script.index("    code_oem = ("):]
     block = block[:block.index(".to_dict()")]
-    assert "pd.concat(trend_history + [sales], ignore_index=True)" in block, (
-        "code_oem must read the quarterly history, not only the month in progress"
+    # `sales_all` is every line the ledger holds; `sales` is the published month alone.
+    # Reading the month here is the defect this test exists for, so it is the one that
+    # must not appear.
+    assert "sales_all" in block, (
+        "code_oem must read the whole ledger, not only the month in progress"
+    )
+    assert not re.search(r"\bsales\b(?!_all)", block), (
+        "code_oem must not narrow to the published month"
     )
     # The gate this protects.
     assert 'failures.append("Schedule OEM resolution is below 99%.")' in script
@@ -1345,6 +1402,158 @@ def test_the_quarterly_calculation_is_a_drill_down_and_leaves_megh_out():
     # Rejection is blank, never zero: the dashboard cannot know it, and a zero reads as
     # "none" rather than "not filled in yet".
     assert "const finalQty = billedQty;" in copies
+
+
+class _FakeRest:
+    """PostgREST, as far as `PostgresSources` can tell.
+
+    Enough to prove the absorption path builds the right requests without a database:
+    the conflict target and resolution that make the insert additive, the grand-total row
+    never reaching the table, and the batch being stamped so it is absorbed exactly once.
+    """
+
+    def __init__(self, batches, grids):
+        self.batches = batches
+        self.grids = grids
+        self.inserted = []
+        self.insert_calls = []
+        self.updated = []
+
+    def select(self, table, query=""):
+        if table == "raw_batches":
+            if "absorbed_at=is.null" in query:
+                return [b for b in self.batches if b.get("absorbed_at") is None]
+            return self.batches
+        if table == "raw_rows":
+            batch_id = query.split("batch_id=eq.")[1].split("&")[0]
+            offset = int(query.split("offset=")[1].split("&")[0])
+            limit = int(query.split("limit=")[1].split("&")[0])
+            cells = self.grids[batch_id]
+            return [{"seq": i, "row": row}
+                    for i, row in enumerate(cells)][offset:offset + limit]
+        if table == "tsl_sales":
+            return []
+        raise AssertionError(f"unexpected read of {table}")
+
+    def insert(self, table, rows, *, chunk=2000, returning=False,
+               prefer=None, on_conflict=None):
+        self.insert_calls.append({"table": table, "prefer": prefer,
+                                  "on_conflict": on_conflict, "rows": len(rows)})
+        self.inserted.extend(rows)
+
+    def update(self, table, query, patch, *, returning=False):
+        self.updated.append((table, query, patch))
+
+
+def test_absorbing_a_sales_batch_adds_only_lines_the_ledger_has_never_seen():
+    """The ledger's whole contract, exercised without a database.
+
+    Three things have to be true of the request, and none of them is visible from the
+    frame it was built from. The insert has to name a conflict target *and* a resolution
+    — PostgREST treats a resolution without a target as an ordinary insert and raises on
+    the first duplicate key, which would turn a re-sent day into a failed refresh. The
+    key has to arrive as text. And the batch has to be stamped absorbed, because that
+    stamp is the only thing standing between a superseded batch and being pruned with
+    its lines never recorded.
+    """
+    load_refresh_module()
+    import sources
+
+    columns = list(sources.SALES_COLUMNS)
+    def cell_row(values):
+        return [values.get(c) for c in columns]
+
+    cells = [
+        columns,
+        cell_row({"Billing  Document Number": 4731002954.0, "Billing Item": 10.0,
+                  "BILLING  DATE": "2026-08-01", "Quantity": 1000.0,
+                  "MATERAIL NUMBER": "3907863", "CUSTOMER  CD": "943209",
+                  "DESP P LANT": "0789"}),
+        # The sheet's own grand total: no document, no date, and the column's sum.
+        cell_row({"Quantity": 968438.483}),
+    ]
+    batch = {"id": "b1", "slot": "sales", "sheet": None, "row_count": len(cells),
+             "original_filename": "sales.xlsx", "absorbed_at": None}
+    client = _FakeRest([batch], {"b1": cells})
+
+    source = sources.PostgresSources(client)
+    absorbed = source.absorb_sales(log=lambda _message: None)
+
+    assert absorbed == {"sales.xlsx": 1}, "the grand-total row is not a line"
+    assert len(client.inserted) == 1
+    line = client.inserted[0]
+    assert line["billing_document"] == "4731002954", "float out of pandas, text into the key"
+    assert line["billing_item"] == "10"
+    assert line["billing_month"] == "2026-08"
+    assert line["customer_code"] == "943209"
+    # The material code must survive as the text it is; inferred as a float, pandas drops
+    # its last digit and 3907863 becomes 3907860.
+    assert line["row"]["MATERAIL NUMBER"] == "3907863"
+    assert line["source_batch"] == "b1"
+
+    call = client.insert_calls[0]
+    assert call["on_conflict"] == "billing_document,billing_item", (
+        "without a conflict target the resolution is ignored and a re-sent day raises"
+    )
+    assert "resolution=ignore-duplicates" in call["prefer"]
+
+    assert client.updated == [
+        ("raw_batches", "id=eq.b1", {"absorbed_at": "now()"})
+    ], "an unstamped batch is absorbed again, or pruned before it ever is"
+
+
+def test_sales_to_megh_opens_months_that_add_to_the_figure_above_them():
+    """The published month's column must total the very figure that was clicked.
+
+    Every other breakup on the Megh tab splits one month's figure by where the material
+    is. This one answers a different question — how the size has sold over time — and a
+    history beside a monthly number is only honest if the two meet somewhere. They meet
+    in the published month's column, and that is what makes the panel checkable.
+
+    Two things have to hold for it, and both have been got wrong on this dashboard
+    before. Each month column must say `add: True`, because `kind: "mt"` is not summable
+    on its own — it is also weight per metre on the price build-up — and a layout relying
+    on it renders a footer of blanks. And `MEGHSALES` must stay out of `AVERAGE_BY_MONTH`,
+    which closes a panel on an average month: right where the *rows* are months, wrong
+    here where they are material codes and the months are columns.
+    """
+    refresh = load_refresh_module()
+
+    layout = refresh.megh_sales_detail_columns(["2026-07", "2026-08"])
+    assert [c["label"] for c in layout] == [
+        "Material code", "Description", "Jul 26", "Aug 26", "Total",
+    ]
+    months = [c for c in layout if c["field"].startswith("m_")]
+    assert months and all(c.get("add") is True for c in months), (
+        "a month column that is not summable leaves the footer blank"
+    )
+    assert layout[-1]["kind"] == "qty", "the total column is the row's own quantity"
+
+    detail = (REPO_ROOT / "app" / "dashboard" / "[view]" / "detail.tsx").read_text(
+        encoding="utf-8"
+    )
+    average = detail[detail.index("const AVERAGE_BY_MONTH"):]
+    average = average[:average.index(")")]
+    assert "MEGHSALES" not in average, (
+        "MEGHSALES closes on a total, not an average month: its rows are codes, not months"
+    )
+
+    # The figure is guarded on the months behind it, not on the month's own tonnage —
+    # a size that sold in March and nothing since is exactly the row worth opening.
+    views = (REPO_ROOT / "app" / "dashboard" / "[view]" / "views.ts").read_text(
+        encoding="utf-8"
+    )
+    # From the figure to the end of the `drill(...)` that wraps it. Closing on the
+    # dedented `),` rather than the first one, which belongs to the `mt(...)` inside it.
+    block = views[views.index('mt("sales_mt", "Sales to Megh MT")'):]
+    block = block[:block.index("\n          ),")]
+    # The guard is `drill`'s last argument, so it is the block's last line. Checking the
+    # position rather than mere presence is what tells it apart from the field name in
+    # the `mt(...)` the drill wraps.
+    guard = block.strip().splitlines()[-1].strip()
+    assert guard == '"sales_months",', (
+        f"the history must be guarded on the months behind it, not on {guard}"
+    )
 
 
 def test_meghs_conversion_cost_model_reproduces_the_owners_own_workbook():

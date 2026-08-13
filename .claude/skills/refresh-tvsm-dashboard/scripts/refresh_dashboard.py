@@ -672,6 +672,37 @@ OVERDUE_DETAIL_COLUMNS = [
     {"label": "Overdue age (days)", "field": "age_days", "kind": "num"},
     {"label": "Amount", "field": "qty", "kind": "qty"},
 ]
+def megh_sales_detail_columns(months):
+    """Sales to Megh: a material code per row, a month per column, a total at the end.
+
+    Built per run rather than declared as a constant, because the months are whatever the
+    ledger holds — a new month must not need a code change any more than it does for the
+    month columns on the trend tab.
+
+    Every month column says `add: True` outright. `kind: "mt"` is not summable on its own
+    — it is also weight per metre and rupees per metre on the price build-up — so a layout
+    that relied on it would render a footer of blanks under the one thing this table is
+    read for.
+    """
+    return [
+        {"label": "Material code", "field": "material_code"},
+        {"label": "Description", "field": "sku"},
+        *(
+            {"label": month_label(month), "field": f"m_{month}",
+             "kind": "mt", "add": True}
+            for month in months
+        ),
+        {"label": "Total", "field": "qty", "kind": "qty"},
+    ]
+
+
+def month_label(month):
+    """`2026-01` -> `Jan 26`, the way every other month column on the dashboard reads."""
+    year, _, mm = str(month).partition("-")
+    index = int(mm) - 1 if mm.isdigit() else -1
+    return f"{MONTH_NAMES[index][:3]} {year[2:]}" if 0 <= index < 12 else str(month)
+
+
 # Megh Steel's own quarterly working. Four OEMs in one document, the OEM first, which is
 # how the owner's workbook divides it into sheets. The claim columns carry nothing until
 # Megh's base-price master is a held input; the note beside `MEGH_RECO_COST` says why.
@@ -1023,6 +1054,20 @@ def shape_matches_bucket(description, bucket):
     return [str(v) for v in shape] == [parts[0], parts[1], parts[2]]
 
 
+def blank_to_none(value):
+    """A plan cell that says nothing, as None.
+
+    Test every plan cell for NaN explicitly. NaN is truthy, so `if not sku` lets a row
+    with no key through to become a dictionary key, and `vsm_bucket or None` keeps a NaN
+    as the bucket — which then reads as governed and never reaches the assign-a-bucket
+    queue. Same trap as the "nan-0.46" CTL buckets.
+
+    Module level because the Megh tab's own rows need it too, and they are built before
+    the length-bucketing block where it used to be a local.
+    """
+    return None if value is None or pd.isna(value) or not str(value).strip() else value
+
+
 def first_unique(series):
     values = [v for v in series if pd.notna(v)]
     unique = list(dict.fromkeys(values))
@@ -1113,9 +1158,26 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             )
         schedule_supplement_rows = int(len(supplement))
         schedule = pd.concat([schedule, supplement[schedule.columns]], ignore_index=True)
+    # Every TSL sales line the source can reach, each line once, keyed on billing
+    # document and item. One ledger rather than a daily dump plus three archives: a
+    # billed line is a fact with a date on it, so sales accumulates where every other
+    # dump supersedes. `Sources.sales_ledger` is where that is assembled and why.
+    #
     # Material-code columns are read as text — the reason is on the `_sales_like` spec
     # in `scripts/sources.py`, beside the pin that enforces it.
-    sales = src.frame("sales")
+    sales_ledger = src.sales_ledger()
+    # The month being published, taken out of the ledger rather than read from its own
+    # file. It is the same set of lines the daily dump held — that dump covers exactly one
+    # month — less the sheet's own grand total row, which has no billing document and so
+    # never enters the ledger. Everything month-scoped downstream reads this.
+    ledger_month = (
+        pd.to_datetime(sales_ledger["BILLING  DATE"], errors="coerce")
+        .dt.strftime("%Y-%m") if not sales_ledger.empty else pd.Series(dtype=str)
+    )
+    published_month = (
+        pd.Timestamp(as_of) if as_of else pd.Timestamp(datetime.now(timezone.utc).date())
+    ).strftime("%Y-%m")
+    sales = sales_ledger[ledger_month.eq(published_month)].copy()
     # Kept unenriched for the code repository, which reads the raw invoice columns and
     # must not inherit the schedule-matching frame's later transformations.
     sales_raw = sales.copy()
@@ -1150,17 +1212,15 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     # which is too short to see every code a customer has been billed under, so the
     # code repository reads this file when it is supplied and the daily dump otherwise.
     sales_history = src.frame_or_empty("sales_history")
-    # Quarterly sales extracts for the trend view. Optional, and read on the same terms
-    # as the daily dump: material number as text, `Sheet1` only.
-    trend_history_raw = []
-    trend_sources = []
-    for filename in SALES_TREND_FILES:
-        slot = Path(filename).stem
-        if not src.available(slot):
-            continue
-        frame = src.frame(slot)
-        trend_history_raw.append(frame)
-        trend_sources.append({"file": filename, "rows": int(len(frame))})
+    # What the trend is built from, for the run summary. The frames themselves are no
+    # longer read here: every one of them is already in the ledger, which is what the
+    # trend now reads. The slots stay in the registry because they are still how an
+    # archive is *uploaded*; this only reports which ones contributed.
+    trend_sources = [
+        {"file": filename, "rows": int(len(src.frame(Path(filename).stem)))}
+        for filename in SALES_TREND_FILES
+        if src.available(Path(filename).stem)
+    ]
     # Order book from the sales-planning consolidation: three sheets, one per despatching
     # origin, each with its own quantity column. Optional, like the other planning files.
     # Each sheet of the order book and the contract is its own slot; the code columns
@@ -1356,8 +1416,12 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
         ).dt.to_period("M").astype(str).replace("NaT", None)
         return frame
 
-    sales = derive_sales(sales)
-    trend_history = [derive_sales(frame) for frame in trend_history_raw]
+    # Derived once, over every line the ledger holds, and sliced afterwards. The whole
+    # window and the published month must be mapped by the same function — a trend that
+    # disagreed with the month it overlaps would be worse than no trend — and deriving
+    # once is what makes that structural rather than a thing to remember.
+    sales_all = derive_sales(sales_ledger)
+    sales = sales_all[sales_all["billing_month"].eq(published_month)]
 
     sales_agg_df = (
         sales.dropna(subset=["customer_key", "ctl_bucket"])
@@ -1385,11 +1449,12 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     # resolution fell to 66.75% against a 99% publication gate. Nothing was wrong with
     # the data: the derivation assumed a populated month. The quarterly extracts already
     # in hand carry the same code/OEM pairs over six months, so read them too and the
-    # mapping stops depending on where in the month the refresh runs.
-    # The daily dump is listed last so `first_unique` sees the oldest evidence first;
-    # it returns nothing on a genuine conflict either way, which is the point.
+    # mapping stops depending on where in the month the refresh runs. The ledger is that
+    # whole window, so this is simply all of it. Order does not enter into it:
+    # `first_unique` answers only where a code has exactly one OEM across every line, and
+    # returns nothing on a genuine conflict, which is the point.
     code_oem = (
-        pd.concat(trend_history + [sales], ignore_index=True)
+        sales_all
         .dropna(subset=["customer_key", "OEM"])
         .groupby("customer_key")["OEM"]
         .agg(first_unique)
@@ -1408,9 +1473,15 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     sales_orders["invoice_date"] = pd.to_datetime(
         sales_orders["BILLING  DATE"], errors="coerce"
     )
+    # Last invoice wins — the loop below overwrites — so the sort decides which SO and
+    # despatch plant a schedule line is offered. `kind="stable"` because the default is
+    # quicksort, which is not: several invoices share a date, and their order among
+    # themselves would then be decided by however the sales frame happened to be
+    # assembled. That was invisible while sales came from one file in file order; the
+    # ledger settles its own order, and this is what carries that through.
     sales_orders = (
         sales_orders.dropna(subset=["so_number", "ctl_bucket"])
-        .sort_values("invoice_date")
+        .sort_values("invoice_date", kind="stable")
     )
     so_by_customer_ctl, so_by_ctl_plant, so_by_ctl = {}, {}, {}
     so_by_customer_material, so_by_material = {}, {}
@@ -2979,10 +3050,7 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
         code: oem for code, oem in CONVERSION_AGENT_OEM_BY_CODE.items()
         if oem in MEGH_ONWARD_OEMS
     }
-    onward_sales = pd.concat(
-        [frame[["material_key", "customer_key"]] for frame in trend_history + [sales]],
-        ignore_index=True,
-    )
+    onward_sales = sales_all[["material_key", "customer_key"]]
     onward_sales = onward_sales[onward_sales["customer_key"].isin(agent_oem_by_code)]
     oems_by_code = (
         onward_sales.assign(oem=onward_sales["customer_key"].map(agent_oem_by_code))
@@ -3139,7 +3207,6 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             for c in order_columns
             if float(pd.to_numeric(group[c], errors="coerce").fillna(0).sum())
         ]
-        megh_detail(sold, keys["sales"], "Sales to Megh", qty_col="sales_mt")
         megh_detail(at_length, keys["atlength"], "Long length at required size")
         megh_detail(other_length, keys["otherlength"], "Long length, other length")
 
@@ -3155,6 +3222,10 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             # and every consumer needs to be able to tell them apart.
             "in_plan": True,
             "plan_note": None,
+            # The governed TVS bucket this size belongs to, where it has one. A
+            # `Megh-` prefixed size has none by design — it is bound for RE or HMSIL and
+            # Bucketting governs TVS — so an empty cell here is the answer, not a gap.
+            "bucket": blank_to_none(first["vsm_bucket"]),
             "od": norm_od(first["O D"]),
             "inner_d": "0",
             "thickness": norm_thickness(first["Thk."]),
@@ -3278,7 +3349,6 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
         ]
         keys = {k: f"MEGH{k.upper()}|{sku}" for k in
                 ("stock", "sales", "atlength", "otherlength")}
-        megh_detail(sold, keys["sales"], "Sales to Megh", qty_col="sales_mt")
         megh_detail(at_length, keys["atlength"], "Long length at required size")
         megh_detail(other_length, keys["otherlength"], "Long length, other length")
         megh_rows.append({
@@ -3286,6 +3356,10 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             "family": family,
             "in_plan": False,
             "plan_note": MEGH_BOP_ADDED_NOTE,
+            # No plan row stands behind this size, so there is no plan key to read a
+            # governed bucket off. Empty for a different reason than a `Megh-` size's is,
+            # and the same on the page.
+            "bucket": None,
             "od": od,
             "inner_d": inner,
             "thickness": thk,
@@ -3339,13 +3413,6 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     # showed on the Megh tab while an order for the same code reached no bucket and was
     # reported as unmapped. This table is that missing mapping, built from the plan
     # itself and offered back as a sheet to paste into the workbook.
-    # Test every plan cell for NaN explicitly. NaN is truthy, so `if not sku` lets a
-    # row with no key through to become a dictionary key, and `vsm_bucket or None`
-    # keeps a NaN as the bucket — which then reads as governed and never reaches the
-    # assign-a-bucket queue. Same trap as the "nan-0.46" CTL buckets.
-    def blank_to_none(value):
-        return None if value is None or pd.isna(value) or not str(value).strip() else value
-
     length_bucketing = {}
     # Plan rows that reach no SKU key at all. One 48.6 x 1.6 x 572.5 mm row carries
     # 20 MT of schedule with its key, grade and FC/NFC cells all empty, so it appears on
@@ -5221,30 +5288,20 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     # 943209, which converts for TVS. `OEM_key_1_rev codes` classifies 943209 as Direct,
     # so it is matched on the code rather than inferred from the OEM key.
     #
-    # One month comes from exactly one source. The daily dump is authoritative for the
-    # month it covers and the archives fill in the rest, taken in the order they are
-    # listed. Without that rule a month held by two sources is counted twice, and the
-    # rule is what makes archiving a closed month's daily dump safe: on 1 August the
-    # daily dump stopped covering July, and July existed in no quarterly extract, so the
-    # trend silently lost 3,344.836 MT of real sales — the most recent complete month,
-    # gone from a six-month view. Archive each month's dump as it closes (see
-    # SALES_TREND_FILES) and this keeps it from being double counted while it is still
-    # in both places.
-    trend_sources_ordered = [("sales.xlsx", sales)] + list(
-        zip([s["file"] for s in trend_sources], trend_history)
-    )
-    claimed_months, trend_parts = set(), []
-    for source_name, frame in trend_sources_ordered:
-        frame = frame[frame["billing_month"].notna()]
-        fresh = frame[~frame["billing_month"].isin(claimed_months)]
-        if fresh.empty:
-            continue
-        claimed_months.update(fresh["billing_month"].unique())
-        trend_parts.append(fresh)
-    trend_all = (
-        pd.concat(trend_parts, ignore_index=True) if trend_parts
-        else pd.concat(trend_history + [sales], ignore_index=True).iloc[0:0]
-    )
+    # The whole ledger, which is the whole window. There used to be a one-month-one-source
+    # rule here: each source claimed the months no earlier source had, because two files
+    # covering the same month would otherwise count it twice. That rule deduplicated whole
+    # months because it had no finer key to work with, and it cost real tonnage both ways
+    # — a month held by two sources was counted twice without it, and on 1 August the
+    # daily dump stopped covering July while no archive yet held it, so the trend silently
+    # lost 3,344.836 MT, the most recent complete month, from a six-month view.
+    #
+    # The ledger's key retires it. Deduplication happens at the line, on billing document
+    # and item, so a month may be assembled from as many extracts as have ever been
+    # uploaded and each line still counts once. That is what lets a partial backfill
+    # *merge* into a closed month — send an extract that finally carries Jamshedpur and
+    # Khopoli, and it adds its missing lines to January rather than having to replace it.
+    trend_all = sales_all[sales_all["billing_month"].notna()].copy()
     is_megh = trend_all["customer_key"].eq(MEGH_TVS_CUSTOMER_CODE)
     is_direct = trend_all["oem_key_oem"].eq("TVS") & ~is_megh
     trend_all["segment"] = np.where(
@@ -5292,6 +5349,72 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             key = key[0] if len(key) == 1 else key
             out.setdefault(key, {})[r["billing_month"]] = round(float(r[value]), digits)
         return out
+
+    # Sales to Megh, month by month, behind the Megh tab's own figure.
+    #
+    # The other breakups on that tab split one month's figure by where the material is;
+    # this one answers a different question, which is how the size has sold over time. So
+    # it is a small table in its own right: a material code per row, a month per column,
+    # and the footer adding each month down its own column. The published month's column
+    # therefore totals to the very figure that was clicked, which is what keeps a history
+    # honest beside a monthly number.
+    #
+    # Read from the ledger rather than the month's dump, and filtered to the same three
+    # conversion-agent codes `sales_mt` itself uses — a breakup drawn from a wider set
+    # than the column above it is a breakup that contradicts it.
+    megh_history = trend_all[trend_all["customer_key"].isin(megh_codes)].copy()
+    if not megh_history.empty:
+        megh_history["vsm_key"] = [
+            bucket_vsm_key(b, l)
+            for b, l in zip(megh_history["bucket"], megh_history["length_m"])
+        ]
+        # Same two routes the tab itself uses, bucket first and the plan's own per-plant
+        # material codes as the fallback — without which no `Megh-` size could be reached
+        # at all, having no governed bucket to join on.
+        megh_history["vsm_key"] = megh_history["vsm_key"].fillna(
+            megh_history["material_key"].map(code_to_vsm_key)
+        )
+    megh_sales_months = (
+        month_map(megh_history.dropna(subset=["vsm_key"]),
+                  ["vsm_key", "material_key", "description_key"])
+        if not megh_history.empty else {}
+    )
+    megh_history_by_sku: dict[str, list] = {}
+    for (sku, code, description), months in megh_sales_months.items():
+        megh_history_by_sku.setdefault(sku, []).append({
+            "material_code": code,
+            "sku": description,
+            # One field per month, because the panel reads flat fields off a row. Only
+            # the months that moved are written; the rest read as a dash rather than a
+            # zero, which is the difference between "sold none" and "no line at all".
+            **{f"m_{month}": qty for month, qty in months.items()},
+            "qty": round(sum(months.values()), 3),
+            "unit": "MT",
+        })
+    # Only for sizes that are actually on the tab. Megh buys plenty the plan carries no
+    # line for — that is what the unmapped-purchases table below exists to report — and a
+    # breakup written against a SKU no row names is a breakup nobody can open.
+    on_the_tab = {row["sku"] for row in megh_rows}
+    megh_history_by_sku = {
+        sku: lines for sku, lines in megh_history_by_sku.items() if sku in on_the_tab
+    }
+    for sku, lines in megh_history_by_sku.items():
+        lines.sort(key=lambda line: -line["qty"])
+        stock_details[f"MEGHSALES|{sku}"] = lines
+    # How many months this size has sold in, and the key to open them.
+    #
+    # The count is what the figure is guarded on, and it earns its place rather than
+    # duplicating the key. The rule this tab already follows is that `when` guards the
+    # figure wherever the key exists but the breakup may not — and a key nulled out is a
+    # weaker guarantee than it looks, because any future build that writes the key
+    # unconditionally, as this one used to, turns every unsold size into a button onto
+    # nothing. Stating the condition outright is what makes that impossible.
+    for row in megh_rows:
+        lines = megh_history_by_sku.get(row["sku"], [])
+        row["sales_months"] = len({
+            field for line in lines for field in line if field.startswith("m_")
+        })
+        row["sales_detail_key"] = f"MEGHSALES|{row['sku']}" if lines else None
 
     # Table one: bucket by month, both parties consolidated, each cell opening its split.
     bucketed = trend[trend["bucket"].notna()]
@@ -6426,6 +6549,8 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             "STRSOURCE": STR_SOURCE_DETAIL_COLUMNS,
             "SIGNOFF": SIGNOFF_DETAIL_COLUMNS,
             "MEGHSIGNOFF": SIGNOFF_DETAIL_COLUMNS,
+            # Months across the columns, so the layout is as long as the window is.
+            "MEGHSALES": megh_sales_detail_columns(trend_months),
             "TRENDBUCKET": TREND_DETAIL_COLUMNS,
             "TRENDMONTH": TREND_DETAIL_COLUMNS,
             "SKUHISTORY": SKU_HISTORY_DETAIL_COLUMNS,

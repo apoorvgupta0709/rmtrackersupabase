@@ -98,6 +98,163 @@ SALES_COLUMNS = (
 )
 
 
+# The invoice line's identity, and the slots that carry one.
+#
+# Sales is the one input that accumulates rather than being superseded: a billed line is
+# a fact with a date on it, and the daily dump holds only the current month. So every
+# sales extract — the daily dump and every archive — pours into one ledger keyed on the
+# line, and `Sources.sales_ledger()` is what the pipeline reads instead of the slots
+# individually.
+#
+# Order is precedence, first occurrence winning: the daily dump is the freshest statement
+# of a line, then the archives newest first. It mirrors the month-precedence rule this
+# replaces, but resolves at line level rather than by whole month.
+BILLING_DOCUMENT_COLUMN = "Billing  Document Number"
+BILLING_ITEM_COLUMN = "Billing Item"
+SALES_LEDGER_SLOTS = ("sales", "sales_jul", "sales_q1", "sales_q4", "sales_history")
+
+
+def whole_number_text(value) -> str | None:
+    """An identifier that arrived as a number, back as the text it is.
+
+    `Billing  Document Number` and `Billing Item` are integers in SAP and floats out of
+    pandas, so an invoice reaches a customer's reconciliation as `4731002954.0` and
+    matches nothing. A value that is not a whole number is left as written.
+
+    It lives here rather than in the pipeline because it is now part of the read: it is
+    what makes the ledger's key stable across extracts. Whether a sales file reads as
+    float or int is decided by something as incidental as whether it carries a grand
+    total row — the daily dumps do and the quarterly archives do not — so the same
+    invoice would key two ways and be stored twice.
+    """
+    if pd.isna(value):
+        return None
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    if isinstance(value, int):
+        return str(value)
+    return str(value).strip() or None
+
+
+def sales_line_keys(frame: pd.DataFrame) -> pd.DataFrame:
+    """A sales frame with its line key attached, and the sheet's own total row dropped.
+
+    Every daily dump ends with a grand total: no customer, no date, no material and no
+    billing document, but `Quantity` holding the sum of the column — 968,438 kg against a
+    month's real 786 lines on the 7 August file. Deduplicating on a blank key would keep
+    one of them; the key has to be *required*, so the row is dropped for having none.
+    """
+    if frame.empty:
+        return frame.assign(billing_document=None, billing_item=None)
+    keyed = frame.assign(
+        billing_document=[whole_number_text(v) for v in frame[BILLING_DOCUMENT_COLUMN]],
+        billing_item=[whole_number_text(v) for v in frame[BILLING_ITEM_COLUMN]],
+    )
+    return keyed[keyed["billing_document"].notna() & keyed["billing_item"].notna()]
+
+
+def _storable(value):
+    """One cell, as something `json.dumps` will take and pandas will give back.
+
+    A date has to survive as text a later `pd.to_datetime` reads identically, and NaN has
+    to become null rather than a bare `NaN` no JSON parser accepts — the same rule the
+    payload writer applies on the way out of the pipeline.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (pd.Timestamp, )):
+        return None if pd.isna(value) else value.isoformat()
+    if isinstance(value, time):
+        return value.isoformat()
+    if isinstance(value, (str, bool)):
+        return value
+    # numpy scalars answer to .item(); this is also what turns np.int64 into int.
+    if hasattr(value, "item") and not isinstance(value, (list, tuple, dict)):
+        try:
+            value = value.item()
+        except (ValueError, AttributeError):
+            return str(value)
+    if isinstance(value, float) and (pd.isna(value) or value != value):
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (int, float, str, bool)):
+        return value
+    return str(value)
+
+
+def sales_ledger_records(frame: pd.DataFrame, batch_id=None) -> list[dict]:
+    """A keyed sales frame as ledger rows.
+
+    The whole named line goes into `row`; the six fields beside it are lifted out because
+    they are what every reader slices on, and a JSONB expression index on each would cost
+    more than the columns do.
+    """
+    if frame.empty:
+        return []
+    columns = [c for c in frame.columns if c not in ("billing_document", "billing_item")]
+    records = []
+    for line in frame.to_dict("records"):
+        billing_date = pd.to_datetime(line.get("BILLING  DATE"), errors="coerce")
+        records.append({
+            "billing_document": line["billing_document"],
+            "billing_item": line["billing_item"],
+            "row": {c: _storable(line.get(c)) for c in columns},
+            "billing_date": None if pd.isna(billing_date) else billing_date.date().isoformat(),
+            "billing_month": None if pd.isna(billing_date) else billing_date.strftime("%Y-%m"),
+            "despatch_plant": _storable(line.get("DESP P LANT")),
+            "material_number": _storable(line.get("MATERAIL NUMBER")),
+            "customer_code": _storable(line.get("CUSTOMER  CD")),
+            "source_batch": batch_id,
+        })
+    return records
+
+
+def sales_ledger_order(frame: pd.DataFrame) -> pd.DataFrame:
+    """The ledger in one settled order: oldest invoice first.
+
+    It has to be settled somewhere, and this is the only place both backends pass
+    through. Several published fields are taken from whichever line of a group comes
+    first — `trend_customer_skus` reads its length, bucket and segment off `group.iloc[0]`
+    — so frame order decides them. Left alone, a file-backed run would order by which
+    extracts happen to sit in `dumps/` and a Postgres run by the primary key, and the two
+    would quietly disagree about the length shown against a long-length SKU.
+
+    Chronological is the order to settle on, because it makes that representative mean
+    something: the earliest line billed against the group, rather than the first one
+    somebody happened to upload.
+    """
+    if frame.empty:
+        return frame
+    order = frame.assign(
+        _billed=pd.to_datetime(frame["BILLING  DATE"], errors="coerce")
+    ).sort_values(
+        ["_billed", "billing_document", "billing_item"],
+        kind="stable",
+        na_position="last",
+    )
+    return order.drop(columns="_billed").reset_index(drop=True)
+
+
+def _sales_ledger_dtypes(frame: pd.DataFrame) -> pd.DataFrame:
+    """The two dtypes the JSONB round trip must not be allowed to lose.
+
+    `MATERAIL NUMBER` is pinned to text on every sales read for a reason the data contract
+    spells out — inferred as a float, pandas drops the last digit of a code stored as text,
+    3907863 reading as 3907860 on 3,603 of 3,989 rows. It is stored as text and must come
+    back as text. The billing date went out as ISO and comes back parsed, so that
+    `billing_month` is derived from a date here exactly as it is from an Excel serial there.
+    """
+    if "MATERAIL NUMBER" in frame.columns:
+        frame["MATERAIL NUMBER"] = frame["MATERAIL NUMBER"].astype("object")
+    if "BILLING  DATE" in frame.columns:
+        frame["BILLING  DATE"] = pd.to_datetime(frame["BILLING  DATE"], errors="coerce")
+    return frame
+
+
 def _sales_like(filename: str, *, optional: bool = False) -> ReadSpec:
     """A sales extract: `Sheet1` only, material number as text.
 
@@ -300,6 +457,33 @@ class Sources:
         if not self.available(slot):
             return pd.DataFrame()
         return self.frame(slot, sheet=sheet)
+
+    def sales_ledger(self) -> pd.DataFrame:
+        """Every TSL sales line this source can reach, each line once.
+
+        The default builds the ledger from the sales slots on the fly, which is what the
+        offline `dumps/` run and the cell-fidelity harness do. `PostgresSources` overrides
+        it with the stored table, where the same lines have been accumulating across every
+        upload rather than being rebuilt from whichever extracts happen to be present.
+
+        Both must agree, and that is the point of assembling it the same way in both
+        places: the key decides, and it is the same key.
+        """
+        parts = []
+        for slot in SALES_LEDGER_SLOTS:
+            if slot not in self.slots or not self.available(slot):
+                continue
+            frame = sales_line_keys(self.frame(slot))
+            if not frame.empty:
+                parts.append(frame)
+        if not parts:
+            return pd.DataFrame()
+        ledger = pd.concat(parts, ignore_index=True)
+        # First occurrence wins, and `SALES_LEDGER_SLOTS` is the precedence order.
+        ledger = ledger.drop_duplicates(
+            subset=["billing_document", "billing_item"], keep="first"
+        )
+        return sales_ledger_order(ledger)
 
 
 class ExcelSources(Sources):
@@ -644,3 +828,90 @@ class PostgresSources(GridSources):
         }
         self._grids[slot] = grid
         return grid
+
+    # ---- The sales ledger ------------------------------------------------
+
+    def unabsorbed_sales_batches(self) -> list[dict]:
+        """Sales batches whose lines are not yet in the ledger, oldest first.
+
+        Deliberately not "the current batch". `promote_upload` supersedes the previous
+        one, so uploading two sales dumps between refreshes leaves the first superseded
+        and unread — and its lines would be lost for good once pruning caught up with it.
+        Absorbing by `absorbed_at is null` instead means a batch is folded in exactly
+        once, whatever order uploads and refreshes interleave in.
+        """
+        slots = ",".join(SALES_LEDGER_SLOTS)
+        return self.client.select(
+            "raw_batches",
+            f"absorbed_at=is.null&slot=in.({slots})"
+            "&select=id,slot,sheet,row_count,original_filename&order=uploaded_at.asc",
+        )
+
+    def absorb_sales(self, log=print) -> dict[str, int]:
+        """Fold every un-absorbed sales batch into `tsl_sales`, newest lines only.
+
+        `resolution=ignore-duplicates` is the whole mechanism: a line already held is left
+        exactly as it was, so re-sending a day, re-uploading a month, or backfilling an
+        extract that overlaps one already absorbed all converge on the same ledger.
+        """
+        absorbed: dict[str, int] = {}
+        for batch in self.unabsorbed_sales_batches():
+            slot = batch["slot"]
+            # Read this batch specifically, not the slot's current grid: the two differ
+            # precisely in the case this method exists for.
+            self._grids.pop(slot, None)
+            held = self._batches
+            self._batches = {slot: batch}
+            try:
+                frame = sales_line_keys(self.frame(slot))
+            finally:
+                self._batches = held
+                self._grids.pop(slot, None)
+
+            records = sales_ledger_records(frame, batch["id"])
+            if records:
+                self.client.insert(
+                    "tsl_sales",
+                    records,
+                    prefer="resolution=ignore-duplicates,return=minimal",
+                    on_conflict="billing_document,billing_item",
+                )
+            self.client.update(
+                "raw_batches", f"id=eq.{batch['id']}", {"absorbed_at": "now()"}
+            )
+            absorbed[batch["original_filename"]] = len(records)
+            log(f"  absorbed {len(records)} sales lines from {batch['original_filename']}")
+        return absorbed
+
+    def sales_ledger(self) -> pd.DataFrame:
+        """The stored ledger, rebuilt as the frame the pipeline expects.
+
+        Every line ever uploaded, not merely the ones the extracts currently in `dumps/`
+        happen to cover. The stored `row` is the named line exactly as the read produced
+        it, so this reconstitutes the same frame the file-backed backend assembles.
+        """
+        rows: list[dict] = []
+        page = 1000
+        offset = 0
+        while True:
+            # Ordered by the key so paging is stable; PostgREST's cap is silent, so the
+            # loop stops on a short page rather than on an empty one.
+            got = self.client.select(
+                "tsl_sales",
+                "select=billing_document,billing_item,row"
+                "&order=billing_document.asc,billing_item.asc"
+                f"&offset={offset}&limit={page}",
+            )
+            rows.extend(got)
+            if len(got) < page:
+                break
+            offset += len(got)
+
+        if not rows:
+            return pd.DataFrame()
+        frame = pd.DataFrame([r["row"] for r in rows])
+        frame["billing_document"] = [r["billing_document"] for r in rows]
+        frame["billing_item"] = [r["billing_item"] for r in rows]
+        # Sorted here rather than in the query, so both backends settle the order the
+        # same way. The query orders by the key only to page a stable set.
+        return sales_ledger_order(_sales_ledger_dtypes(frame))
