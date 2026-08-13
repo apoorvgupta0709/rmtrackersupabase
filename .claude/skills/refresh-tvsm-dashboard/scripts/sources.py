@@ -335,10 +335,16 @@ SLOTS: dict[str, ReadSpec] = {
     "vsm_tvsm": ReadSpec(("rm_tracker_tvsm.xlsx",), "TVSM", 2,
                          key_column="key",
                          required=("key", "VSM Requirement", "VSM Sales", "VSM Stock")),
+    # `length key` is the plan's own statement of the length-specific key Megh SKUs join
+    # on. It is required rather than optional: the pipeline used to derive that key from
+    # the row's dimensions and cut type, and where the plan and Bucketting disagreed on
+    # end condition the derived key missed and the tonnage fell out of the tab entirely.
+    # A tracker without the column should stop the run, not quietly resurrect the guess.
     "vsm_stock": ReadSpec(
         ("rm_tracker_tvsm.xlsx",), "vsm stock", 2,
         key_column="key",
-        required=("key", "O D", "Thk.", "Length", "Grade", "FC/NFC", "Schedule", "Stock"),
+        required=("key", "length key", "O D", "Thk.", "Length", "Grade", "FC/NFC",
+                  "Schedule", "Stock"),
     ),
 
     "receivables": ReadSpec(

@@ -134,6 +134,28 @@ ordered — a row saying both that everything was signed off and that nothing wa
 5 Aug; the line values and `data.json` were right throughout, only the totals row was
 not. A test fails if a shared total returns.
 
+**The Megh SKU key is stated by the plan, not derived.** From 13 Aug the `vsm stock`
+sheet carries a **`length key`** column and it is the join key: the governed bucket with
+the finished length appended, `22.23-0-2-ERW 1-PE-5.951`. It replaced a key the pipeline
+assembled as `OD-ID-thickness-length-grade-cuttype`, whose cut token came from the
+bucket's end condition — so wherever the plan and `Bucketting` disagreed there, the two
+sides built different keys and the tonnage went to the unmapped queue instead of a SKU.
+Adopting it moved 32.349 MT out of that queue (mapped 87.569 → 119.918 MT, unmapped
+86.141 → 53.792, the pair still summing to the 173.711 MT the sales file holds) and took
+the tracker from 73 SKUs to 89. `sources.py` now *requires* the column, so a tracker
+without it stops the run rather than silently resurrecting the guess. Two corrections
+only, in `norm_length_key`, both where the row could otherwise not join at all: collapse
+whitespace, and render a trailing length above 20 in metres. **The `Megh-` prefix is read
+off the length key, not `key`** — four rows carry it there while `key` still names a
+governed bucket, and per the owner the prefix means the size goes onward to RE or HMSIL,
+so those rows hold no TVS bucket and stop counting toward TVSM coverage.
+
+**The Megh tab's *Sales to Megh* is the current month only.** A bucket showing zero there
+is not evidence of no sales: `22.23-0-2-ERW 1-PE` reads zero in August and TSL still
+billed Megh ~180 MT of it across Feb, Mar, Apr, Jun and Jul. The month-by-month figures
+live on the Past sales trend tab, and that tab is keyed on buckets while the Megh tab is
+keyed on length SKUs — searching one for the other's key finds nothing by construction.
+
 **The customer tracker's history cell is an average month**, headed *Avg month sales*,
 with a tooltip naming how many months it averages over. The figures beside it are one
 month of schedule and one month of dispatch; the window total read as a SKU running six
@@ -695,11 +717,9 @@ that the package still sits where Claude Code looks — the repo root is
   ledger should settle at roughly 22,235 lines — 7,932 Q4, 7,948 Q1, 4,941 July and
   1,414 August, each less its grand-total row. A first refresh landing far short of that
   means absorption is reading `current` batches rather than un-absorbed ones.
-- **The `Schedule` column of the current `vsm stock` sheet is entirely empty.** All 119
-  rows read zero, so every Megh SKU shows 0 schedule, coverage days is blank on all 73
-  rows, and the Schedule figure opens nothing. Stock and In Transit are populated, so it
-  is that one column of `RM Tracker_18092025.xlsx` rather than the file. Not a code
-  fault and it predates the column rework — it wants a fresher `rm_tracker_tvsm.xlsx`.
+- ~~The `Schedule` column of the `vsm stock` sheet is empty.~~ **Resolved 13 Aug** by the
+  owner's `RM_Tracker_18092025.xlsx`, which carries 1,696.5 MT of schedule across 89
+  tracked rows where the previous file read zero on all 119.
 - **Megh's base-price master is the one input the reco still wants.** Send the workbook
   the `Key2` / `VSM Base Price` VLOOKUP points at and the TVS half fills in; RE, HMSIL
   and Rane also need their own cost constants, which are pasted values in the sheets sent
@@ -772,7 +792,7 @@ that the package still sits where Claude Code looks — the repo root is
 ## Decisions already made (do not re-open without cause)
 
 - Stale-file detection, WhatsApp clearance format, RFD weight-based
-  reconciliation, Megh keying off the governed bucket, ERW 2 pricing off the
+  reconciliation, Megh keying off the plan's own `length key`, ERW 2 pricing off the
   `-HST` contract variant, STR per-plant columns, per-quarter price audit at
   1 m for LL — all specified with reasons in `SKILL.md` and the data contract.
 - Figures in the data contract are dated; its header says which set they describe.

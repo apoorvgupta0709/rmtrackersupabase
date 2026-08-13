@@ -985,6 +985,75 @@ def norm_bucket(value):
     return text or None
 
 
+def bucket_vsm_key(bucket, length):
+    """The Megh SKU key: a governed bucket with the finished length appended.
+
+    This is the shape the `vsm stock` plan states in its own `length key` column, and
+    every frame that joins to a Megh SKU has to build the same one. It replaces a key
+    assembled as `OD-ID-thickness-length-grade-cuttype`, whose cut token was read off
+    the bucket's end condition — so wherever the plan and Bucketting disagreed there,
+    the key missed and the tonnage left the tab rather than landing on a SKU.
+    """
+    bucket = norm_bucket(bucket)
+    if not bucket or pd.isna(length):
+        return None
+    rendered = norm_number(length, 4)
+    if rendered is None:
+        return None
+    return f"{bucket}-{rendered}"
+
+
+def norm_length_key(value):
+    """The plan's own length key, corrected only where it could not otherwise join.
+
+    The sheet stays as written; only the derived join key moves. Two corrections, both
+    agreed with the owner:
+
+    * whitespace collapses, so `25.4-0-2.5-ERW 1-FC -5.95` meets the key every other
+      frame builds. A stray space makes a different string that renders identically —
+      the same defect that once put 60.304 MT of sales on a phantom bucket row.
+    * a trailing length above `VSM_LENGTH_MM_ABOVE_M` is millimetres. The plan writes
+      572.5 beside 5.95 and 6.0, and stock, sales and WIP all normalise to metres, so
+      as written such a row could never meet them.
+
+    Anything whose last component is not a number comes back as written: a key that
+    states no length is not one to invent a length for.
+    """
+    # `or ""` would not do: a float NaN is truthy, so an empty cell would come back as
+    # the string "nan" and be published as though it were a key.
+    if value is None or pd.isna(value):
+        return None
+    text = re.sub(r"\s+", " ", str(value).replace("\xa0", " ")).strip()
+    if not text:
+        return None
+    text = re.sub(r"\s*-\s*", "-", text)
+    head, _, tail = text.rpartition("-")
+    if not head:
+        return text
+    length = pd.to_numeric(tail, errors="coerce")
+    if pd.isna(length):
+        return text
+    if length > VSM_LENGTH_MM_ABOVE_M:
+        length = length / 1000
+    rendered = norm_number(length, 4)
+    return f"{head}-{rendered}" if rendered is not None else text
+
+
+def key_family(key):
+    """The SKU key without its length component — §5e.1's key for "other length".
+
+    Derived from the key itself rather than rebuilt from dimensions, so both sides of
+    the join produce it the same way. For a governed size that is the bucket; for a
+    `Megh-` size it is `Megh-OD-ID-thickness`, which is the honest answer — such a size
+    has no governed bucket for other-length stock to be found under.
+    """
+    text = str(key or "")
+    head, _, tail = text.rpartition("-")
+    if head and pd.notna(pd.to_numeric(tail, errors="coerce")):
+        return head
+    return text or None
+
+
 def sheet_total_rows(frame, key_column, value_columns, tolerance=0.001):
     """Index of a sheet's own grand-total rows.
 
@@ -2964,16 +3033,6 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     # (Stock reconciles to NOS x Wt/Len, and its own Coverage = Stock / Schedule x 30).
     vsm_stock = src.frame("vsm_stock")
 
-    def vsm_key(od, inner, thickness, length, grade, cut):
-        parts = [
-            norm_od(od), norm_number(0 if pd.isna(inner) else inner),
-            norm_thickness(thickness), norm_number(length, 4),
-            norm_text(grade), cut,
-        ]
-        if any(part is None for part in parts):
-            return None
-        return "-".join(str(part) for part in parts)
-
     def cut_type(end_condition):
         text = str(end_condition or "").strip().upper()
         return "FC" if text in {"FC", "FIN CUT"} else "NFC"
@@ -2997,63 +3056,35 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
         vsm_stock["Length"] <= VSM_LENGTH_MM_ABOVE_M, vsm_stock["Length"] / 1000
     )
 
-    # Same key from a pipeline bucket ("od-id-thickness-grade-endcondition") plus length.
-    def bucket_vsm_key(bucket, length):
-        parts = str(bucket or "").split("-")
-        if len(parts) < 5 or pd.isna(length):
-            return None
-        return vsm_key(parts[0], parts[1], parts[2], length, parts[3], cut_type(parts[-1]))
-
-    def megh_only_vsm_key(key, grade, cut_flag):
-        """SKU key for a Megh-only size, read off its own key rather than its cells.
-
-        `Megh-OD-ID-thickness-length` already states the four dimensions the SKU key
-        needs, and states them as the planner governs them — the dimension cells write
-        22.2 where the key writes what the join has to agree on. Grade and cut type come
-        from the row, as they do for a governed size.
-        """
-        parts = str(key or "").split("-")
-        if len(parts) < 5:
-            return None
-        od, inner, thickness, length = parts[1], parts[2], parts[3], parts[4]
-        length_m = pd.to_numeric(length, errors="coerce")
-        if pd.isna(length_m):
-            return None
-        return vsm_key(od, inner, thickness, length_m, grade, cut_type(cut_flag))
-
-    def bucket_family(bucket, cut):
-        parts = str(bucket or "").split("-")
-        if len(parts) < 5:
-            return None
-        return "-".join([parts[0], parts[1], parts[2], norm_text(parts[3]) or "", cut])
-
-    # Key the plan off the governed bucket it already names in its own `key` column,
-    # not off its `O D`/`Thk.` cells. The two disagree where Bucketting groups a
-    # thickness: the sheet writes 41.28 x 3.15 while the governed bucket is
-    # 41.28-0-3.2-ERW 1-FC, so a dimension-built key produced "-3.15-" on the plan side
-    # and "-3.2-" on the stock, sales and WIP side, and the two never met — the SKU
-    # showed no mapped stock while the same material sat in the long-length tracker.
-    # Every tracked row carries a key, so the dimension build is only a fallback.
-    # The plan's `key` column now carries two different things, and they must not be
-    # read the same way. A key without the prefix is a governed TVS bucket,
-    # `OD-ID-thickness-grade-endcondition`. A key with it is a size Bucketting does not
-    # govern at all, written `Megh-OD-ID-thickness-length` — five parts like the other
-    # shape, but the last two mean thickness and length rather than grade and end
-    # condition. Parsing one as the other yields a key built from "Megh" and a cut type
-    # read off a length.
+    # Take the key the plan states rather than deriving one. `length key` is the owner's
+    # own statement of what each SKU joins on, so the pipeline no longer has to infer a
+    # cut token from an end condition the two sources disagree about. Deriving from the
+    # governed bucket plus `Length` remains only as a fallback for a row stating none.
+    #
+    # The `Megh-` prefix is read off the **length key**, not `key`. The prefix marks a
+    # size Megh supplies onward to RE or HMSIL rather than to TVSM, and four rows carry
+    # it on the length key while their `key` column still names a governed TVS bucket
+    # (`34.93-0-1.2-ERW 1-FC`). The prefix is the statement of where the material goes,
+    # so it decides: those rows hold no TVS bucket, stay out of the assign-a-bucket
+    # queue, and take their end OEM from the conversion-agent code that bought them.
+    # No row prefixes `key` without also prefixing `length key`, so nothing is lost by
+    # reading the one rather than the other.
     plan_key = vsm_stock["key"].map(norm_bucket)
-    is_megh_only = plan_key.fillna("").str.upper().str.startswith(MEGH_KEY_PREFIX.upper())
+    plan_length_key = vsm_stock["length key"].map(norm_length_key)
+    is_megh_only = (
+        plan_length_key.where(plan_length_key.notna(), plan_key)
+        .fillna("")
+        .str.upper()
+        .str.startswith(MEGH_KEY_PREFIX.upper())
+    )
     vsm_stock["megh_only"] = is_megh_only
     # Only a governed TVS bucket goes in the bucket column. A size destined for RE or
     # HMSIL has none, which is the truth and is what the length-bucketing reports.
     vsm_stock["vsm_bucket"] = plan_key.where(~is_megh_only)
     vsm_stock["vsm_key"] = [
-        (megh_only_vsm_key(key, grade, fc) if megh else bucket_vsm_key(bucket, length))
-        or vsm_key(od, 0, thk, length, grade, cut_type(fc))
-        for key, megh, bucket, od, thk, length, grade, fc in zip(
-            plan_key, is_megh_only, vsm_stock["vsm_bucket"], vsm_stock["O D"],
-            vsm_stock["Thk."], vsm_stock["Length"], vsm_stock["Grade"],
-            vsm_stock["FC/NFC"],
+        stated or bucket_vsm_key(bucket, length)
+        for stated, bucket, length in zip(
+            plan_length_key, vsm_stock["vsm_bucket"], vsm_stock["Length"],
         )
     ]
     # Which OEM a prefixed size actually reaches. The prefix says "not TVSM" but not
@@ -3108,9 +3139,9 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
         frame["vsm_key"] = frame["vsm_key"].fillna(
             frame["material_key"].map(code_to_vsm_key)
         )
-        frame["vsm_family"] = [
-            bucket_family(b, cut_type(str(b).split("-")[-1])) for b in frame["bucket"]
-        ]
+        # Taken off the key rather than the bucket, so a row that reached its SKU by the
+        # material-code route carries the family of the SKU it actually met.
+        frame["vsm_family"] = frame["vsm_key"].map(key_family)
 
     megh_codes = {"943209", "943210", "943211"}
     megh_sales_rows = sales[sales["customer_key"].isin(megh_codes)].copy()
@@ -3183,11 +3214,8 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             cut_label = "Non fin cut"
         else:
             cut_label = "Fin cut" if cut == "FC" else "Non fin cut"
-        # Built from the governed bucket for the same reason the key is.
-        family = bucket_family(first["vsm_bucket"], cut) or "-".join([
-            str(norm_od(first["O D"])), "0", str(norm_thickness(first["Thk."])),
-            str(norm_text(first["Grade"]) or ""), cut,
-        ])
+        # Taken off the key the plan stated, for the same reason the key itself is.
+        family = key_family(sku)
         sold = megh_sales_rows[megh_sales_rows["vsm_key"].eq(sku)]
         at_length = allocatable[allocatable["vsm_key"].eq(sku)]
         other_length = allocatable[
@@ -3348,13 +3376,19 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
         grade = next(iter(grades)) if len(grades) == 1 else LOOKUP_ERROR
         cut_label = next(iter(cuts)) if len(cuts) == 1 else LOOKUP_ERROR
         cut = "FC" if cut_label == "Fin cut" else "NFC"
-        sku = vsm_key(od, dim2, thk, length_m, grade, cut) if grade != LOOKUP_ERROR \
-            else f"{od}-{inner}-{thk}-{norm_number(length_m, 4)}-{LOOKUP_ERROR}"
+        # The key is the family with the length appended, and the family comes from the
+        # siblings rather than being reassembled out of grade and cut type: the plan
+        # states the shape and a BOP size has no plan row of its own to state it. Where
+        # the siblings disagree there is no family to borrow, and the row says so.
+        families = {r["family"] for r in siblings if r.get("family")}
+        family = next(iter(families)) if len(families) == 1 else None
+        sku = f"{family}-{norm_number(length_m, 4)}" if family \
+            else f"{od}-{inner}-{thk}-{LOOKUP_ERROR}-{norm_number(length_m, 4)}"
         if sku in megh_sku_keys:
             # The plan does carry this exact SKU after all, just at a length the
             # tolerance would not bridge. Flag that row instead of adding a duplicate.
             continue
-        family = "-".join([str(od), str(inner), str(thk), norm_text(grade) or "", cut])
+        family = family or key_family(sku)
         stated = (f"{dim1:g}" + (f"x{dim2:g}" if dim2 else "")
                   + f"x{thickness:g}x{length_mm:g}")
         sold = megh_sales_rows[megh_sales_rows["vsm_key"].eq(sku)]
