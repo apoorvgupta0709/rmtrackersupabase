@@ -161,6 +161,31 @@ def plant_code(value) -> str | None:
     return (text.lstrip("0") or "0") if text.isdigit() else text
 
 
+def material_code(value) -> str | None:
+    """A material code as one canonical string, whatever shape it arrived in.
+
+    SAP holds a material number zero-padded to eighteen characters and shows it unpadded,
+    and which of the two reaches a dump is decided per extract. Measured on what is
+    stored: the transfer dump is padded on all 1,088 lines and WIP on all 693, stock and
+    the bucketing master on none — and the sales ledger on 6,539 of 22,419, because the
+    daily dump and the quarterly archives disagree with each other.
+
+    So the same material is `000000000003501105` in one table and `3501105` in the next,
+    and a join between them matches nothing at all: 0 of 1,088 transfer lines reached a
+    bucket before this existed, and 837 after. Like `plant_code`, the value as sent is
+    kept beside the canonical one wherever this is used.
+    """
+    text = whole_number_text(value)
+    if text is None:
+        return None
+    text = text.strip()
+    if not text:
+        return None
+    # Only a code written as digits is renormalised, and a code that is all zeros keeps
+    # one. Anything else is left exactly as it came.
+    return (text.lstrip("0") or "0") if text.isdigit() else text
+
+
 def sales_line_keys(frame: pd.DataFrame) -> pd.DataFrame:
     """A sales frame with its line key attached, and the sheet's own total row dropped.
 
@@ -230,12 +255,95 @@ def sales_ledger_records(frame: pd.DataFrame, batch_id=None) -> list[dict]:
             "row": {c: _storable(line.get(c)) for c in columns},
             "billing_date": None if pd.isna(billing_date) else billing_date.date().isoformat(),
             "billing_month": None if pd.isna(billing_date) else billing_date.strftime("%Y-%m"),
-            "despatch_plant": _storable(line.get("DESP P LANT")),
-            "material_number": _storable(line.get("MATERAIL NUMBER")),
+            "despatch_plant": plant_code(line.get("DESP P LANT")),
+            "despatch_plant_raw": _storable(line.get("DESP P LANT")),
+            # Canonical, with the file's own spelling beside it. The daily dump and the
+            # quarterly archives disagree about zero-padding, so 6,539 of the 22,419 lines
+            # held key one way and the rest the other — and neither joins to stock.
+            "material_number": material_code(line.get("MATERAIL NUMBER")),
+            "material_number_raw": _storable(line.get("MATERAIL NUMBER")),
             "customer_code": _storable(line.get("CUSTOMER  CD")),
             "source_batch": batch_id,
         })
     return records
+
+
+def bucketing_keys(frame: pd.DataFrame) -> pd.DataFrame:
+    """A `Bucketting` frame keyed on the material code, padding dropped.
+
+    **Not on `Bucket`**, which is what the slot's `key_column` names and what a reader
+    would reach for first. `Bucket` is the size family a code belongs to and is shared:
+    167 distinct buckets over 1,538 rows, `12.7-0-1.6-ERW 1-PE` alone covering 27 codes.
+    Keyed on it, the master would collapse to 167 rows and quietly lose nine tenths of
+    the mapping. `Material Codes` is unique across all 1,538, measured.
+
+    The sheet is read through a column window and ends with 212 rows that are empty in the
+    file too. They carry no code, so they go the way every other keyless row goes.
+    """
+    if frame.empty:
+        return frame.assign(material_code=None)
+    keyed = frame.assign(
+        # Read as float64 — `2426342.0` — because the column has blanks in it. Stored raw
+        # it joins to the material code on the sales, stock and zmat side not at all.
+        material_code=[whole_number_text(v) for v in frame["Material Codes"]],
+    )
+    return keyed[keyed["material_code"].notna()]
+
+
+def oem_key_keys(frame: pd.DataFrame) -> pd.DataFrame:
+    """An `OEM_key_1_rev codes` frame keyed on the customer, as the sheet spells it.
+
+    `Customer ` really does end in a space; that is the header, and the read is by name.
+    Unique across all 174 rows as written. Deliberately *not* normalised for case or
+    whitespace on the way in: two of the 174 collide once upper-cased, and the OEM key is
+    the one place the exact spelling is the point — `Rane` and `RANE` would otherwise
+    become one OEM in some summaries and two in others.
+    """
+    if frame.empty:
+        return frame.assign(customer=None)
+    keyed = frame.assign(
+        customer=[None if pd.isna(v) else str(v) for v in frame["Customer "]],
+    )
+    return keyed[keyed["customer"].notna()]
+
+
+def _master_records(frame, batch_id, key_columns, lift):
+    """A keyed master frame as table rows: the named row, plus the columns readers slice on."""
+    if frame.empty:
+        return []
+    columns = [c for c in frame.columns if c not in key_columns]
+    records = []
+    for line in frame.to_dict("records"):
+        record = {column: line[column] for column in key_columns}
+        record["row"] = {c: _storable(line.get(c)) for c in columns}
+        record.update({name: get(line) for name, get in lift.items()})
+        record["source_batch"] = batch_id
+        records.append(record)
+    return records
+
+
+def bucketing_records(frame: pd.DataFrame, batch_id=None) -> list[dict]:
+    """A keyed bucketing frame as rows of `dump_bucketing`."""
+    return _master_records(frame, batch_id, ("material_code",), {
+        "bucket": lambda line: _storable(line.get("Bucket")),
+        "ctl_bucket": lambda line: _storable(line.get("CTL Bucket")),
+        "ll_or_ctl": lambda line: _storable(line.get("LL or CTL")),
+        "grade": lambda line: _storable(line.get("Grade")),
+        "fc_pe": lambda line: _storable(line.get("FC/PE")),
+        "annealed": lambda line: _storable(line.get("Annealed")),
+        "od": lambda line: _storable(line.get("OD")),
+        "inner_diameter": lambda line: _storable(line.get("ID")),
+        "thickness": lambda line: _storable(line.get("Thickness")),
+        "length": lambda line: _storable(line.get("Length")),
+    })
+
+
+def oem_key_records(frame: pd.DataFrame, batch_id=None) -> list[dict]:
+    """A keyed OEM frame as rows of `dump_oem_key`."""
+    return _master_records(frame, batch_id, ("customer",), {
+        "oem": lambda line: _storable(line.get("OEM")),
+        "cam": lambda line: _storable(line.get("CAM")),
+    })
 
 
 # What makes a line on the transfer dump a transfer. The pipeline holds the same constant
@@ -326,7 +434,11 @@ def transfer_ledger_records(frame: pd.DataFrame, batch_id=None) -> list[dict]:
             "source_plant_raw": _storable(line.get("DESP P LANT")),
             "receiving_plant": plant_code(line.get("CUSTOMER  CD")),
             "receiving_plant_raw": _storable(line.get("CUSTOMER  CD")),
-            "material_number": _storable(line.get("MATERAIL NUMBER")),
+            # This dump pads every material code to eighteen characters and the bucketing
+            # master pads none, so before this was canonicalised **none** of the 1,088
+            # transfer lines reached a bucket. 837 do.
+            "material_number": material_code(line.get("MATERAIL NUMBER")),
+            "material_number_raw": _storable(line.get("MATERAIL NUMBER")),
             "source_batch": batch_id,
         })
     return records
@@ -629,8 +741,36 @@ def _snapshot(slot: str) -> TableSpec:
     return TableSpec(table="dump_" + slot.replace(":", "_"), mode="snapshot")
 
 
+# The two mapping masters out of the approved RM tracker workbook. Both accumulate, and
+# both let the newer workbook win.
+#
+# Last-wins rather than keep-first, and that is the owner's call rather than a default:
+# a code does get re-bucketed and an OEM's spelling does get corrected, and under
+# keep-first neither would ever land — the workbook would stop being the thing that
+# decides. What accumulating buys is the other direction: a code the newest workbook
+# happens not to mention is not thereby deleted.
+_BUCKETING_TABLE = TableSpec(
+    table="dump_bucketing",
+    mode="accumulating",
+    key=("material_code",),
+    key_from=bucketing_keys,
+    records=bucketing_records,
+    on_conflict="replace",
+)
+
+_OEM_KEY_TABLE = TableSpec(
+    table="dump_oem_key",
+    mode="accumulating",
+    key=("customer",),
+    key_from=oem_key_keys,
+    records=oem_key_records,
+    on_conflict="replace",
+)
+
 TABLES: dict[str, TableSpec] = {slot: _SALES_TABLE for slot in SALES_LEDGER_SLOTS}
 TABLES["transfers"] = _TRANSFER_TABLE
+TABLES["bucketting"] = _BUCKETING_TABLE
+TABLES["oem_key"] = _OEM_KEY_TABLE
 TABLES.update({slot: _snapshot(slot) for slot in (
     "stock", "wip", "rfd", "receivables", "vsm_stock", "vsm_tvsm",
     "schedule", "schedule_supplement",
@@ -643,8 +783,6 @@ TABLES.update({slot: _snapshot(slot) for slot in (
 # implied by absence, so that adding a slot without deciding where its rows go fails a
 # test instead of passing unnoticed — the same reason `pipeline.json` lists every input.
 SLOTS_WITHOUT_A_TABLE: dict[str, str] = {
-    "bucketting": "not yet built — see step 4 of the per-source table work",
-    "oem_key": "not yet built — see step 4",
     "zmat": "not yet built — see step 5",
     # Read with `header=None`, because the quarters they hold are column offsets rather
     # than named fields. There are no column names to give a table or a view, so a stored

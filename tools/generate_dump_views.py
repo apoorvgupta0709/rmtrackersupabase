@@ -154,6 +154,26 @@ returns text language sql immutable as $$
   end;
 $$;
 
+-- The SQL twin of `sources.material_code`, and the same argument as `plant_code`.
+--
+-- SAP holds a material number zero-padded to eighteen characters and shows it unpadded,
+-- and which reaches a dump is decided per extract: the transfer dump pads all 1,088 of
+-- its lines and WIP all 693, stock and the bucketing master pad none, and the sales
+-- ledger pads 6,539 of 22,419 because the daily dump and the quarterly archives disagree.
+-- Joined raw, 0 of 1,088 transfer lines reached a bucket. Joined on this, 837 do.
+create or replace function public.material_code(value text)
+returns text language sql immutable as $$
+  select case
+    when value is null or btrim(value) = '' then null
+    when btrim(value) ~ '^[0-9]+$'
+      then coalesce(nullif(ltrim(btrim(value), '0'), ''), '0')
+    when btrim(value) ~ '^[0-9]+\\.0+$'
+      then coalesce(nullif(ltrim(split_part(btrim(value), '.', 1), '0'), ''), '0')
+    else btrim(value)
+  end;
+$$;
+
+grant execute on function public.material_code(text)      to authenticated;
 grant execute on function public.dump_text(jsonb)         to authenticated;
 grant execute on function public.dump_numeric(jsonb)      to authenticated;
 grant execute on function public.dump_date(jsonb)         to authenticated;
@@ -263,6 +283,16 @@ def view_sql(slot: str, spec, frame) -> str:
             columns.append(f"  {canonical:<34} as plant")
             columns.append(f"  {cell_sql(position, 'text'):<34} as plant_raw")
             taken.add("plant_raw")
+        elif name in MATERIAL_COLUMNS:
+            # Same argument as `plant`, and the same shape. SAP pads a material number to
+            # eighteen characters or does not, per extract: the transfer dump pads all of
+            # its lines and this stock sheet none, so a join on what the file wrote
+            # matched 0 of 1,088. Canonical takes the plain name because it is the one a
+            # join should use.
+            canonical = f"public.material_code({cell_sql(position, 'text')})"
+            columns.append(f"  {canonical:<34} as {name}")
+            columns.append(f"  {cell_sql(position, 'text'):<34} as {name}_raw")
+            taken.add(f"{name}_raw")
         else:
             columns.append(f"  {cell_sql(position, kind):<34} as {name}")
 
@@ -363,6 +393,13 @@ def view_name(slot: str) -> str:
 
 MONTHS = ("January February March April May June July August September October "
           "November December").split()
+
+# Column names that hold an SAP material number. Every one of these is canonicalised and
+# kept raw beside it, whatever the file did, so that a join across two dumps works without
+# the person writing it having to know which of them pads.
+MATERIAL_COLUMNS = {
+    "material", "material_no", "material_number", "material_codes", "matl_no",
+}
 
 
 def is_month_sheet(name: str) -> bool:

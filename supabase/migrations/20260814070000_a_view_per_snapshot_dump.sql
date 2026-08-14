@@ -106,6 +106,26 @@ returns text language sql immutable as $$
   end;
 $$;
 
+-- The SQL twin of `sources.material_code`, and the same argument as `plant_code`.
+--
+-- SAP holds a material number zero-padded to eighteen characters and shows it unpadded,
+-- and which reaches a dump is decided per extract: the transfer dump pads all 1,088 of
+-- its lines and WIP all 693, stock and the bucketing master pad none, and the sales
+-- ledger pads 6,539 of 22,419 because the daily dump and the quarterly archives disagree.
+-- Joined raw, 0 of 1,088 transfer lines reached a bucket. Joined on this, 837 do.
+create or replace function public.material_code(value text)
+returns text language sql immutable as $$
+  select case
+    when value is null or btrim(value) = '' then null
+    when btrim(value) ~ '^[0-9]+$'
+      then coalesce(nullif(ltrim(btrim(value), '0'), ''), '0')
+    when btrim(value) ~ '^[0-9]+\.0+$'
+      then coalesce(nullif(ltrim(split_part(btrim(value), '.', 1), '0'), ''), '0')
+    else btrim(value)
+  end;
+$$;
+
+grant execute on function public.material_code(text)      to authenticated;
 grant execute on function public.dump_text(jsonb)         to authenticated;
 grant execute on function public.dump_numeric(jsonb)      to authenticated;
 grant execute on function public.dump_date(jsonb)         to authenticated;
@@ -142,7 +162,8 @@ select
   public.dump_text(r.row -> 17)      as zone2,
   public.dump_numeric(r.row -> 18)   as ship_to_party,
   public.dump_text(r.row -> 19)      as sold_cust_name,
-  public.dump_text(r.row -> 20)      as material_number,
+  public.material_code(public.dump_text(r.row -> 20)) as material_number,
+  public.dump_text(r.row -> 20)      as material_number_raw,
   public.dump_text(r.row -> 21)      as material_desc,
   public.dump_numeric(r.row -> 22)   as bal_for_prod_roll_mt
 from public.raw_batches b
@@ -199,7 +220,8 @@ select
   public.dump_text(r.row -> 12)      as blgblk,
   public.dump_numeric(r.row -> 13)   as order_no,
   public.dump_numeric(r.row -> 14)   as item_no,
-  public.dump_text(r.row -> 15)      as matl_no,
+  public.material_code(public.dump_text(r.row -> 15)) as matl_no,
+  public.dump_text(r.row -> 15)      as matl_no_raw,
   public.dump_text(r.row -> 16)      as description,
   public.dump_text(r.row -> 17)      as cam,
   public.dump_text(r.row -> 18)      as remarks,
@@ -300,7 +322,8 @@ select
   public.dump_text(r.row -> 2)       as customer_name,
   public.dump_text(r.row -> 3)       as helper_customer,
   public.dump_text(r.row -> 4)       as customer_code,
-  public.dump_text(r.row -> 5)       as material_no,
+  public.material_code(public.dump_text(r.row -> 5)) as material_no,
+  public.dump_text(r.row -> 5)       as material_no_raw,
   public.dump_text(r.row -> 6)       as key,
   public.dump_text(r.row -> 7)       as material_des,
   public.dump_text(r.row -> 8)       as grade,
@@ -359,7 +382,8 @@ select
   public.dump_numeric(r.row -> 0)    as sales_order_no,
   public.dump_numeric(r.row -> 1)    as sales_document_item,
   public.dump_text(r.row -> 2)       as sold_cust_name,
-  public.dump_text(r.row -> 3)       as material,
+  public.material_code(public.dump_text(r.row -> 3)) as material,
+  public.dump_text(r.row -> 3)       as material_raw,
   public.dump_text(r.row -> 4)       as material_desc,
   public.dump_text(r.row -> 5)       as grade,
   public.dump_text(r.row -> 6)       as rm_grade,
@@ -425,7 +449,8 @@ select
   public.dump_numeric(r.row -> 29)   as blgblk,
   public.dump_numeric(r.row -> 30)   as order_no,
   public.dump_numeric(r.row -> 31)   as item_no,
-  public.dump_text(r.row -> 32)      as matl_no,
+  public.material_code(public.dump_text(r.row -> 32)) as matl_no,
+  public.dump_text(r.row -> 32)      as matl_no_raw,
   public.dump_text(r.row -> 33)      as description,
   public.dump_numeric(r.row -> 34)   as nrm_po,
   public.dump_numeric(r.row -> 35)   as cld_po,
@@ -509,7 +534,8 @@ select
   public.dump_text(r.row -> 20)      as sales_office,
   public.dump_text(r.row -> 21)      as sold_cust_name,
   public.dump_text(r.row -> 22)      as oem,
-  public.dump_text(r.row -> 23)      as material,
+  public.material_code(public.dump_text(r.row -> 23)) as material,
+  public.dump_text(r.row -> 23)      as material_raw,
   public.dump_text(r.row -> 24)      as material_desc,
   public.dump_numeric(r.row -> 25)   as width_od,
   public.dump_numeric(r.row -> 26)   as id,
@@ -599,7 +625,8 @@ select
   b.original_filename                as original_filename,
   b.sheet                            as sheet,
   r.seq                              as seq,
-  public.dump_text(r.row -> 0)       as material,
+  public.material_code(public.dump_text(r.row -> 0)) as material,
+  public.dump_text(r.row -> 0)       as material_raw,
   public.dump_text(r.row -> 1)       as material_description,
   public.dump_numeric(r.row -> 2)    as length,
   public.dump_text(r.row -> 3)       as ctl_ll,
@@ -714,7 +741,8 @@ select
   public.dump_text(r.row -> 0)       as plant_raw,
   public.dump_text(r.row -> 1)       as staorage_location,
   public.dump_date(r.row -> 2)       as creation_date,
-  public.dump_text(r.row -> 3)       as material_no,
+  public.material_code(public.dump_text(r.row -> 3)) as material_no,
+  public.dump_text(r.row -> 3)       as material_no_raw,
   public.dump_text(r.row -> 4)       as batch,
   public.dump_text(r.row -> 5)       as material_description,
   public.dump_numeric(r.row -> 6)    as total_stock,

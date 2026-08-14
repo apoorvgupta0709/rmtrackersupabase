@@ -1853,6 +1853,100 @@ def test_a_transfer_line_is_allowed_to_stop_being_in_transit():
     )
 
 
+def test_bucketing_is_keyed_on_the_material_code_and_not_on_the_bucket():
+    """The slot's declared key column is a label, and keying on it loses the master.
+
+    `ReadSpec.key_column` is documented as the column that says what a row is *about* —
+    it is what the uploader shows first in a preview, not a natural key. For `Bucketting`
+    it is `Bucket`, the size family a code belongs to, and it is shared: 167 distinct
+    buckets over 1,538 rows, with `12.7-0-1.6-ERW 1-PE` alone covering 27 material codes.
+    Keyed on it the table would hold 167 rows and lose nine tenths of the mapping, and
+    nothing about the insert would fail.
+    """
+    load_refresh_module()
+    import sources
+
+    assert sources.TABLES["bucketting"].key == ("material_code",), (
+        "keyed on Bucket, 1,538 rows of mapping collapse to 167"
+    )
+    assert sources.SLOTS["bucketting"].key_column == "Bucket", (
+        "if the read spec stops calling it Bucket this test has lost its point"
+    )
+
+
+def test_a_re_bucketed_code_updates_and_a_code_dropped_from_the_workbook_survives():
+    """Both halves of what the owner asked of the mapping masters.
+
+    Accumulating is the easy half: a code the newest workbook does not mention is not
+    thereby deleted. The other half is that the newest workbook *wins* where they
+    disagree, because codes do get re-bucketed and an OEM's spelling does get corrected.
+    Keep-first would mean neither ever landed, and `bucket_assignments` — which exists to
+    override the master — would become the only way to correct it.
+    """
+    load_refresh_module()
+    import sources
+
+    for slot in ("bucketting", "oem_key"):
+        assert sources.TABLES[slot].on_conflict == "replace", slot
+
+    # `Bucketting` is read through a column window, `U:AF` — columns 21 to 32 of the
+    # sheet, so 20 empty ones come first. Building the grid without them is how a test of
+    # this slot passes while reading nothing at all.
+    lead = [None] * 20
+    columns = ["Material Codes", "OD", "ID", "Thickness", "Length", "Grade", "FC/PE",
+               "Annealed", "Bucket", "LL or CTL", "CTL Bucket", "kG/nos"]
+    cells = [
+        lead + ["ignored"] * len(columns),   # header=1, so row 0 is above the names
+        lead + columns,
+        lead + [2426342.0, 11, None, 1.5, 0.263, "WG", "PE", "N",
+                "11--1.5-CEW-NON FIN", "CTL", "11--1.5-CEW-NON FIN-0.263", 1.2],
+        # The sheet's trailing padding: empty in the file, and not a bucket mapping.
+        lead + [None] * len(columns),
+    ]
+    batch = {"id": "b1", "slot": "bucketting", "sheet": "Bucketting",
+             "row_count": len(cells), "original_filename": "rm_tracker_model.xlsx",
+             "absorbed_at": None}
+    client = _FakeRest([batch], {"b1": cells})
+    absorbed = sources.PostgresSources(client).absorb(log=lambda _m: None)
+
+    assert absorbed == {"b1": 1}, "the padding rows carry no code and are not mappings"
+    row = client.inserted[0]
+    assert row["material_code"] == "2426342", (
+        "read as float64 because the column has blanks, and stored raw it would be "
+        "'2426342.0' and join to nothing on the stock or sales side"
+    )
+    assert row["bucket"] == "11--1.5-CEW-NON FIN"
+    call = client.insert_calls[0]
+    assert call["table"] == "dump_bucketing"
+    assert call["on_conflict"] == "material_code"
+    assert "resolution=merge-duplicates" in call["prefer"], (
+        "ignore-duplicates would freeze a code in the first bucket it was ever seen in"
+    )
+
+
+def test_material_codes_from_every_dump_canonicalise_to_the_same_value():
+    """`000000000003501105` and `3501105` are one material, and both are written.
+
+    SAP holds a material number zero-padded to eighteen characters and shows it unpadded,
+    and which reaches a dump is decided per extract. Measured on what is stored: the
+    transfer dump pads all 1,088 of its lines and WIP all 693, stock and the bucketing
+    master pad none, and the sales ledger pads 6,539 of 22,419 — the daily dump and the
+    quarterly archives disagree with each other. Joined raw, 0 of 1,088 transfer lines
+    reached a bucket; joined on this, 837 do.
+    """
+    load_refresh_module()
+    import sources
+
+    for written in ("000000000003501105", "3501105", 3501105, 3501105.0, " 3501105 "):
+        assert sources.material_code(written) == "3501105", written
+    assert sources.material_code(None) is None
+    assert sources.material_code("") is None
+    # A code that is not digits is left exactly as it came, and one that is all zeros
+    # keeps a zero rather than becoming nothing.
+    assert sources.material_code("6 M CODE") == "6 M CODE"
+    assert sources.material_code("0000") == "0"
+
+
 def test_plant_codes_from_every_dump_canonicalise_to_the_same_value():
     """`0788`, `788` and `788.0` are one plant, and only one of them is written anywhere.
 
@@ -1881,10 +1975,16 @@ def test_pruning_refuses_a_batch_whose_rows_are_not_in_a_table_yet():
     """Pruning must not outrun absorption, for every slot that accumulates.
 
     A dump uploaded and left unrefreshed for a fortnight would otherwise be deleted with
-    its lines never recorded, and nothing downstream would report a gap — the months would
-    simply be short. The clause is asserted as written, parentheses included, because the
-    two readings of it differ by exactly whether that happens.
+    its rows never recorded, and nothing downstream would report a gap — the months would
+    simply be short.
+
+    Derived from the registry rather than spelled out, because the failure this guards
+    against is somebody adding an accumulating slot and not coming back here. A slot named
+    in `TABLES` as accumulating and absent from the clause is exactly that.
     """
+    load_refresh_module()
+    import sources
+
     # The clause as the *latest* migration to redefine the function leaves it: an earlier
     # one still carries the version it replaced, and asserting against that would pass
     # while production ran something else.
@@ -1892,10 +1992,19 @@ def test_pruning_refuses_a_batch_whose_rows_are_not_in_a_table_yet():
                for path in sorted((REPO_ROOT / "supabase" / "migrations").glob("*.sql"))]
     latest = [text for text in written
               if "create or replace function public.prune_uploads" in text][-1]
-    assert "(absorbed_at is not null" in latest
-    assert "or (slot not like 'sales%' and slot <> 'transfers'))" in latest, (
-        "an accumulating slot missing from this clause is a dump pruned unstored"
-    )
+    clause = latest[latest.index("create or replace function public.prune_uploads"):]
+    clause = clause[:clause.index("returning 1")]
+
+    assert "absorbed_at is not null" in clause
+    for slot, spec in sorted(sources.TABLES.items()):
+        if spec.mode != "accumulating":
+            continue
+        # `sales%` covers the five sales slots between them; anything else is named.
+        covered = f"'{slot}'" in clause or (slot.startswith("sales") and "'sales%'" in clause)
+        assert covered, (
+            f"{slot!r} accumulates but pruning does not wait for it — a dump uploaded and "
+            f"left unrefreshed for a fortnight is deleted with its rows never stored"
+        )
 
 
 def test_sales_to_megh_opens_months_that_add_to_the_figure_above_them():
