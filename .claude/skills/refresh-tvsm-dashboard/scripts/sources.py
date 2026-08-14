@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from datetime import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -426,6 +427,111 @@ def slots_for_families(order_book_sheets, pricing_sheets, signoff_sheets):
         )
 
     return slots
+
+
+@dataclass(frozen=True)
+class TableSpec:
+    """Where a slot's rows are kept once they have been read.
+
+    Deliberately separate from `ReadSpec`, and not a set of extra fields on it, for two
+    reasons. They answer different questions and change for different reasons — a
+    corrected header row is a re-read, a new stored column is a migration. And
+    `tools/generate_adapters.py` projects every `ReadSpec` field into `adapters.ts` for
+    the browser, which absorbs nothing and must never learn a table name: the uploader
+    writing a dump table directly is exactly the audit-trail bypass `raw_batches` exists
+    to prevent.
+    """
+
+    table: str
+    # "accumulating" — the table outlives the batch and is keyed on the row's own
+    # identity, so a re-sent day adds nothing and a backfill adds only what was missing.
+    # "snapshot" — the current batch is the whole truth and each upload replaces it.
+    mode: str
+    # Accumulating only: the table columns forming the natural key, in the order the
+    # PostgREST `on_conflict` target must name them.
+    key: tuple[str, ...] = ()
+    # Accumulating only: frame -> frame with the key columns attached and any row that
+    # cannot carry one dropped. `sales_line_keys` is the shape.
+    key_from: Callable[[pd.DataFrame], pd.DataFrame] | None = None
+    # frame, batch_id -> the rows to write.
+    records: Callable[[pd.DataFrame, str], list[dict]] | None = None
+    # "keep" leaves a row the table already holds exactly as it was; "replace" lets the
+    # newer file win. The choice is per master and is a business rule, not a detail:
+    # keep-first means a correction never lands, replace means a deletion never does.
+    on_conflict: str = "keep"
+
+
+# Every sales extract pours into one ledger keyed on the invoice line, so all five slots
+# share a spec. See `SALES_LEDGER_SLOTS` for why, and the ledger migration for the
+# evidence that the key really is unique across all four extracts held.
+_SALES_TABLE = TableSpec(
+    table="tsl_sales",
+    mode="accumulating",
+    key=("billing_document", "billing_item"),
+    key_from=sales_line_keys,
+    records=sales_ledger_records,
+    on_conflict="keep",
+)
+
+TABLES: dict[str, TableSpec] = {slot: _SALES_TABLE for slot in SALES_LEDGER_SLOTS}
+
+# A slot that deliberately keeps no table of its own, and why. Explicit rather than
+# implied by absence, so that adding a slot without deciding where its rows go fails a
+# test instead of passing unnoticed — the same reason `pipeline.json` lists every input.
+SLOTS_WITHOUT_A_TABLE: dict[str, str] = {
+    "bucketting": "not yet built — see step 4 of the per-source table work",
+    "oem_key": "not yet built — see step 4",
+    "schedule": "not yet built — snapshot view",
+    "schedule_supplement": "not yet built — snapshot view",
+    "stock": "not yet built — snapshot view",
+    "wip": "not yet built — snapshot view",
+    "rfd": "not yet built — snapshot view",
+    "receivables": "not yet built — snapshot view",
+    "transfers": "not yet built — see step 2",
+    "vsm_tvsm": "not yet built — snapshot view",
+    "vsm_stock": "not yet built — snapshot view",
+    "zmat": "not yet built — see step 5",
+    # These two are read with `header=None`, because the quarters they hold are column
+    # offsets rather than named fields. There are no column names to give a table or a
+    # view, so a stored copy would be `{"0": ..., "1": ...}` — unreadable, unqueryable,
+    # and no better than the grid it came from. They keep nothing on purpose.
+    "contract": "read positionally with header=None — it has no column names to store",
+    # The multi-sheet planning families, pending their views.
+    "orders": "not yet built — snapshot view per sheet",
+    "signoff": "not yet built — snapshot view per sheet",
+}
+
+
+def table_for(slot: str) -> TableSpec | None:
+    """Where this slot's rows are kept, or None where it deliberately keeps none.
+
+    Resolves `orders:jsr` through its family, since the family slots are built at run
+    time from the pipeline's own sheet specs and cannot be listed here. An unknown slot
+    raises rather than quietly storing nothing: silence is how a dump goes unstored for
+    a fortnight and nobody notices until a month is short.
+    """
+    if slot in TABLES:
+        return TABLES[slot]
+    family = slot.split(":", 1)[0]
+    if family in TABLES:
+        return TABLES[family]
+    if slot in SLOTS_WITHOUT_A_TABLE or family in SLOTS_WITHOUT_A_TABLE:
+        return None
+    raise KeyError(
+        f"slot {slot!r} says nothing about where its rows are kept. Add it to TABLES or, "
+        f"with a reason, to SLOTS_WITHOUT_A_TABLE."
+    )
+
+
+def slots_with_tables(mode: str) -> tuple[str, ...]:
+    """The named slots whose rows are kept in a table of the given mode.
+
+    Family slots are excluded: they are addressed as `family:sheet` and are resolved
+    through `table_for`, so a query built from this list names only what it can name.
+    """
+    return tuple(sorted(
+        slot for slot, spec in TABLES.items() if spec.mode == mode
+    ))
 
 
 class Sources:
@@ -835,59 +941,104 @@ class PostgresSources(GridSources):
         self._grids[slot] = grid
         return grid
 
-    # ---- The sales ledger ------------------------------------------------
+    # ---- Absorption: a batch into the table its slot keeps ----------------
 
-    def unabsorbed_sales_batches(self) -> list[dict]:
-        """Sales batches whose lines are not yet in the ledger, oldest first.
+    def frame_for_batch(self, batch: dict) -> pd.DataFrame:
+        """One named batch's frame, rather than its slot's current one.
+
+        The two differ precisely in the case absorption exists for: `promote_upload`
+        supersedes the previous batch the moment a second dump is uploaded, so a slot's
+        *current* grid is not the batch being folded in. The swap is around `frame()`
+        rather than inside it because everything else in this class — the pipeline
+        included — wants the current batch and should keep getting it.
+        """
+        slot = batch["slot"]
+        self._grids.pop(slot, None)
+        held = self._batches
+        self._batches = {slot: batch}
+        try:
+            return self.frame(slot)
+        finally:
+            self._batches = held
+            self._grids.pop(slot, None)
+
+    def unabsorbed_batches(self, mode: str) -> list[dict]:
+        """Batches of that storage mode whose rows are not yet in their table, oldest first.
 
         Deliberately not "the current batch". `promote_upload` supersedes the previous
-        one, so uploading two sales dumps between refreshes leaves the first superseded
-        and unread — and its lines would be lost for good once pruning caught up with it.
-        Absorbing by `absorbed_at is null` instead means a batch is folded in exactly
-        once, whatever order uploads and refreshes interleave in.
+        one, so uploading two dumps between refreshes leaves the first superseded and
+        unread — and for an accumulating slot its rows would be lost for good once
+        pruning caught up with it. Absorbing by `absorbed_at is null` instead means a
+        batch is folded in exactly once, whatever order uploads and refreshes interleave
+        in.
         """
-        slots = ",".join(SALES_LEDGER_SLOTS)
+        slots = slots_with_tables(mode)
+        if not slots:
+            return []
         return self.client.select(
             "raw_batches",
-            f"absorbed_at=is.null&slot=in.({slots})"
+            f"absorbed_at=is.null&slot=in.({','.join(slots)})"
             "&select=id,slot,sheet,row_count,original_filename&order=uploaded_at.asc",
         )
 
-    def absorb_sales(self, log=print) -> dict[str, int]:
-        """Fold every un-absorbed sales batch into `tsl_sales`, newest lines only.
+    def absorb(self, mode: str = "accumulating", log=print) -> dict[str, int]:
+        """Fold every un-absorbed batch of that mode into the table its slot keeps.
 
-        `resolution=ignore-duplicates` is the whole mechanism: a line already held is left
-        exactly as it was, so re-sending a day, re-uploading a month, or backfilling an
-        extract that overlaps one already absorbed all converge on the same ledger.
+        For an accumulating table the insert names both a conflict target and a
+        resolution, and the two must be given together: PostgREST treats a resolution
+        without a target as an ordinary insert and raises on the first duplicate key,
+        which would turn a re-sent day into a failed refresh. `ignore-duplicates` is what
+        makes a re-send, a re-upload and an overlapping backfill all converge on the same
+        table; `merge-duplicates` is for the masters where the newer file is meant to win.
+
+        The stamp is last and is the flip. Until it is written the batch is still
+        un-absorbed and a crash mid-insert simply leaves it to be picked up again.
         """
         absorbed: dict[str, int] = {}
-        for batch in self.unabsorbed_sales_batches():
-            slot = batch["slot"]
-            # Read this batch specifically, not the slot's current grid: the two differ
-            # precisely in the case this method exists for.
-            self._grids.pop(slot, None)
-            held = self._batches
-            self._batches = {slot: batch}
-            try:
-                frame = sales_line_keys(self.frame(slot))
-            finally:
-                self._batches = held
-                self._grids.pop(slot, None)
+        for batch in self.unabsorbed_batches(mode):
+            spec = table_for(batch["slot"])
+            if spec is None or spec.mode != mode:
+                # `slot=in.(...)` named only the slots of this mode, so reaching here
+                # means the registry and the query disagree. Skip rather than store a
+                # row in a table that was not asked for.
+                continue
+            if spec.records is None:
+                raise ValueError(
+                    f"{spec.table} says it stores {batch['slot']!r} but names no way to "
+                    f"turn a frame into rows. A TableSpec without `records` stores "
+                    f"nothing and stamps the batch absorbed, which loses the dump."
+                )
 
-            records = sales_ledger_records(frame, batch["id"])
+            frame = self.frame_for_batch(batch)
+            if spec.key_from is not None:
+                frame = spec.key_from(frame)
+            records = spec.records(frame, batch["id"])
+
             if records:
+                resolution = ("ignore-duplicates" if spec.on_conflict == "keep"
+                              else "merge-duplicates")
                 self.client.insert(
-                    "tsl_sales",
+                    spec.table,
                     records,
-                    prefer="resolution=ignore-duplicates,return=minimal",
-                    on_conflict="billing_document,billing_item",
+                    prefer=f"resolution={resolution},return=minimal",
+                    on_conflict=",".join(spec.key),
                 )
             self.client.update(
                 "raw_batches", f"id=eq.{batch['id']}", {"absorbed_at": "now()"}
             )
             absorbed[batch["original_filename"]] = len(records)
-            log(f"  absorbed {len(records)} sales lines from {batch['original_filename']}")
+            log(f"  absorbed {len(records)} rows from {batch['original_filename']} "
+                f"into {spec.table}")
         return absorbed
+
+    def absorb_sales(self, log=print) -> dict[str, int]:
+        """The accumulating absorption, under the name the refresh calls it by.
+
+        Kept as its own name rather than inlined at the call site because the test that
+        guards the call asserts on the source text of `refresh_from_supabase.py` — see
+        `test_the_refresh_absorbs_before_it_reads_the_ledger`, and the defect it records.
+        """
+        return self.absorb(mode="accumulating", log=log)
 
     def sales_ledger(self) -> pd.DataFrame:
         """The stored ledger, rebuilt as the frame the pipeline expects.

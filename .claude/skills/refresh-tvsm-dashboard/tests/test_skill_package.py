@@ -524,6 +524,31 @@ def test_config_lists_every_input_the_pipeline_reads():
     assert fallbacks == {"july0626_rm_tracker_v1.xlsx", "rfd.xlsx"}
 
 
+def test_every_slot_says_where_its_rows_are_kept():
+    """A dump with nowhere to go is stored nowhere, and nothing says so.
+
+    `raw_batches` takes any slot name, so a slot added to the registry without deciding
+    where its rows are kept uploads cleanly, refreshes cleanly, and simply never reaches
+    a table. The symptom arrives weeks later as a query returning less than it should.
+    So the decision is required rather than defaulted: `table_for` raises on a slot that
+    is in neither `TABLES` nor `SLOTS_WITHOUT_A_TABLE`, and this asks it of every slot
+    the pipeline reads — the expanded `orders:`/`signoff:`/`contract:` families included,
+    since those are built at run time and would otherwise be the ones missed.
+    """
+    load_refresh_module()
+    import sources
+
+    for slot in all_input_slots():
+        # Raises rather than returning None where the slot is unaccounted for; None is
+        # the answer for a slot that deliberately keeps nothing.
+        sources.table_for(slot)
+
+    # And the reasons stay honest: a slot listed as keeping nothing must still be a slot.
+    known = set(all_input_slots()) | set(sources.SHEET_FAMILIES)
+    unknown = set(sources.SLOTS_WITHOUT_A_TABLE) - known
+    assert not unknown, f"SLOTS_WITHOUT_A_TABLE names slots that do not exist: {unknown}"
+
+
 def test_the_pipeline_reads_nothing_except_through_the_source_registry():
     """One inline `pd.read_excel` is enough to break a second backend, silently.
 
