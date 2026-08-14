@@ -1924,6 +1924,80 @@ def test_a_re_bucketed_code_updates_and_a_code_dropped_from_the_workbook_survive
     )
 
 
+def test_zmat_is_keyed_on_the_code_and_the_plant_it_is_extended_at():
+    """The plant is half the key, and it is the half the table exists for.
+
+    zmat is a material × plant extract — the same code once per plant it is extended at,
+    otherwise identical. Keyed on the code alone it is 57,478 rows instead of 64,074 and
+    answers nothing about where a material can be made, which is precisely what a
+    stock-transfer plan asks of both the sending and the receiving plant.
+    """
+    load_refresh_module()
+    import sources
+
+    assert sources.TABLES["zmat"].key == ("material_code", "plant")
+    assert sources.SLOTS["zmat"].key_column == "Column1", (
+        "the read spec's key column is the code alone, which is why the table cannot "
+        "take its key from there"
+    )
+
+
+def test_zmat_is_deduplicated_in_frame_order_and_not_by_the_database():
+    """No column combination in this file is unique, so somebody has to choose.
+
+    480 rows are byte-identical repeats of another row, and `(Column1, PLANT)` still
+    leaves 1,104 over — pairs differing only in noise. Left to
+    `resolution=ignore-duplicates`, PostgREST would resolve against whatever happened to
+    share a 2,000-row chunk, so which of two near-identical rows survived would move the
+    day the file gains a row above them. Deduplicating here makes it frame order, which
+    is the order the file was written in.
+    """
+    load_refresh_module()
+    import sources
+    import pandas as pd
+
+    frame = pd.DataFrame([
+        # Same code at two plants: both are real and both must survive.
+        {"Column1": 3406677, "PLANT": 56,  "MATERIAL DESCRIPTION": "TUB-A"},
+        {"Column1": 3406677, "PLANT": 788, "MATERIAL DESCRIPTION": "TUB-A"},
+        # Same code and plant twice, differing in noise: the first wins, every time.
+        {"Column1": 249132, "PLANT": 789, "MATERIAL DESCRIPTION": "TUB-B"},
+        {"Column1": 249132, "PLANT": 789, "MATERIAL DESCRIPTION": "TUB-B-CORRECTED"},
+    ])
+    keyed = sources.zmat_keys(frame)
+    assert len(keyed) == 3, "the plant fan-out is real and must not be collapsed"
+    assert list(keyed["plant"]) == ["56", "788", "789"]
+    assert list(keyed["MATERIAL DESCRIPTION"])[-1] == "TUB-B", "frame order, first wins"
+
+    # Twice over the same frame gives the same answer, which is what "deterministic" means
+    # here and what `ignore-duplicates` could not promise.
+    assert list(sources.zmat_keys(frame)["MATERIAL DESCRIPTION"]) == \
+        list(keyed["MATERIAL DESCRIPTION"])
+
+
+def test_one_bad_cell_does_not_stop_the_material_master_loading():
+    """A typed column is what makes this table fit, and it is also what makes it brittle.
+
+    `OUTER DIAMETER OF MATERIAL` is the text `o` on exactly one row of the 65,178 held — a
+    typo for zero — and it failed the insert for the whole 2,000-row chunk it travelled
+    in: `invalid input syntax for type numeric: "o"`. Coerced to null rather than widening
+    the column, because a diameter that cannot be filtered on numerically is worth less
+    than one missing value, and nothing is lost either way: the batch is still in
+    `raw_rows` exactly as uploaded.
+    """
+    load_refresh_module()
+    import sources
+    import pandas as pd
+
+    frame = sources.zmat_keys(pd.DataFrame([
+        {"Column1": 3406677, "PLANT": 56, "OUTER DIAMETER OF MATERIAL": "o"},
+        {"Column1": 3406678, "PLANT": 56, "OUTER DIAMETER OF MATERIAL": 41.28},
+    ]))
+    records = sources.zmat_records(frame, "b1")
+    assert records[0]["outer_diameter"] is None, "a cell that is not a number is not one"
+    assert records[1]["outer_diameter"] == 41.28
+
+
 def test_material_codes_from_every_dump_canonicalise_to_the_same_value():
     """`000000000003501105` and `3501105` are one material, and both are written.
 

@@ -346,6 +346,121 @@ def oem_key_records(frame: pd.DataFrame, batch_id=None) -> list[dict]:
     })
 
 
+def zmat_keys(frame: pd.DataFrame) -> pd.DataFrame:
+    """A zmat frame keyed on material code and plant, deduplicated in frame order.
+
+    zmat is a material × plant extract — the same code appears once per plant it is
+    extended at, otherwise identical — and the plant is the point: the stock-transfer plan
+    for 8406 asks whether a code is extended at both the sending and the receiving plant,
+    which is a question only this pair can answer. `Column1` alone is 57,478 distinct
+    values over 65,178 rows and would throw the answer away.
+
+    The pair is not unique either, and no combination of these 24 columns is: 480 rows are
+    byte-identical repeats of another row, and `(Column1, PLANT)` still leaves 1,104 over
+    — pairs differing only in noise, `PE`/`AW` swapped between end finish and surface
+    finish, a specification written `10` on one row and `010` on the next.
+
+    So the duplicates are dropped **here, deterministically, in frame order**, rather than
+    left to `resolution=ignore-duplicates`. PostgREST resolves a conflict against whatever
+    happens to be in the same 2,000-row chunk, so which of two near-identical rows
+    survived would depend on where the chunk boundary fell — stable within a run, and
+    liable to change the moment the file gains a row above them.
+    """
+    if frame.empty:
+        return frame.assign(material_code=None, plant=None)
+    keyed = frame.assign(
+        material_code=[material_code(v) for v in frame["Column1"]],
+        plant=[plant_code(v) for v in frame["PLANT"]],
+        plant_raw=[_storable(v) for v in frame["PLANT"]],
+    )
+    keyed = keyed[keyed["material_code"].notna() & keyed["plant"].notna()]
+    return keyed.drop_duplicates(subset=["material_code", "plant"], keep="first")
+
+
+# One zmat column, as the table spells it and how it is to be read. Typed columns rather
+# than a `row` JSONB, and this is the one place that trade is worth making: 65,178 rows of
+# 24 columns whose *names* are longer than most of their values — stored as named objects
+# they cost about 59 MB against 15, on a database with 105 MB of headroom. It is safe here
+# and would not be for the sales dump, because SAP's material master does not gain a
+# column every few weeks; if it ever does, that is a migration rather than a silent loss.
+ZMAT_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("material_description", "MATERIAL DESCRIPTION", "text"),
+    ("material_type", "MATERIAL TYPE", "text"),
+    ("material_group", "MATERIAL GROUP", "text"),
+    ("old_material_number", "OLD MATERIAL NUMBER", "text"),
+    ("base_unit_of_measure", "BASE UNIT OF MEASURE", "text"),
+    ("division", "DIVISION", "text"),
+    ("material_grade", "MATERIAL GRADE", "text"),
+    ("outer_diameter", "OUTER DIAMETER OF MATERIAL", "numeric"),
+    ("inner_diameter", "INNER DIAMETER OF MATERIAL", "numeric"),
+    ("thickness", "THICKNESS FOR TATA TUBES MATERIAL", "numeric"),
+    # The header really is cut off mid-word in the file — `(WITH 4 D` — and the read is
+    # by name, so it is spelled here exactly as the sheet spells it.
+    ("length", "LENGTH FOR TATA TUBES MATERIAL (WITH 4 D", "numeric"),
+    ("weight_per_metre", "WEIGHT/METRE OF MATERIAL", "numeric"),
+    ("weight_per_metre_2", "WEIGHT/METRE OF MATERIAL2", "numeric"),
+    ("weight_per_number", "WEIGHT/NUMBER OF MATERIAL", "numeric"),
+    ("weight_per_number_2", "WEIGHT/NUMBER OF MATERIAL2", "numeric"),
+    ("item_type", "ITEM TYPE (FOR MATERIALS)", "text"),
+    ("material_draw_type", "MATERIAL DRAW TYPE", "text"),
+    ("material_category", "MATERIAL CATEGORY", "text"),
+    ("material_specification", "MATERIAL SPECIFICATION", "text"),
+    ("material_end_finish", "MATERIAL END FINISH", "text"),
+    ("material_surface_finish", "MATERIAL SURFACE FINISH", "text"),
+    ("material_geometry", "MATERIAL GEOMETRY", "text"),
+)
+
+
+def zmat_records(frame: pd.DataFrame, batch_id=None) -> list[dict]:
+    """A keyed zmat frame as rows of `dump_zmat`."""
+    if frame.empty:
+        return []
+    records = []
+    for line in frame.to_dict("records"):
+        record = {
+            "material_code": line["material_code"],
+            "plant": line["plant"],
+            "plant_raw": line.get("plant_raw"),
+            "source_batch": batch_id,
+        }
+        for name, column, kind in ZMAT_COLUMNS:
+            value = _storable(line.get(column))
+            if kind == "text" and value is not None and not isinstance(value, str):
+                # `DIVISION` is an int64 out of pandas and a code in SAP. Left a number it
+                # would read `10` where the file says `010`, which is the same trap the
+                # material codes were in.
+                value = whole_number_text(value)
+            elif kind == "numeric":
+                value = _numeric_or_none(value)
+            record[name] = value
+        records.append(record)
+    return records
+
+
+def _numeric_or_none(value):
+    """A numeric cell, or nothing where the sheet did not write a number.
+
+    A typed column is the whole reason `dump_zmat` fits in the storage there is, and the
+    price of one is that a single bad cell fails the insert for the 2,000 rows it travels
+    with. `OUTER DIAMETER OF MATERIAL` is `o` on exactly one row of the 65,178 held — a
+    typo for zero — and it stopped the whole absorption with `invalid input syntax for
+    type numeric: "o"`.
+
+    Coerced to null rather than widening the column to text, because a diameter you cannot
+    filter on numerically is worth less than one missing value. Nothing is lost by it: the
+    batch this came from is still in `raw_rows` exactly as uploaded, which is what that
+    table is for.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return None if value != value else value        # NaN is not equal to itself
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 # What makes a line on the transfer dump a transfer. The pipeline holds the same constant
 # for its own filtering; this one is the read's, applied before anything is stored.
 TRANSFER_INVOICE_MARKER = "TRANSFER"
@@ -771,6 +886,19 @@ TABLES: dict[str, TableSpec] = {slot: _SALES_TABLE for slot in SALES_LEDGER_SLOT
 TABLES["transfers"] = _TRANSFER_TABLE
 TABLES["bucketting"] = _BUCKETING_TABLE
 TABLES["oem_key"] = _OEM_KEY_TABLE
+
+# The material master, keyed on the code *and the plant it is extended at*. Last-wins for
+# the same reason the other two masters are: SAP is the authority on what a material is,
+# and a corrected description should land. Accumulating means a code SAP stops extracting
+# is not thereby forgotten.
+TABLES["zmat"] = TableSpec(
+    table="dump_zmat",
+    mode="accumulating",
+    key=("material_code", "plant"),
+    key_from=zmat_keys,
+    records=zmat_records,
+    on_conflict="replace",
+)
 TABLES.update({slot: _snapshot(slot) for slot in (
     "stock", "wip", "rfd", "receivables", "vsm_stock", "vsm_tvsm",
     "schedule", "schedule_supplement",
@@ -783,7 +911,6 @@ TABLES.update({slot: _snapshot(slot) for slot in (
 # implied by absence, so that adding a slot without deciding where its rows go fails a
 # test instead of passing unnoticed — the same reason `pipeline.json` lists every input.
 SLOTS_WITHOUT_A_TABLE: dict[str, str] = {
-    "zmat": "not yet built — see step 5",
     # Read with `header=None`, because the quarters they hold are column offsets rather
     # than named fields. There are no column names to give a table or a view, so a stored
     # copy would be `{"0": ..., "1": ...}` — unreadable, unqueryable, and no better than

@@ -106,7 +106,15 @@ def main() -> int:
         # bad run.
         pruned = client.rpc("prune_builds", {"keep_days": 14})
         uploads = client.rpc("prune_uploads", {"keep_days": 14})
-        print(f"pruned {pruned} old build(s), {uploads} old upload(s)", flush=True)
+        # The rows behind a superseded batch go a fortnight before the manifest does. They
+        # are what the space actually is — 52 MB against a few hundred bytes an upload —
+        # and they are spent once the batch is no longer current: every snapshot is read
+        # through a view filtered to `status = 'current'`, and every accumulating dump has
+        # had its lines folded into a table that outlives the batch. What is kept is the
+        # record that the upload happened, which is what somebody asks about later.
+        rows = client.rpc("prune_upload_rows", {"keep_days": 1})
+        print(f"pruned {pruned} old build(s), {uploads} old upload(s), "
+              f"and the rows behind {rows} superseded batch(es)", flush=True)
     else:
         print(f"NOT published — status {status}. Yesterday's build still stands.",
               flush=True)
