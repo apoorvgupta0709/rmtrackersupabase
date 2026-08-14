@@ -613,8 +613,31 @@ _TRANSFER_TABLE = TableSpec(
     on_conflict="replace",
 )
 
+def _snapshot(slot: str) -> TableSpec:
+    """A slot exposed as a view over its current batch, and absorbed nowhere.
+
+    Every one of these is replaced whole on upload, which is what the owner wants of
+    them: no history of yesterday's stock, only today's. A view over the current batch
+    is precisely that and costs nothing — no second copy of the rows, no absorption to
+    run or to fail, no window in which the table is half-emptied, and no path by which
+    any of it could move a published number. Superseding the batch changes what the view
+    returns, in the statement that made the upload current.
+
+    The view's DDL is generated from this registry by `tools/generate_dump_views.py`,
+    because a view has to name its columns and the stored grid is positional.
+    """
+    return TableSpec(table="dump_" + slot.replace(":", "_"), mode="snapshot")
+
+
 TABLES: dict[str, TableSpec] = {slot: _SALES_TABLE for slot in SALES_LEDGER_SLOTS}
 TABLES["transfers"] = _TRANSFER_TABLE
+TABLES.update({slot: _snapshot(slot) for slot in (
+    "stock", "wip", "rfd", "receivables", "vsm_stock", "vsm_tvsm",
+    "schedule", "schedule_supplement",
+    # The two multi-sheet planning families, by family: `orders:jsr` and `signoff:hosur`
+    # resolve through `table_for`, and each sheet gets its own view.
+    "orders", "signoff",
+)})
 
 # A slot that deliberately keeps no table of its own, and why. Explicit rather than
 # implied by absence, so that adding a slot without deciding where its rows go fails a
@@ -622,23 +645,12 @@ TABLES["transfers"] = _TRANSFER_TABLE
 SLOTS_WITHOUT_A_TABLE: dict[str, str] = {
     "bucketting": "not yet built — see step 4 of the per-source table work",
     "oem_key": "not yet built — see step 4",
-    "schedule": "not yet built — snapshot view",
-    "schedule_supplement": "not yet built — snapshot view",
-    "stock": "not yet built — snapshot view",
-    "wip": "not yet built — snapshot view",
-    "rfd": "not yet built — snapshot view",
-    "receivables": "not yet built — snapshot view",
-    "vsm_tvsm": "not yet built — snapshot view",
-    "vsm_stock": "not yet built — snapshot view",
     "zmat": "not yet built — see step 5",
-    # These two are read with `header=None`, because the quarters they hold are column
-    # offsets rather than named fields. There are no column names to give a table or a
-    # view, so a stored copy would be `{"0": ..., "1": ...}` — unreadable, unqueryable,
-    # and no better than the grid it came from. They keep nothing on purpose.
+    # Read with `header=None`, because the quarters they hold are column offsets rather
+    # than named fields. There are no column names to give a table or a view, so a stored
+    # copy would be `{"0": ..., "1": ...}` — unreadable, unqueryable, and no better than
+    # the grid it came from. This one keeps nothing on purpose.
     "contract": "read positionally with header=None — it has no column names to store",
-    # The multi-sheet planning families, pending their views.
-    "orders": "not yet built — snapshot view per sheet",
-    "signoff": "not yet built — snapshot view per sheet",
 }
 
 
@@ -654,7 +666,10 @@ def table_for(slot: str) -> TableSpec | None:
         return TABLES[slot]
     family = slot.split(":", 1)[0]
     if family in TABLES:
-        return TABLES[family]
+        # The family is registered once; each of its sheets gets its own view, because
+        # `orders:jsr` and `orders:hk_so` are different sheets with different columns and
+        # sharing one name would have three slots all pointing at `dump_orders`.
+        return replace(TABLES[family], table=_snapshot(slot).table)
     if slot in SLOTS_WITHOUT_A_TABLE or family in SLOTS_WITHOUT_A_TABLE:
         return None
     raise KeyError(
@@ -1134,6 +1149,10 @@ class PostgresSources(GridSources):
         The stamp is last and is the flip. Until it is written the batch is still
         un-absorbed and a crash mid-insert simply leaves it to be picked up again.
 
+        Only an accumulating slot is absorbed at all. A snapshot slot is exposed as a
+        view over its current batch and has nothing to fold in — writing a copy of it
+        would be a second statement of the same rows, kept in step by hand.
+
         A batch the read refuses — a dump filed under the wrong slot — is skipped rather
         than raised past the other batches. One bad file must not stop the good ones, and
         it must certainly not stop the sales ledger the pipeline is about to read. It is
@@ -1141,6 +1160,11 @@ class PostgresSources(GridSources):
         keeps `prune_uploads` from deleting it: a complaint that stops being made is a
         complaint nobody acts on, and this one wants somebody to send the right file.
         """
+        if mode != "accumulating":
+            raise ValueError(
+                f"nothing is absorbed for mode {mode!r}. A snapshot slot is a view over "
+                f"its current batch; there is no second copy to fill."
+            )
         absorbed: dict[str, int] = {}
         for batch in self.unabsorbed_batches(mode):
             spec = table_for(batch["slot"])

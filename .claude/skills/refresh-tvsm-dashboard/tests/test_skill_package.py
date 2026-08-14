@@ -549,6 +549,60 @@ def test_every_slot_says_where_its_rows_are_kept():
     assert not unknown, f"SLOTS_WITHOUT_A_TABLE names slots that do not exist: {unknown}"
 
 
+def snapshot_view_migration():
+    return (REPO_ROOT / "supabase" / "migrations"
+            / "20260814070000_a_view_per_snapshot_dump.sql").read_text(encoding="utf-8")
+
+
+def test_every_snapshot_slot_has_a_view_and_every_view_a_slot():
+    """The generated migration and the registry, compared.
+
+    A snapshot slot is exposed as a view over its current batch rather than copied into a
+    table, so the view *is* the table as far as anyone querying is concerned. One missing
+    is a dump that silently cannot be read in SQL at all.
+    """
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "tools" / "generate_dump_views.py"), "--check"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_every_snapshot_view_runs_as_the_invoker():
+    """Without this the views hand raw receivables to anyone who can log in.
+
+    A Postgres view runs as its *owner* by default, not its caller, so a view over
+    `raw_rows` would return rows the base table's row-level security exists to withhold —
+    sales lines, open invoices, customer rates. The whole access model is decided by one
+    option per view, and there is nothing about a working query that would reveal it was
+    missing.
+    """
+    written = snapshot_view_migration()
+    created = re.findall(r"create or replace view public\.(dump_\w+)(.*)", written)
+    assert created, "no views in the migration at all"
+    for name, rest in created:
+        assert "security_invoker = on" in rest, f"{name} runs as its owner"
+
+
+def test_a_blank_row_is_recognised_in_one_place_and_not_thirteen():
+    """This predicate has been wrong twice, and both times in every view at once.
+
+    First written per column with `is null`, which never fires: an empty cell is stored as
+    a JSON null, and `'[null]'::jsonb -> 0 is null` is false. Then rewritten as one
+    expression and negated, which kept only the blank rows — every view returned padding
+    and nothing else. Each was a one-character fix in thirteen places.
+    """
+    written = snapshot_view_migration()
+    assert "create or replace function public.dump_row_has_data" in written
+    for view_body in written.split("create or replace view")[1:]:
+        assert "public.dump_row_has_data(r.row)" in view_body, (
+            "a view filtering blank rows by hand will be the one left behind"
+        )
+    assert "jsonb_array_elements" not in written.split("-- ---- The views")[-1], (
+        "the row-emptiness test belongs in the function, not inlined in a view"
+    )
+
+
 def test_the_pipeline_reads_nothing_except_through_the_source_registry():
     """One inline `pd.read_excel` is enough to break a second backend, silently.
 
