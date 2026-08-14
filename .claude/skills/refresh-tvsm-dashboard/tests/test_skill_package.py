@@ -1615,7 +1615,7 @@ def test_absorbing_a_sales_batch_adds_only_lines_the_ledger_has_never_seen():
     source = sources.PostgresSources(client)
     absorbed = source.absorb_sales(log=lambda _message: None)
 
-    assert absorbed == {"sales.xlsx": 1}, "the grand-total row is not a line"
+    assert absorbed == {"b1": 1}, "the grand-total row is not a line"
     assert len(client.inserted) == 1
     line = client.inserted[0]
     assert line["billing_document"] == "4731002954", "float out of pandas, text into the key"
@@ -1636,6 +1636,212 @@ def test_absorbing_a_sales_batch_adds_only_lines_the_ledger_has_never_seen():
     assert client.updated == [
         ("raw_batches", "id=eq.b1", {"absorbed_at": "now()"})
     ], "an unstamped batch is absorbed again, or pruned before it ever is"
+
+
+def _transfer_cells(rows):
+    """A transfer grid: the header, then one cell row per dict given."""
+    columns = ["MATERAIL NUMBER", "Material   Description", "DESP P LANT", "CUSTOMER  CD",
+               "Invoice Type", "GR DATE", "Quantity", "qty in no",
+               "Billing  Document Number", "Billing Item", "BILLING  DATE"]
+    return [columns] + [[row.get(c) for c in columns] for row in rows]
+
+
+def test_a_transfer_batch_that_is_really_the_sales_dump_is_refused():
+    """The mis-sent file stops being self-correcting the moment the table accumulates.
+
+    The daily mail has more than once carried a copy of the sales dump under the transfer
+    filename — the 27 July set arrived byte-identical, 3,990 rows and 234 columns both.
+    Under the snapshot model the next upload cleared it. In a table that accumulates,
+    those sales invoices would sit in the transfer ledger permanently, and nothing could
+    take them out again. So the batch is refused before a row of it is written.
+
+    The test is exact rather than a proportion because the fault is exact: a real extract
+    is `Tax Inv Transfer` and `D.Challan Transfer` throughout, and a sales extract carries
+    `Tax Inv Sale IGST`/`SGST` and matches nothing.
+
+    And it is skipped rather than raised. One file in the wrong slot must not stop the
+    good ones and must certainly not stop the sales ledger the pipeline reads next, so a
+    refusal takes the bad batch out of the run and leaves everything else in it.
+    """
+    load_refresh_module()
+    import sources
+
+    bad = _transfer_cells([
+        {"Invoice Type": "Tax Inv Sale IGST", "Billing  Document Number": 4731002954.0,
+         "Billing Item": 10.0, "DESP P LANT": 789.0},
+        {"Invoice Type": "Tax Inv Sale SGST", "Billing  Document Number": 4731002955.0,
+         "Billing Item": 10.0, "DESP P LANT": 789.0},
+    ])
+    good = _transfer_cells([
+        {"Invoice Type": "Tax Inv Transfer", "Billing  Document Number": 4470110377.0,
+         "Billing Item": 10.0, "DESP P LANT": 788.0, "CUSTOMER  CD": 8406.0},
+    ])
+    batches = [
+        {"id": "bad", "slot": "transfers", "sheet": None, "row_count": len(bad),
+         "original_filename": "transfer.xlsx", "absorbed_at": None},
+        {"id": "good", "slot": "transfers", "sheet": None, "row_count": len(good),
+         "original_filename": "transfer_correct.xlsx", "absorbed_at": None},
+    ]
+    client = _FakeRest(batches, {"bad": bad, "good": good})
+
+    said = []
+    absorbed = sources.PostgresSources(client).absorb(log=said.append)
+
+    assert absorbed == {"good": 1}, (
+        "the good batch behind a refused one must still be absorbed"
+    )
+    assert len(client.inserted) == 1, "no sales line may reach the transfer ledger"
+    assert client.inserted[0]["billing_document"] == "4470110377"
+    assert client.updated == [("raw_batches", "id=eq.good", {"absorbed_at": "now()"})], (
+        "a refused batch must stay un-absorbed, or the refusal is recorded as success "
+        "and the dump is pruned unstored"
+    )
+    assert any("REFUSED" in message and "transfer.xlsx" in message for message in said), (
+        "a refusal nobody is told about is a dump that quietly never arrives"
+    )
+
+
+def test_absorbing_a_transfer_batch_keys_it_on_the_invoice_line():
+    """The same key as sales, the same total-row rule, and plants that will join.
+
+    Three things this has to get right and none is visible from the frame. The key halves
+    arrive as floats — the sheet's grand total is what makes pandas read them that way —
+    and must be stored as the text they are. The grand-total row itself carries no
+    billing document and is dropped for having none rather than deduplicated. And both
+    plant columns go through `plant_code`, because this dump writes `788.0` where stock
+    writes `0788` and zmat writes `788`, and a stock-transfer plan joining the raw values
+    would report a code as not extended when it plainly is.
+    """
+    load_refresh_module()
+    import sources
+
+    cells = _transfer_cells([
+        {"Invoice Type": "Tax Inv Transfer", "Billing  Document Number": 4470110377.0,
+         "Billing Item": 10.0, "DESP P LANT": 788.0, "CUSTOMER  CD": 8406.0,
+         "MATERAIL NUMBER": "000000000003501105", "BILLING  DATE": "2026-07-11",
+         "GR DATE": "2026-07-20", "Quantity": 1000.0},
+        # Despatched but not yet received: no GR date is the in-transit flag.
+        {"Invoice Type": "D.Challan Transfer", "Billing  Document Number": 4470110378.0,
+         "Billing Item": 10.0, "DESP P LANT": 56.0, "CUSTOMER  CD": 4731.0,
+         "MATERAIL NUMBER": "000000000003501106", "BILLING  DATE": "2026-07-15",
+         "Quantity": 2000.0},
+        # The sheet's own grand total: no invoice type, no document, the column's sum.
+        {"Quantity": 3000.0},
+    ])
+    batch = {"id": "b1", "slot": "transfers", "sheet": None, "row_count": len(cells),
+             "original_filename": "transfer.xlsx", "absorbed_at": None}
+    client = _FakeRest([batch], {"b1": cells})
+
+    absorbed = sources.PostgresSources(client).absorb(log=lambda _message: None)
+
+    assert absorbed == {"b1": 2}, "the grand-total row is not a despatch"
+    first, second = client.inserted
+    assert first["billing_document"] == "4470110377", "float out of pandas, text into the key"
+    assert first["billing_item"] == "10"
+    assert first["billing_month"] == "2026-07"
+    assert first["gr_date"] == "2026-07-20"
+    assert first["source_plant"] == "788" and first["receiving_plant"] == "8406"
+    assert first["row"]["MATERAIL NUMBER"] == "000000000003501105", (
+        "a material code that arrived zero-padded text must not come back a number"
+    )
+    assert second["gr_date"] is None, "an absent goods receipt is what in-transit means"
+    assert second["source_plant"] == "56"
+
+    call = client.insert_calls[0]
+    assert call["table"] == "tsl_transfers"
+    assert call["on_conflict"] == "billing_document,billing_item", (
+        "without a conflict target the resolution is ignored and a re-sent day raises"
+    )
+    # Which resolution travels with that target is a separate claim, and belongs with the
+    # reason for it: see `test_a_transfer_line_is_allowed_to_stop_being_in_transit`.
+    assert client.updated == [("raw_batches", "id=eq.b1", {"absorbed_at": "now()"})]
+
+
+def test_a_transfer_line_is_allowed_to_stop_being_in_transit():
+    """The one place the transfer ledger must not copy the sales ledger.
+
+    A billed sale is finished when it is billed, so `tsl_sales` keeps the first version of
+    a line and ignores every later one. A transfer is not: it stays *in transit* until the
+    receiving plant posts a goods receipt, and `GR DATE` therefore fills in on a dump sent
+    days after the one that first carried the line. Measured on the four transfer dumps
+    held, 227 of 1,088 lines did exactly that.
+
+    Keep-first froze all 227 as in transit permanently — the table reported 445 against a
+    true 218 — and the error was invisible, because every individual line looked right.
+    So the resolution is `merge-duplicates`, and the natural key still does the job it was
+    chosen for: a re-sent day cannot double count, it can only correct.
+    """
+    load_refresh_module()
+    import sources
+
+    assert sources.TABLES["transfers"].on_conflict == "replace", (
+        "keep-first freezes GR DATE, and a line in transit stays in transit for ever"
+    )
+    assert sources.TABLES["sales"].on_conflict == "keep", (
+        "a billed sale is finished when it is billed; letting a later dump rewrite it "
+        "would let a re-cut extract silently move a closed month"
+    )
+
+    cells = _transfer_cells([
+        {"Invoice Type": "Tax Inv Transfer", "Billing  Document Number": 4470110597.0,
+         "Billing Item": 1.0, "DESP P LANT": 788.0, "CUSTOMER  CD": 8406.0,
+         "BILLING  DATE": "2026-07-11", "GR DATE": "2026-07-20"},
+    ])
+    batch = {"id": "b1", "slot": "transfers", "sheet": None, "row_count": len(cells),
+             "original_filename": "transfer.xlsx", "absorbed_at": None}
+    client = _FakeRest([batch], {"b1": cells})
+    sources.PostgresSources(client).absorb(log=lambda _message: None)
+
+    assert "resolution=merge-duplicates" in client.insert_calls[0]["prefer"]
+    assert client.insert_calls[0]["on_conflict"] == "billing_document,billing_item", (
+        "PostgREST ignores a resolution given without a conflict target, so the two must "
+        "travel together or the second dump raises on the first duplicate key"
+    )
+
+
+def test_plant_codes_from_every_dump_canonicalise_to_the_same_value():
+    """`0788`, `788` and `788.0` are one plant, and only one of them is written anywhere.
+
+    Measured on the live uploads: `stock.Plant` holds `0788` and `789` in the same column,
+    `zmat.PLANT` holds `788` and `789`, the sales extract holds `056` and `0788`, and the
+    transfer dump holds floats. The 8406 stock-transfer plan asks whether a material code
+    is extended at both plants, so a join across these is the whole feature — and on the
+    raw values it matches a subset and calls the rest absent.
+    """
+    load_refresh_module()
+    import sources
+
+    for written in ("0788", "788", 788, 788.0, " 788 "):
+        assert sources.plant_code(written) == "788", written
+    assert sources.plant_code("056") == "56"
+    assert sources.plant_code(None) is None
+    assert sources.plant_code("") is None
+    # A plant code that is not digits is left exactly as it came: one this does not
+    # recognise is not one it should rewrite.
+    assert sources.plant_code("HOSUR") == "HOSUR"
+    # And zero does not vanish when its padding is stripped.
+    assert sources.plant_code("0000") == "0"
+
+
+def test_pruning_refuses_a_batch_whose_rows_are_not_in_a_table_yet():
+    """Pruning must not outrun absorption, for every slot that accumulates.
+
+    A dump uploaded and left unrefreshed for a fortnight would otherwise be deleted with
+    its lines never recorded, and nothing downstream would report a gap — the months would
+    simply be short. The clause is asserted as written, parentheses included, because the
+    two readings of it differ by exactly whether that happens.
+    """
+    # The clause as the *latest* migration to redefine the function leaves it: an earlier
+    # one still carries the version it replaced, and asserting against that would pass
+    # while production ran something else.
+    written = [path.read_text(encoding="utf-8")
+               for path in sorted((REPO_ROOT / "supabase" / "migrations").glob("*.sql"))]
+    latest = [text for text in written
+              if "create or replace function public.prune_uploads" in text][-1]
+    assert "(absorbed_at is not null" in latest
+    assert "or (slot not like 'sales%' and slot <> 'transfers'))" in latest, (
+        "an accumulating slot missing from this clause is a dump pruned unstored"
+    )
 
 
 def test_sales_to_megh_opens_months_that_add_to_the_figure_above_them():

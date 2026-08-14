@@ -137,6 +137,30 @@ def whole_number_text(value) -> str | None:
     return str(value).strip() or None
 
 
+def plant_code(value) -> str | None:
+    """A plant code as one canonical string, whatever shape it arrived in.
+
+    The dumps disagree with each other and with themselves. `stock` writes `0788` on one
+    row and `789` on the next; `zmat` writes `788` and `789`; the sales extract writes
+    `056` and `0788`; the transfer dump writes them as floats, `788.0`. Every one of
+    those is the same plant, and any join made on the raw value matches a subset and
+    reports the rest as absent — which on a stock-transfer plan reads as "this code is
+    not extended at 8406" rather than as a formatting difference.
+
+    Canonical is the digits without leading zeros. The as-sent value is stored beside it
+    wherever this is used, because which padding a file chose is evidence about the file.
+    """
+    text = whole_number_text(value)
+    if text is None:
+        return None
+    text = text.strip()
+    if not text:
+        return None
+    # Only a plant written as digits is renormalised. Anything else is left exactly as
+    # it came: a code this function does not recognise is not a code it should rewrite.
+    return (text.lstrip("0") or "0") if text.isdigit() else text
+
+
 def sales_line_keys(frame: pd.DataFrame) -> pd.DataFrame:
     """A sales frame with its line key attached, and the sheet's own total row dropped.
 
@@ -209,6 +233,100 @@ def sales_ledger_records(frame: pd.DataFrame, batch_id=None) -> list[dict]:
             "despatch_plant": _storable(line.get("DESP P LANT")),
             "material_number": _storable(line.get("MATERAIL NUMBER")),
             "customer_code": _storable(line.get("CUSTOMER  CD")),
+            "source_batch": batch_id,
+        })
+    return records
+
+
+# What makes a line on the transfer dump a transfer. The pipeline holds the same constant
+# for its own filtering; this one is the read's, applied before anything is stored.
+TRANSFER_INVOICE_MARKER = "TRANSFER"
+
+
+class DumpRefused(ValueError):
+    """A stored batch that is not the dump its slot says it is.
+
+    Distinct from a batch that is merely empty or short. Absorption skips one of these
+    and carries on with the rest — one file sent to the wrong slot must not stop the
+    others, and must certainly not stop the sales ledger the pipeline is about to read —
+    so it has to be catchable as a class without also catching a genuine fault.
+    """
+
+
+class NotATransferExtract(DumpRefused):
+    """A batch filed as `transfers` that holds no transfer line.
+
+    The daily mail has more than once carried a copy of the sales dump under the transfer
+    filename — the 27 July set arrived byte-identical to `sales.xlsx`, 3,990 rows and 234
+    columns both. Under the old snapshot model the next upload cleared it. In a table
+    that accumulates, those lines would be a permanent, unremovable population of sales
+    invoices sitting in the transfer ledger, so the file has to be refused before a row
+    of it is written rather than noted afterwards.
+
+    The test is exact rather than a proportion, and can only fire on the real fault: a
+    genuine extract is `Tax Inv Transfer` and `D.Challan Transfer` throughout — 844 of
+    845 rows on the file held, the one exception being the sheet's own grand total — and
+    a sales extract carries `Tax Inv Sale IGST`/`SGST` and matches nothing at all.
+    """
+
+
+def transfer_line_keys(frame: pd.DataFrame) -> pd.DataFrame:
+    """A transfer frame with its line key attached, and everything that is not a transfer gone.
+
+    The key is the invoice line, the same one sales uses and under the same column names
+    — verified unique across all 844 lines of the file held, zero duplicate pairs. The
+    grand-total row goes the way sales' does: `sales_line_keys` requires the key, and the
+    total row carries none.
+    """
+    if frame.empty:
+        return frame.assign(billing_document=None, billing_item=None)
+
+    if "Invoice Type" not in frame.columns:
+        raise NotATransferExtract(
+            "the transfer dump has no `Invoice Type` column, so nothing in it can be "
+            "shown to be a transfer. Nothing was stored."
+        )
+    invoice_type = frame["Invoice Type"].astype(str).str.upper()
+    transfers = frame[invoice_type.str.contains(TRANSFER_INVOICE_MARKER, na=False)]
+    if transfers.empty:
+        raise NotATransferExtract(
+            f"none of this dump's {len(frame)} rows carries a transfer invoice type, so "
+            f"it is not a transfer extract — most likely the sales dump sent under the "
+            f"transfer filename, which has happened before. Nothing was stored."
+        )
+    return sales_line_keys(transfers)
+
+
+def transfer_ledger_records(frame: pd.DataFrame, batch_id=None) -> list[dict]:
+    """A keyed transfer frame as ledger rows.
+
+    Lifts what a transfer is asked about, which is not quite what a sale is asked about.
+    `DESP P LANT` is the sending plant and `CUSTOMER  CD` the receiving one — on this
+    dump the "customer" is a plant, 4731 and 8406 — so both go through `plant_code` and
+    both keep the value as sent beside it. `GR DATE` is lifted because its *absence* is
+    the in-transit flag: a line is in transit until the receiving plant posts a goods
+    receipt, and 207 of 844 lines on the file held have none.
+    """
+    if frame.empty:
+        return []
+    columns = [c for c in frame.columns if c not in ("billing_document", "billing_item")]
+    records = []
+    for line in frame.to_dict("records"):
+        billed = pd.to_datetime(line.get("BILLING  DATE"), errors="coerce")
+        received = pd.to_datetime(line.get("GR DATE"), errors="coerce")
+        records.append({
+            "billing_document": line["billing_document"],
+            "billing_item": line["billing_item"],
+            "row": {c: _storable(line.get(c)) for c in columns},
+            "billing_date": None if pd.isna(billed) else billed.date().isoformat(),
+            "billing_month": None if pd.isna(billed) else billed.strftime("%Y-%m"),
+            "gr_date": None if pd.isna(received) else received.date().isoformat(),
+            "invoice_type": _storable(line.get("Invoice Type")),
+            "source_plant": plant_code(line.get("DESP P LANT")),
+            "source_plant_raw": _storable(line.get("DESP P LANT")),
+            "receiving_plant": plant_code(line.get("CUSTOMER  CD")),
+            "receiving_plant_raw": _storable(line.get("CUSTOMER  CD")),
+            "material_number": _storable(line.get("MATERAIL NUMBER")),
             "source_batch": batch_id,
         })
     return records
@@ -473,7 +591,30 @@ _SALES_TABLE = TableSpec(
     on_conflict="keep",
 )
 
+# Transfers accumulate for the same reason sales does, and against the same key. The
+# despatch of a line between two plants is a fact with a date on it, the dump carries
+# only the current month, and superseding it therefore threw the closed months away.
+#
+# But unlike a sale, a transfer line is not finished when it is billed, and this is the
+# one place the two ledgers must differ. A line stays *in transit* until the receiving
+# plant posts a goods receipt, and `GR DATE` fills in on a later dump — 227 of the 1,088
+# lines held did exactly that. Keep-first would freeze every one of them as in transit
+# for good: the table reported 445 lines in transit against a true 218, and the error was
+# permanent and invisible, because each line was individually plausible.
+#
+# So the newer dump wins. The key still does the job it was chosen for — a re-sent day
+# cannot double count — and the fields that legitimately move are allowed to move.
+_TRANSFER_TABLE = TableSpec(
+    table="tsl_transfers",
+    mode="accumulating",
+    key=("billing_document", "billing_item"),
+    key_from=transfer_line_keys,
+    records=transfer_ledger_records,
+    on_conflict="replace",
+)
+
 TABLES: dict[str, TableSpec] = {slot: _SALES_TABLE for slot in SALES_LEDGER_SLOTS}
+TABLES["transfers"] = _TRANSFER_TABLE
 
 # A slot that deliberately keeps no table of its own, and why. Explicit rather than
 # implied by absence, so that adding a slot without deciding where its rows go fails a
@@ -487,7 +628,6 @@ SLOTS_WITHOUT_A_TABLE: dict[str, str] = {
     "wip": "not yet built — snapshot view",
     "rfd": "not yet built — snapshot view",
     "receivables": "not yet built — snapshot view",
-    "transfers": "not yet built — see step 2",
     "vsm_tvsm": "not yet built — snapshot view",
     "vsm_stock": "not yet built — snapshot view",
     "zmat": "not yet built — see step 5",
@@ -993,6 +1133,13 @@ class PostgresSources(GridSources):
 
         The stamp is last and is the flip. Until it is written the batch is still
         un-absorbed and a crash mid-insert simply leaves it to be picked up again.
+
+        A batch the read refuses — a dump filed under the wrong slot — is skipped rather
+        than raised past the other batches. One bad file must not stop the good ones, and
+        it must certainly not stop the sales ledger the pipeline is about to read. It is
+        left **un-absorbed**, which is what makes the refusal repeat on every refresh and
+        keeps `prune_uploads` from deleting it: a complaint that stops being made is a
+        complaint nobody acts on, and this one wants somebody to send the right file.
         """
         absorbed: dict[str, int] = {}
         for batch in self.unabsorbed_batches(mode):
@@ -1009,9 +1156,15 @@ class PostgresSources(GridSources):
                     f"nothing and stamps the batch absorbed, which loses the dump."
                 )
 
-            frame = self.frame_for_batch(batch)
-            if spec.key_from is not None:
-                frame = spec.key_from(frame)
+            try:
+                frame = self.frame_for_batch(batch)
+                if spec.key_from is not None:
+                    frame = spec.key_from(frame)
+            except DumpRefused as refusal:
+                log(f"  REFUSED {batch['original_filename']} "
+                    f"(slot {batch['slot']}, uploaded {batch.get('uploaded_at', '?')}): "
+                    f"{refusal}")
+                continue
             records = spec.records(frame, batch["id"])
 
             if records:
@@ -1026,7 +1179,13 @@ class PostgresSources(GridSources):
             self.client.update(
                 "raw_batches", f"id=eq.{batch['id']}", {"absorbed_at": "now()"}
             )
-            absorbed[batch["original_filename"]] = len(records)
+            # Keyed on the batch, not on the filename it arrived under. Four transfer
+            # dumps were absorbed in a row and three of them were called `transfer.XLSX`,
+            # so a filename-keyed tally reported "1,829 rows from 2 batches" where the
+            # truth was 3,613 from 4 — the caller's summary is built from `sum` and `len`
+            # of this, and both were wrong. The name is in the log line, where it is
+            # useful and where it is allowed to repeat.
+            absorbed[batch["id"]] = len(records)
             log(f"  absorbed {len(records)} rows from {batch['original_filename']} "
                 f"into {spec.table}")
         return absorbed
