@@ -61,7 +61,21 @@ def main() -> int:
     extra = sources_module.slots_for_families(
         pipeline.ORDER_BOOK_SHEETS, pipeline.PRICING_SHEETS, pipeline.SIGNOFF_SHEETS
     )
-    source = sources_module.PostgresSources(client, extra_slots=extra)
+    # The dump tables, not the cell grid the uploader stored.
+    #
+    # Every uploaded dump lands in both: `raw_rows` cell for cell, which is the audit
+    # trail, and a named table or view, which is what anyone querying the data reaches
+    # for. Reading the second is what makes the four accumulating dumps mean anything —
+    # the transfer ledger holds every line back to 8 July where the current upload holds
+    # only the month in progress, and zmat holds every code SAP has ever extracted rather
+    # than only those still in the newest extract.
+    #
+    # Proved before it was switched, by `tools/compare_pipeline_backends.py`: the whole
+    # of `data.json` is identical between the two backends except for the transfer figures
+    # and the transfer drill-downs, which is the gain and not a difference — 220 lines
+    # against 255, 1,898 MT against 2,129. `PostgresSources` is still the class this
+    # inherits from and still what the comparison harnesses read the other side through.
+    source = sources_module.TableSources(client, extra_slots=extra)
 
     held = sorted(source.batches)
     print(f"as of {as_of}; {len(held)} slots uploaded: {', '.join(held)}", flush=True)

@@ -23,7 +23,9 @@ import re
 from collections.abc import Callable
 from datetime import time
 from dataclasses import dataclass, replace
+from hashlib import sha1
 from pathlib import Path
+from urllib.parse import quote
 
 import pandas as pd
 
@@ -346,8 +348,29 @@ def oem_key_records(frame: pd.DataFrame, batch_id=None) -> list[dict]:
     })
 
 
+def _row_digest(line: dict) -> str:
+    """A zmat row's own identity: what is in it, in a settled order.
+
+    zmat has no natural key — no combination of its 24 columns is unique — so the row's
+    content is the only thing that can identify it. A digest rather than the columns
+    themselves because there are ten of them and a ten-column primary key would be a
+    ten-column `on_conflict` target on every insert.
+
+    Written as text through `_storable` so that a value's *stored* form decides, which is
+    what makes the digest stable across the JSON round trip. Hashing the pandas value
+    instead would give a different answer for the same row depending on whether the column
+    happened to read as int64 or float64 that morning.
+    """
+    material = [_storable(line.get(column)) for _, column, _ in ZMAT_COLUMNS]
+    # A separator no spreadsheet cell holds, so that ("a b", "c") and ("a", "b c")
+    # cannot digest to the same row.
+    return sha1(
+        "\x1f".join("" if value is None else str(value) for value in material).encode()
+    ).hexdigest()
+
+
 def zmat_keys(frame: pd.DataFrame) -> pd.DataFrame:
-    """A zmat frame keyed on material code and plant, deduplicated in frame order.
+    """A zmat frame keyed on material code, plant and the row's own content.
 
     zmat is a material × plant extract — the same code appears once per plant it is
     extended at, otherwise identical — and the plant is the point: the stock-transfer plan
@@ -355,26 +378,41 @@ def zmat_keys(frame: pd.DataFrame) -> pd.DataFrame:
     which is a question only this pair can answer. `Column1` alone is 57,478 distinct
     values over 65,178 rows and would throw the answer away.
 
-    The pair is not unique either, and no combination of these 24 columns is: 480 rows are
-    byte-identical repeats of another row, and `(Column1, PLANT)` still leaves 1,104 over
-    — pairs differing only in noise, `PE`/`AW` swapped between end finish and surface
-    finish, a specification written `10` on one row and `010` on the next.
+    **The pair is not enough either, and keying on it alone lost 1,104 real rows.** It is
+    not unique — 480 rows are byte-identical repeats, and `(Column1, PLANT)` leaves 1,104
+    over on top of those, pairs differing in end finish, surface finish or specification.
+    Those looked like noise and are not: the pipeline's own material key is the code, the
+    description and an attribute key built from the diameters, the thickness, the
+    specification and both finishes, so two rows this pair calls the same are two
+    different materials to everything downstream. Collapsed to one, nine stock rows
+    stopped resolving to a bucket, the STR plan lost two lines and a long-length SKU's
+    signed-off tonnage read 4.925 MT against a true 7.205.
 
-    So the duplicates are dropped **here, deterministically, in frame order**, rather than
-    left to `resolution=ignore-duplicates`. PostgREST resolves a conflict against whatever
-    happens to be in the same 2,000-row chunk, so which of two near-identical rows
-    survived would depend on where the chunk boundary fell — stable within a run, and
-    liable to change the moment the file gains a row above them.
+    So the third part of the key is the row's own content. Byte-identical repeats still
+    collapse — that is what a digest does — and rows that differ in any column the file
+    wrote are all kept. `source_seq` rides along so the table can be read back in the
+    order the sheet wrote it.
     """
     if frame.empty:
-        return frame.assign(material_code=None, plant=None)
+        return frame.assign(material_code=None, plant=None, row_digest=None)
     keyed = frame.assign(
         material_code=[material_code(v) for v in frame["Column1"]],
         plant=[plant_code(v) for v in frame["PLANT"]],
         plant_raw=[_storable(v) for v in frame["PLANT"]],
+        row_digest=[_row_digest(line) for line in frame.to_dict("records")],
+        # The row's position in the sheet, taken before anything is dropped. The frame
+        # comes off the read with a reset index, so this is the file's own order.
+        source_seq=list(range(len(frame))),
     )
     keyed = keyed[keyed["material_code"].notna() & keyed["plant"].notna()]
-    return keyed.drop_duplicates(subset=["material_code", "plant"], keep="first")
+    # Deterministically, in frame order, rather than left to `ignore-duplicates`:
+    # PostgREST resolves a conflict against whatever happens to be in the same 2,000-row
+    # chunk, so which of two identical rows survived would depend on where the chunk
+    # boundary fell — stable within a run, and liable to change the moment the file gains
+    # a row above them.
+    return keyed.drop_duplicates(
+        subset=["material_code", "plant", "row_digest"], keep="first"
+    )
 
 
 # One zmat column, as the table spells it and how it is to be read. Typed columns rather
@@ -421,6 +459,8 @@ def zmat_records(frame: pd.DataFrame, batch_id=None) -> list[dict]:
             "material_code": line["material_code"],
             "plant": line["plant"],
             "plant_raw": line.get("plant_raw"),
+            "row_digest": line["row_digest"],
+            "source_seq": line["source_seq"],
             "source_batch": batch_id,
         }
         for name, column, kind in ZMAT_COLUMNS:
@@ -804,6 +844,11 @@ class TableSpec:
     # newer file win. The choice is per master and is a business rule, not a detail:
     # keep-first means a correction never lands, replace means a deletion never does.
     on_conflict: str = "keep"
+    # The order the pipeline reads these rows back in. Defaults to the key, which is what
+    # every ledger wants — `sales_ledger_order` re-sorts chronologically afterwards. zmat
+    # names `source_seq` instead, because its rows are deduplicated again in the pipeline
+    # with `keep="first"` and "first" has to mean the same row it meant off the sheet.
+    read_order: tuple[str, ...] = ()
 
 
 # Every sales extract pours into one ledger keyed on the invoice line, so all five slots
@@ -894,10 +939,13 @@ TABLES["oem_key"] = _OEM_KEY_TABLE
 TABLES["zmat"] = TableSpec(
     table="dump_zmat",
     mode="accumulating",
-    key=("material_code", "plant"),
+    # The row's content is the third part of the key, because no combination of zmat's
+    # own columns is unique and `(code, plant)` alone silently dropped 1,104 real rows.
+    key=("material_code", "plant", "row_digest"),
     key_from=zmat_keys,
     records=zmat_records,
     on_conflict="replace",
+    read_order=("source_seq",),
 )
 TABLES.update({slot: _snapshot(slot) for slot in (
     "stock", "wip", "rfd", "receivables", "vsm_stock", "vsm_tvsm",
@@ -1215,32 +1263,48 @@ class GridSources(Sources):
 
     @staticmethod
     def _as_pandas_dtype(series: pd.Series, column, spec: ReadSpec) -> pd.Series:
-        """Give a rebuilt column the dtype `read_excel` would have given it.
-
-        A column built from a Python list is object dtype whatever it holds, so the
-        numeric and datetime columns have to be recovered. The pinned text columns are
-        left alone on purpose — pinning them is what stops a material code losing its
-        last digit to a float.
-        """
+        """Give a rebuilt column the dtype `read_excel` would have given it."""
         if spec.dtype and column in spec.dtype:
-            return series.astype(object).map(
-                lambda v: None if v is None or (isinstance(v, float) and pd.isna(v)) else str(v)
-            )
+            return as_text(series)
+        return inferred_dtype(series)
 
-        values = series.dropna()
-        if values.empty:
-            return series.astype(object)
-        if all(isinstance(v, pd.Timestamp) for v in values):
-            return pd.to_datetime(series)
-        if all(isinstance(v, bool) for v in values):
-            return series.astype(bool) if len(values) == len(series) else series
-        if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values):
-            numeric = pd.to_numeric(series, errors="coerce")
-            # pandas keeps an all-integer column as int64 only when nothing is missing.
-            if len(values) == len(series) and all(float(v).is_integer() for v in values):
-                return numeric.astype("int64")
-            return numeric.astype("float64")
+
+def as_text(series: pd.Series) -> pd.Series:
+    """A column pinned to text, as `dtype={...: str}` leaves it.
+
+    Pinning is what stops a material code losing its last digit to a float — 3907863 read
+    as 3907860 on 3,603 of 3,989 rows — so a pinned column is never inferred, whatever it
+    happens to hold today.
+    """
+    return series.astype(object).map(
+        lambda v: None if v is None or (isinstance(v, float) and pd.isna(v)) else str(v)
+    )
+
+
+def inferred_dtype(series: pd.Series) -> pd.Series:
+    """The dtype `read_excel` would infer for a column of these values.
+
+    A column built from a Python list is object dtype whatever it holds, so the numeric and
+    datetime ones have to be recovered — and recovered from the values, not from what the
+    column held in some earlier file. That distinction is the whole reason this is
+    inference: `stock.Plant` is int64 in one day's extract and object in the next, because
+    the second writes `0788` as text on 298 of its rows, and a dtype taken from the first
+    would strip the leading zero off every one of them.
+    """
+    values = series.dropna()
+    if values.empty:
         return series.astype(object)
+    if all(isinstance(v, pd.Timestamp) for v in values):
+        return pd.to_datetime(series)
+    if all(isinstance(v, bool) for v in values):
+        return series.astype(bool) if len(values) == len(series) else series
+    if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values):
+        numeric = pd.to_numeric(series, errors="coerce")
+        # pandas keeps an all-integer column as int64 only when nothing is missing.
+        if len(values) == len(series) and all(float(v).is_integer() for v in values):
+            return numeric.astype("int64")
+        return numeric.astype("float64")
+    return series.astype(object)
 
 
 class CellSources(GridSources):
@@ -1520,3 +1584,279 @@ class PostgresSources(GridSources):
         # Sorted here rather than in the query, so both backends settle the order the
         # same way. The query orders by the key only to page a stable set.
         return sales_ledger_order(_sales_ledger_dtypes(frame))
+
+
+# Where the read-back manifest lives. Generated by `tools/generate_dump_views.py` beside
+# the view DDL, because the two are the same knowledge pointed in opposite directions:
+# the DDL says which position becomes which column name, and this says which column name
+# was which header. It cannot be derived at refresh time — a cloud run has no `dumps/`
+# folder to read the headers off — so it is generated from the files and committed.
+DUMP_COLUMNS_FILE = Path(__file__).resolve().parents[1] / "config" / "dump_columns.json"
+
+_DUMP_COLUMNS: dict | None = None
+
+
+def dump_columns() -> dict:
+    """The read-back manifest, read once."""
+    global _DUMP_COLUMNS
+    if _DUMP_COLUMNS is None:
+        _DUMP_COLUMNS = json.loads(DUMP_COLUMNS_FILE.read_text(encoding="utf-8"))
+    return _DUMP_COLUMNS
+
+
+def paged(client, table: str, query: str, *, page: int = 1000) -> list[dict]:
+    """Every row a query selects, in pages the server will actually give.
+
+    PostgREST caps a response at 1,000 rows, server-side and **silently**: asking for
+    5,000 returns 1,000 with no error and no indication that anything was left. A loop
+    that stops when it gets fewer rows than it asked for is the only safe shape, and it
+    has already cost one refresh — 998 rows of `Bucketting` read as the whole master,
+    which failed the bucket-resolution floor and looked like a data problem.
+    """
+    rows: list[dict] = []
+    offset = 0
+    while True:
+        got = client.select(table, f"{query}&offset={offset}&limit={page}")
+        rows.extend(got)
+        if len(got) < page:
+            return rows
+        offset += len(got)
+
+
+def revive_number(value):
+    """A cell a *view* handed back as text, as the number the sheet actually held.
+
+    `dump_text` is how a view exposes a column that is not reliably numeric, and it is
+    lossy in exactly one way: a cell holding the *number* 788 and a cell holding the *text*
+    `0788` both come back as `'788'` and `'0788'`, and the same stock column holds both —
+    2,158 rows of one and 298 of the other. Left as text, every numeric column that shares
+    a sheet with a padded code changes type under the pipeline; converted blindly, `0788`
+    becomes 788 and a code that meant a plant stops joining to anything.
+
+    A round trip separates them exactly. `'788'` is the text of the number 788 and becomes
+    one; `'0788'` is not the text of any number and stays text. The same rule keeps
+    `00001`, `0000129663` and `000000000003502027` — SAP pads on some extracts and not
+    others — as the strings the reader produced.
+
+    This is **only** for the views. A table that stores the line as JSONB never lost the
+    distinction in the first place: `'8406'` is stored as a JSON string because that is
+    what the sheet held, and reviving it would invent a number the file never wrote.
+    """
+    if not isinstance(value, str):
+        return value
+    try:
+        whole = int(value)
+    except (TypeError, ValueError):
+        pass
+    else:
+        return whole if str(whole) == value else value
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return value
+    # `str` on a float is the shortest text that reads back as the same double, so this
+    # accepts `2.042` and `12.7` and refuses `2.0420`, `+3` and `1e3` — none of which a
+    # spreadsheet number would ever have been written as.
+    return number if str(number) == value else value
+
+
+_ISO_DATETIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?")
+_ISO_TIME = re.compile(r"\d{2}:\d{2}:\d{2}(\.\d+)?")
+
+
+def revive_moment(value):
+    """A date or a clock time that was stored as the ISO text of itself.
+
+    JSON has no date type, so `_storable` writes a Timestamp and a `time` as
+    `.isoformat()` on the way into a table. Coming back they are indistinguishable from
+    text — and a whole column of them read as text is not a small difference: every
+    `.dt` accessor downstream stops working, and a date comparison silently becomes a
+    string comparison, which orders `2026-1-9` after `2026-10-9`.
+
+    Told apart by the same round trip the numbers use, so a cell that genuinely held the
+    text `2026-07-14` — no time on it — is left exactly as it is.
+    """
+    if not isinstance(value, str):
+        return value
+    if _ISO_DATETIME.fullmatch(value):
+        stamp = pd.Timestamp(value)
+        return stamp if not pd.isna(stamp) and stamp.isoformat() == value else value
+    if _ISO_TIME.fullmatch(value):
+        try:
+            clock = time.fromisoformat(value)
+        except ValueError:
+            return value
+        return clock if clock.isoformat() == value else value
+    return value
+
+
+def restore_column(series: pd.Series, *, text: bool, entry: dict | None = None) -> pd.Series:
+    """A column read back out of a table, as the frame the pipeline was written against.
+
+    A pinned column stays text whatever it holds — that is what stops a material code
+    losing its last digit. A column the DDL typed as a date comes back as a bare
+    `YYYY-MM-DD` and is parsed on that authority rather than guessed at. Everything else
+    has its cells revived and its dtype *inferred* from the result, by the same inference
+    the grid read uses, so the two cannot disagree about when an all-integer column is
+    int64 and when one blank cell widens it to float64.
+
+    **What the table says a column is, is what it is.** That is the rule, and it is worth
+    stating because the alternative is tempting and wrong: a view column typed `text` is
+    read back as text even where today's file happens to hold numbers there, because the
+    type was declared once from the columns' meaning rather than re-guessed from whichever
+    extract arrived this morning. Guessing is what makes a column int64 on Tuesday and
+    object on Wednesday, and it is exactly what moving onto the tables is meant to end.
+
+    The single exception is the column a canonicaliser forced to text — a plant or a
+    material number. There, `text` is not a statement about the column, it is how
+    `plant_code` is given something to work on, and the column's real type is recorded
+    beside it. Those are revived, which is what keeps `788` a number and `0788` the string
+    it has to stay.
+    """
+    if text:
+        return as_text(series)
+    entry = entry or {}
+    if entry.get("kind") == "date":
+        return pd.to_datetime(series, errors="coerce")
+    revived = series.map(revive_moment)
+    if entry.get("sql_kind") == "text" and entry.get("kind") != "text":
+        revived = revived.map(revive_number)
+    return inferred_dtype(revived)
+
+
+class TableSources(PostgresSources):
+    """The frames the pipeline reads, taken from the dump tables rather than the grid.
+
+    Every uploaded dump lands in two places: `raw_rows`, cell for cell, which is the audit
+    trail; and a named table or view, which is what anybody querying the data would reach
+    for. `PostgresSources` reads the first. This reads the second, and the difference is
+    not cosmetic for the four dumps whose table *accumulates* — the transfer ledger holds
+    every line back to 8 July where the current upload holds only the month in progress,
+    and zmat holds every code SAP has ever extracted rather than only those in the newest
+    extract. Read off the grid, the pipeline sees the newest file and nothing else.
+
+    Two slots deliberately keep reading the grid, and neither is an omission:
+
+    - **`contract:*`** keeps no table at all. It is read with `header=None` because its
+      quarters are column offsets rather than named fields, so there are no column names
+      to give a table — see `SLOTS_WITHOUT_A_TABLE`.
+    - **the five sales slots** pour into one ledger keyed on the invoice line, where
+      `sales_q1` and today's dump are the same rows by design. No individual slot can be
+      read back out of it, and none needs to be: `sales_ledger()` reads the table already,
+      and has since the ledger existed. What the slots are still read for is a row count
+      in the run summary, and the code repository's optional `sales_history`.
+
+    The mapping back to the file's own headers is `config/dump_columns.json`, generated
+    beside the view DDL so that a renamed column cannot move under one without the other.
+    """
+
+    def _manifest(self, slot: str) -> dict | None:
+        return dump_columns().get(slot)
+
+    def available(self, slot: str) -> bool:
+        manifest = self._manifest(slot)
+        if manifest is None or manifest["storage"] == "view":
+            # A view is a window onto the current batch, so what makes it available is
+            # exactly what made the grid available: an upload that has not been superseded.
+            return super().available(slot)
+        # An accumulating table outlives every batch it was filled from. `transfers` is
+        # optional and its dump is not sent every day; the ledger is still there and is
+        # still what the pipeline should read.
+        self.spec(slot)
+        return bool(self.client.select(manifest["table"], "limit=1"))
+
+    def frame(self, slot: str, *, sheet: str | None = None) -> pd.DataFrame:
+        manifest = self._manifest(slot)
+        if manifest is None:
+            return super().frame(slot, sheet=sheet)
+        if manifest["storage"] == "view":
+            return self._view_frame(slot, manifest, sheet=sheet)
+        return self._accumulated_frame(slot, manifest)
+
+    def _view_frame(self, slot: str, manifest: dict, *, sheet: str | None) -> pd.DataFrame:
+        """A snapshot slot, out of the view over its current batch.
+
+        Ordered by `seq`, which is the row's position in the sheet — the same order the
+        grid read produces, and it has to be asked for: a view has no order of its own,
+        and several published fields are taken off whichever row of a group comes first.
+        """
+        spec = self.spec(slot)
+        wanted = [entry["column"] for entry in manifest["columns"]]
+        query = f"select=seq,{','.join(wanted)}&order=seq.asc"
+        if sheet is not None:
+            # The schedule keeps one current batch *per month sheet* — the uniqueness
+            # index is on `(slot, coalesce(sheet, ''))`, not on the slot — so its view can
+            # hold several months at once, one after another. Unfiltered, a run publishing
+            # August would read August's rows with July's concatenated onto them and
+            # nothing would say so.
+            #
+            # Quoted, because the sheet is `Schedule August` and a bare space in a URL is
+            # not a request at all — urllib refuses it outright, which is the good case.
+            query += f"&sheet=eq.{quote(sheet, safe='')}"
+        rows = paged(self.client, manifest["table"], query)
+
+        frame = pd.DataFrame(
+            [[row.get(entry["column"]) for entry in manifest["columns"]] for row in rows],
+            columns=[entry["header"] for entry in manifest["columns"]],
+        )
+        if frame.empty and sheet is not None and not rows:
+            raise SheetMissing(f"{manifest['table']} holds no rows for sheet {sheet!r}")
+        text = set(manifest["text_columns"]) | {str(c) for c in (spec.dtype or {})}
+        for entry in manifest["columns"]:
+            header = entry["header"]
+            frame[header] = restore_column(
+                frame[header], text=header in text, entry=entry
+            )
+        return frame.reset_index(drop=True)
+
+    @staticmethod
+    def _order(slot: str) -> str:
+        """The order this slot's rows are read back in.
+
+        The key by default, which is only there to make paging stable — PostgREST pages by
+        offset, and an unordered offset over a growing table can serve a row twice and skip
+        another. A slot that names `read_order` means it: zmat's rows are deduplicated
+        again inside the pipeline with `keep="first"`, so "first" has to be the sheet's
+        first and not whichever material code sorts lowest.
+        """
+        spec = table_for(slot)
+        columns = spec.read_order or spec.key
+        return ",".join(f"{column}.asc" for column in columns)
+
+    def _accumulated_frame(self, slot: str, manifest: dict) -> pd.DataFrame:
+        """An accumulating slot, out of the table that outlives its batches.
+
+        This is the read the whole exercise is for. `transfers` here is every line the
+        ledger has ever absorbed rather than the month the newest dump happens to carry,
+        and `bucketting`, `oem_key` and `zmat` are every code and customer ever mastered
+        rather than only those the newest workbook still mentions.
+        """
+        spec = self.spec(slot)
+        headers = [entry["header"] for entry in manifest["columns"]]
+        if manifest["storage"] == "typed":
+            wanted = [entry["column"] for entry in manifest["columns"]]
+            rows = paged(
+                self.client, manifest["table"],
+                f"select={','.join(wanted)}&order={self._order(slot)}",
+            )
+            grid = [[row.get(entry["column"]) for entry in manifest["columns"]]
+                    for row in rows]
+        else:
+            # The whole named line is in `row`, headers as the file wrote them. Only the
+            # *order* is lost — jsonb sorts its keys — which is why the manifest records
+            # it: the pipeline reads by name, but a frame whose columns have been
+            # reshuffled is a different frame to anything that compares two of them.
+            rows = paged(
+                self.client, manifest["table"],
+                f"select=row&order={self._order(slot)}",
+            )
+            grid = [[row["row"].get(header) for header in headers] for row in rows]
+
+        frame = pd.DataFrame(grid, columns=headers)
+        text = set(manifest["text_columns"]) | {str(c) for c in (spec.dtype or {})}
+        for entry in manifest["columns"]:
+            header = entry["header"]
+            # No `entry`: a JSONB row never lost the distinction between the number
+            # 8406 and the text `8406`, so there is nothing here to revive or declare.
+            frame[header] = restore_column(frame[header], text=header in text)
+        return frame.reset_index(drop=True)

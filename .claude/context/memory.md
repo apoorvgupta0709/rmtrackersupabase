@@ -11,9 +11,9 @@ is now three ignore rules deep, one anchored pattern away from being wrong, and 
 repo is served by two public deployments. The rule stands on that, not on the file
 being reachable today.
 
-_Last updated: 2026-08-14 (a named table or view per dump source: the transfer ledger, the
-bucketing / OEM / material masters, thirteen snapshot views, canonical plant and material
-codes, and row-level pruning that paid for all of it)._
+_Last updated: 2026-08-14 (the refresh reads the dump tables now, not the stored cell grid —
+which moved the transfer figures and nothing else, after retyping sixteen view columns that
+were unpadding SAP codes and rekeying zmat on the row rather than the code and plant)._
 
 ## What this is
 
@@ -717,13 +717,46 @@ that the package still sits where Claude Code looks — the repo root is
   `rows_pruned_at` records it, so a reclaimed batch never reads as a dump that arrived
   empty. Live: 395 MB before this work → 439 with the tables → **376 MB, 75% of the free
   plan** after.
-- **The pipeline reads none of the new tables.** `tsl_sales` is still the only one it
-  reads, exactly as before; everything else is additive and cannot move a number. A dry
-  run after all of it read 23 slots and finished WARN on the same three warnings. Moving
-  any read onto a dump table is phase 2 and needs a frame → records → frame identity
-  harness first: `_sales_ledger_dtypes` exists because the JSONB round trip lost
-  `MATERAIL NUMBER`'s text-ness and `BILLING  DATE`'s datetime-ness, and each slot would
-  need its own.
+- **The refresh now reads the dump tables, not the stored cell grid.**
+  `refresh_from_supabase.py` builds a `TableSources`, so every slot comes out of its table
+  or view; `PostgresSources` still reads the grid and is what the harnesses compare
+  against. The offline `dumps/` run is untouched. For the thirteen snapshot slots the two
+  are the same rows and the switch changed nothing; for the four accumulating ones beyond
+  sales it changed what the pipeline can see, and **only the transfer figures moved**: 220
+  lines → 255, 1,898.021 → 2,128.824 MT, in transit 415.952 → 438.623. Everything else in
+  `data.json` is identical, proved before the switch by
+  `tools/compare_pipeline_backends.py`, which runs the pipeline both ways and diffs the
+  payload. `tools/compare_table_sources.py` does the same one frame at a time.
+- **What the table says a column is, is what it is** — the rule the read back settles on.
+  A view column typed `text` reads back as text even where today's file holds numbers
+  there; re-guessing from whichever extract arrived this morning is what makes a column
+  int64 on Tuesday and object on Wednesday. Two exceptions, both round trips: a
+  canonicalised `_raw` column, where `text` is only how `plant_code` is given something to
+  work on, so `'788'` becomes 788 and `'0788'` stays a string; and an ISO moment, because
+  JSON has no date type — `2026-07-14T00:00:00` round-trips and becomes a Timestamp,
+  `2026-07-14` does not and stays text. `config/dump_columns.json` carries the mapping
+  from a view's snake-case name back to the file's own header, generated beside the DDL by
+  `tools/generate_dump_views.py` because a cloud run has no `dumps/` to read headers off.
+- **A view's column types are baked from one file, and that is its one silent failure.**
+  `dumps/yf65.xlsx` writes the accounting document number as a *number*, so the view was
+  generated `dump_numeric`; the uploaded `yf65.XLSX` writes it zero-padded, `0071029066`,
+  and the padding is stripped **in SQL**, where no read can undo it. It reached the page as
+  `DP 36388067` against a true `DP 0036388067`. Sixteen columns across five slots had it,
+  `000000000110102155` reading as 110102155 and `00001` as 1. Identifier columns are now
+  typed by name in `generate_dump_views.TEXT_COLUMNS`, and
+  **`tools/compare_table_sources.py --drift` is what finds the next one** — it asks of
+  every column of every slot which are typed numeric while the upload holds padded text.
+  A view column cannot change type in place, so each fix is a `drop`+`create`.
+- **`dump_zmat` is keyed on the row's content, not on `(code, plant)`.** That pair is
+  coarser than the data: it dropped 1,104 rows the file carries, which read as noise — an
+  end finish and a surface finish swapped, `10` against `010` — and are not, because the
+  pipeline identifies a material by code, description and an attribute key over both
+  diameters, thickness, specification and both finishes. Collapsed, nine stock rows
+  stopped resolving to a bucket, the STR plan lost two lines and a long-length SKU's
+  signed-off tonnage read 4.925 MT against a true 7.205. Third key part is a sha1 of the
+  row's stored values (`sources._row_digest`); `source_seq` rides along and is the read
+  order, because the pipeline deduplicates again with `keep="first"`. 64,697 rows now
+  against 64,074, the 481 byte-identical repeats still collapsing.
 - **TSL sales is one accumulating table, `public.tsl_sales`, keyed on billing document
   and billing item.** Sales is the one input that accumulates where every other dump
   supersedes, because a billed line is a fact with a date on it and the daily dump holds
@@ -831,8 +864,11 @@ that the package still sits where Claude Code looks — the repo root is
   rate is set some other way.
 
 - **Migration filenames in the repo have drifted from the versions actually applied**, and
-  the 14 Aug work widened the gap deliberately: production carries **37**, the repo 19
-  files. The MCP tool takes SQL rather than a file, and the views were applied in batches
+  the 14 Aug work widened the gap deliberately: production carries **45**, the repo 19
+  files. Eight of those forty-five are the retyped views and the zmat rekey, applied one
+  statement at a time and *not* written to a repo file of their own — the view DDL is
+  regenerated from `tools/generate_dump_views.py --write`, which is the reproducible
+  definition, and `20260814123112` is the last of them. The MCP tool takes SQL rather than a file, and the views were applied in batches
   small enough to paste accurately after two transcription slips, so one repo file
   (`20260814070000_a_view_per_snapshot_dump.sql`) corresponds to fourteen applied
   versions, `dump_cell_helpers_and_plant_code` through

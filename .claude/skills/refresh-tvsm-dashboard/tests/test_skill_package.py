@@ -1627,6 +1627,191 @@ def test_the_refresh_absorbs_before_it_reads_the_ledger():
     )
 
 
+def test_the_refresh_reads_the_dump_tables_not_the_cell_grid():
+    """The whole point of putting the dumps in tables, asserted at the one line that does it.
+
+    `TableSources` and `PostgresSources` serve the same slots and differ in where they
+    read them from, so swapping one for the other changes nothing that raises and
+    everything that matters: read off the grid, the pipeline sees the newest upload of the
+    transfer dump — the month in progress — instead of every line the ledger has absorbed
+    since 8 July. Measured at the switch: 220 transfer lines against 255, 1,898 MT against
+    2,129, and 416 MT in transit against 439.
+
+    Asserted on the source text for the same reason
+    `test_the_refresh_absorbs_before_it_reads_the_ledger` is: nothing else in the suite
+    reaches this line, because the offline `dumps/` run uses `ExcelSources` and never
+    constructs either of them.
+    """
+    script = (SKILL_ROOT / "scripts" / "refresh_from_supabase.py").read_text(
+        encoding="utf-8"
+    )
+    assert "sources_module.TableSources(" in script, (
+        "the refresh is reading the stored cell grid again, so every accumulating dump "
+        "is back to whatever the newest upload happens to carry"
+    )
+    assert "sources_module.PostgresSources(client" not in script
+
+
+def test_every_slot_with_a_table_can_be_read_back_out_of_it():
+    """A table nothing can read back is a copy of the dump, not a source of it.
+
+    The pipeline addresses every column by the header the file wrote — `CUSTOMER  CD`
+    with two spaces, `Material\xa0No` with a non-breaking one, `Chamferring ` with a
+    trailing space — and the views name their columns in snake case because an Excel
+    header is not an identifier. `config/dump_columns.json` is the mapping between the
+    two, and a slot missing from it is a slot the refresh silently falls back to reading
+    off the cell grid.
+
+    The two exemptions are exemptions on purpose. `contract:*` keeps no table at all — it
+    is read with `header=None` because its quarters are column offsets, so there are no
+    names to map. The five sales slots pour into one ledger keyed on the invoice line,
+    where `sales_q1` and today's dump are the same rows by design; `sales_ledger()` reads
+    that table and no individual slot can be read back out of it.
+    """
+    load_refresh_module()
+    import sources
+
+    manifest = sources.dump_columns()
+    for slot in all_input_slots():
+        spec = sources.table_for(slot)
+        if spec is None or slot in sources.SALES_LEDGER_SLOTS:
+            continue
+        if slot == "schedule_supplement":
+            # Retired: the owner's v15 workbook carries every customer, so there is no
+            # supplement to read and nothing in `dumps/` to name its columns from.
+            continue
+        assert slot in manifest, (
+            f"{slot!r} keeps its rows in {spec.table} and nothing says how to read them "
+            f"back, so the refresh would quietly read the cell grid instead"
+        )
+        assert manifest[slot]["table"] == spec.table
+        assert manifest[slot]["columns"], f"{slot!r} maps no columns"
+
+
+def test_a_view_never_types_an_identifier_as_a_number():
+    """The one thing a view gets wrong that no read can put right.
+
+    A column is typed from one file in `dumps/`, once. `yf65.xlsx` there writes the
+    accounting document number as a *number*, so the view was written `dump_numeric` —
+    and the uploaded `yf65.XLSX` writes the same column as `0071029066`. The padding is
+    stripped in SQL, before anything can read it, and it reached the page: the overdue
+    drill-down showed `DP 36388067` where the invoice is `DP 0036388067`, in a document
+    people paste into a mail. The order book and both sign-off sheets had the same fault
+    on ten more columns — `000000000110102155` read as 110102155, `00001` as 1, `056`
+    as 56.
+
+    So the identifier columns are typed by name rather than by whichever file was to hand,
+    and this holds the generated migration to it. `tools/compare_table_sources.py --drift`
+    is what finds the next one, against the uploads actually held.
+    """
+    sys.path.insert(0, str(REPO_ROOT / "tools"))
+    import generate_dump_views
+
+    migration = snapshot_view_migration()
+    for name in sorted(generate_dump_views.TEXT_COLUMNS):
+        numeric = f"public.dump_numeric(r.row -> "
+        for line in migration.splitlines():
+            if line.strip().endswith(f"as {name},") or line.strip().endswith(f"as {name}"):
+                assert numeric not in line, (
+                    f"{name!r} is an identifier and this view reads it as a number, "
+                    f"which strips the zero padding SAP writes and cannot be undone"
+                )
+
+
+def test_a_number_revives_out_of_a_view_and_a_padded_code_does_not():
+    """`dump_text` collapses the number 788 and the text `0788`; this is what separates them.
+
+    Both come back as text, and the same stock column holds both — 2,158 rows of one and
+    298 of the other. Left as text, every numeric column that shares a sheet with a padded
+    code changes type under the pipeline; converted blindly, `0788` becomes 788 and a code
+    that meant a plant stops joining to anything.
+    """
+    load_refresh_module()
+    import sources
+
+    assert sources.revive_number("788") == 788
+    assert sources.revive_number("2.042") == 2.042
+    assert sources.revive_number("-3") == -3
+    # A code, and it stays one. Every shape SAP actually pads in.
+    assert sources.revive_number("0788") == "0788"
+    assert sources.revive_number("00001") == "00001"
+    assert sources.revive_number("000000000003502027") == "000000000003502027"
+    # Not the shortest text of any float, so not a number a spreadsheet wrote.
+    assert sources.revive_number("2.0420") == "2.0420"
+    assert sources.revive_number("1e3") == "1e3"
+    assert sources.revive_number("+3") == "+3"
+    assert sources.revive_number("ERW 1-FC") == "ERW 1-FC"
+    assert sources.revive_number(None) is None
+    assert sources.revive_number(6) == 6
+
+
+def test_a_date_revives_out_of_a_table_and_the_text_of_one_does_not():
+    """JSON has no date, so `_storable` writes a Timestamp as its own ISO text.
+
+    Coming back it is indistinguishable from a cell that held that text — and a whole
+    column of dates read as text is not a small difference: every `.dt` accessor
+    downstream stops working and a date comparison silently becomes a string comparison,
+    which orders `2026-1-9` after `2026-10-9`. The round trip is what tells them apart.
+    """
+    load_refresh_module()
+    import pandas as pd
+    from datetime import time as clock
+
+    import sources
+
+    assert sources.revive_moment("2026-07-14T00:00:00") == pd.Timestamp("2026-07-14")
+    assert sources.revive_moment("17:55:00") == clock(17, 55)
+    # A cell that really did hold this text: no time on it, so it is not what
+    # `.isoformat()` writes and it is left exactly as it came.
+    assert sources.revive_moment("2026-07-14") == "2026-07-14"
+    assert sources.revive_moment("TUB-O-N-25.4") == "TUB-O-N-25.4"
+    assert sources.revive_moment(None) is None
+
+
+def test_zmat_is_keyed_on_the_row_and_not_just_the_code_and_plant():
+    """zmat has no natural key, so the row's own content is the third part of it.
+
+    Keyed on `(material_code, plant)` alone the table dropped 1,104 real rows. They looked
+    like noise — an end finish and a surface finish swapped, a specification written `10`
+    on one row and `010` on the next — and they are not: the pipeline identifies a
+    material by its code, its description and an attribute key built from both diameters,
+    the thickness, the specification and both finishes, so two rows that pair calls the
+    same are two different materials to everything downstream.
+
+    Measured, reading the pipeline off the table against off the sheet: nine stock rows
+    stopped resolving to a bucket, the STR plan lost two lines, and a long-length SKU's
+    signed-off tonnage read 4.925 MT against a true 7.205.
+    """
+    load_refresh_module()
+    import pandas as pd
+
+    import sources
+
+    def row(**overrides):
+        line = {column: None for _, column, _ in sources.ZMAT_COLUMNS}
+        line.update({"Column1": "3501105", "PLANT": "0788",
+                     "MATERIAL DESCRIPTION": "TUB-O-N-25.4"})
+        line.update(overrides)
+        return line
+
+    frame = pd.DataFrame([
+        row(**{"MATERIAL END FINISH": "PE", "MATERIAL SURFACE FINISH": "AW"}),
+        row(**{"MATERIAL END FINISH": "AW", "MATERIAL SURFACE FINISH": "PE"}),
+        # Byte-identical to the first, and this one really is a repeat.
+        row(**{"MATERIAL END FINISH": "PE", "MATERIAL SURFACE FINISH": "AW"}),
+    ])
+    keyed = sources.zmat_keys(frame)
+    assert len(keyed) == 2, (
+        "two rows differing in end and surface finish are two materials to the pipeline; "
+        "collapsing them is what cost nine stock resolutions"
+    )
+    assert set(sources.TABLES["zmat"].key) == {"material_code", "plant", "row_digest"}
+    # The sheet's own order, kept, because the pipeline deduplicates again with
+    # `keep="first"` and "first" has to mean the row the sheet wrote first.
+    assert sources.TABLES["zmat"].read_order == ("source_seq",)
+    assert list(keyed["source_seq"]) == [0, 1]
+
+
 def test_an_empty_sales_ledger_stops_the_refresh():
     """And says which read came back empty, rather than which column went missing.
 
@@ -1943,7 +2128,7 @@ def test_zmat_is_keyed_on_the_code_and_the_plant_it_is_extended_at():
     load_refresh_module()
     import sources
 
-    assert sources.TABLES["zmat"].key == ("material_code", "plant")
+    assert sources.TABLES["zmat"].key[:2] == ("material_code", "plant")
     assert sources.SLOTS["zmat"].key_column == "Column1", (
         "the read spec's key column is the code alone, which is why the table cannot "
         "take its key from there"
@@ -1953,12 +2138,26 @@ def test_zmat_is_keyed_on_the_code_and_the_plant_it_is_extended_at():
 def test_zmat_is_deduplicated_in_frame_order_and_not_by_the_database():
     """No column combination in this file is unique, so somebody has to choose.
 
-    480 rows are byte-identical repeats of another row, and `(Column1, PLANT)` still
-    leaves 1,104 over — pairs differing only in noise. Left to
+    480 rows are byte-identical repeats of another row. Left to
     `resolution=ignore-duplicates`, PostgREST would resolve against whatever happened to
-    share a 2,000-row chunk, so which of two near-identical rows survived would move the
-    day the file gains a row above them. Deduplicating here makes it frame order, which
-    is the order the file was written in.
+    share a 2,000-row chunk, so which of two identical rows survived would move the day
+    the file gains a row above them. Deduplicating here makes it frame order, which is
+    the order the file was written in.
+
+    **What is deduplicated changed on 14 August, and this test changed with it.** It used
+    to assert that two rows sharing a code and a plant collapsed to the first — including
+    the pair below, which differ in their description. That was wrong, and wrong in a way
+    only visible from the far end: `(Column1, PLANT)` leaves 1,104 rows over beyond the
+    byte-identical ones, and the pipeline identifies a material by its code, its
+    description and an attribute key built from both diameters, the thickness, the
+    specification and both finishes. Two rows that pair calls the same are two different
+    materials to all of it. Collapsed, nine stock rows stopped resolving to a bucket, the
+    STR plan lost two lines, and a long-length SKU's signed-off tonnage read 4.925 MT
+    against a true 7.205.
+
+    So the third part of the key is a digest of the row's own content. Byte-identical
+    repeats still collapse — that is all a digest can do — and anything the file wrote
+    differently is kept.
     """
     load_refresh_module()
     import sources
@@ -1968,14 +2167,18 @@ def test_zmat_is_deduplicated_in_frame_order_and_not_by_the_database():
         # Same code at two plants: both are real and both must survive.
         {"Column1": 3406677, "PLANT": 56,  "MATERIAL DESCRIPTION": "TUB-A"},
         {"Column1": 3406677, "PLANT": 788, "MATERIAL DESCRIPTION": "TUB-A"},
-        # Same code and plant twice, differing in noise: the first wins, every time.
+        # Same code and plant, different description: two materials, both kept.
         {"Column1": 249132, "PLANT": 789, "MATERIAL DESCRIPTION": "TUB-B"},
+        {"Column1": 249132, "PLANT": 789, "MATERIAL DESCRIPTION": "TUB-B-CORRECTED"},
+        # And a byte-identical repeat of the row above it, which is not a material.
         {"Column1": 249132, "PLANT": 789, "MATERIAL DESCRIPTION": "TUB-B-CORRECTED"},
     ])
     keyed = sources.zmat_keys(frame)
-    assert len(keyed) == 3, "the plant fan-out is real and must not be collapsed"
-    assert list(keyed["plant"]) == ["56", "788", "789"]
-    assert list(keyed["MATERIAL DESCRIPTION"])[-1] == "TUB-B", "frame order, first wins"
+    assert len(keyed) == 4, "only the byte-identical repeat is a repeat"
+    assert list(keyed["plant"]) == ["56", "788", "789", "789"]
+    assert list(keyed["MATERIAL DESCRIPTION"]) == [
+        "TUB-A", "TUB-A", "TUB-B", "TUB-B-CORRECTED",
+    ], "frame order, first wins"
 
     # Twice over the same frame gives the same answer, which is what "deterministic" means
     # here and what `ignore-duplicates` could not promise.

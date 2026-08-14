@@ -69,6 +69,55 @@ Run the package checks with:
 10. Never let anything but `index.html`, `data.json` and `access.json` reach the Vercel deployment. The GitHub repository is private; the deployment is not, and serves whatever it receives at a guessable URL with no authentication. `.vercelignore` holds `dumps/` and `.claude/` out of it — `dumps/` above all, which carries sales transactions, receivables ageing and the customer contract prices that no non-admin account is granted.
 11. Report the as-of date, status, schedule MT, sales MT, open balance MT, critical/low bucket counts, mapping rates, high-age tonnage at month end, unbacked 4731 CTL tonnage, ancillary overdue, and any warnings.
 
+## Where the cloud refresh reads its inputs
+
+The workflow above is the offline run: files into a directory, `refresh_dashboard.py`
+over them. The scheduled refresh does not work that way and has not since 10 August —
+`refresh_from_supabase.py` hands the same pipeline a different source of frames.
+
+Since 14 August that source is the **dump tables**, not the stored cell grid. Every upload
+still lands in `raw_batches`/`raw_rows` cell for cell, which is the audit trail; it also
+lands in a named table or view, and that is what the refresh reads.
+
+For the thirteen **snapshot** dumps the two are the same rows — a view over the current
+batch — and the switch changes nothing. For the five that **accumulate** it changes what
+the pipeline can see:
+
+| Table | What it adds over the newest upload |
+|---|---|
+| `tsl_sales` | every invoice line ever uploaded, not the month in progress |
+| `tsl_transfers` | every transfer line since 8 July — 1,088 against the newest dump's 987 |
+| `dump_bucketing`, `dump_oem_key` | a code or customer the newest workbook omits is not thereby forgotten |
+| `dump_zmat` | every code × plant SAP has ever extracted |
+
+Only the transfer figures moved when this was switched: 220 lines to 255, 1,898.021 MT to
+2,128.824, in-transit 415.952 MT to 438.623. Everything else in `data.json` is identical,
+which was proved before the switch rather than after.
+
+Two tools exist to keep it that way, and both want running after any change to a read
+spec, a view, or `sources.py`:
+
+```bash
+python3 tools/compare_table_sources.py           # every slot read both ways, frame to frame
+python3 tools/compare_table_sources.py --drift   # which view columns are unpadding a code
+python3 tools/compare_pipeline_backends.py       # the whole pipeline both ways, diffing data.json
+```
+
+`--drift` is the one that catches the failure nothing else does. A view's column types are
+baked from one file in `dumps/`; when the next file writes that column as zero-padded text
+instead, `dump_numeric` strips the padding in SQL and nothing errors. It reached the page
+once as `DP 36388067` against a true `DP 0036388067`. Anything `--drift` names belongs in
+`generate_dump_views.TEXT_COLUMNS`, and the views need regenerating and re-applying:
+
+```bash
+python3 tools/generate_dump_views.py --write     # the view DDL and config/dump_columns.json
+python3 tools/generate_dump_views.py --check     # wired into pytest; fails on drift
+```
+
+A view column cannot change type in place, so a retyped view is a `drop` and a `create`,
+not a `create or replace`. Nothing in this repository applies a migration — read the
+applied list with `list_migrations`, never the directory.
+
 ## Tabs
 
 The dashboard publishes eleven views, in this order: Customer tracker, Megh Steel sales,

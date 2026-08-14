@@ -1,0 +1,4299 @@
+{
+  "bucketting": {
+    "columns": [
+      {
+        "dtype": "float64",
+        "header": "Material Codes"
+      },
+      {
+        "dtype": "float64",
+        "header": "OD"
+      },
+      {
+        "dtype": "float64",
+        "header": "ID"
+      },
+      {
+        "dtype": "float64",
+        "header": "Thickness"
+      },
+      {
+        "dtype": "float64",
+        "header": "Length"
+      },
+      {
+        "dtype": "object",
+        "header": "Grade"
+      },
+      {
+        "dtype": "object",
+        "header": "FC/PE"
+      },
+      {
+        "dtype": "object",
+        "header": "Annealed"
+      },
+      {
+        "dtype": "object",
+        "header": "Bucket"
+      },
+      {
+        "dtype": "object",
+        "header": "LL or CTL"
+      },
+      {
+        "dtype": "object",
+        "header": "CTL Bucket"
+      },
+      {
+        "dtype": "float64",
+        "header": "kG/nos"
+      }
+    ],
+    "storage": "row_json",
+    "table": "dump_bucketing",
+    "text_columns": []
+  },
+  "oem_key": {
+    "columns": [
+      {
+        "dtype": "object",
+        "header": "Customer "
+      },
+      {
+        "dtype": "object",
+        "header": "OEM"
+      },
+      {
+        "dtype": "object",
+        "header": "CAM"
+      }
+    ],
+    "storage": "row_json",
+    "table": "dump_oem_key",
+    "text_columns": []
+  },
+  "orders:hk_so": {
+    "columns": [
+      {
+        "column": "cam",
+        "dtype": "object",
+        "header": "CAM",
+        "kind": "text",
+        "position": 0
+      },
+      {
+        "column": "remarks",
+        "dtype": "object",
+        "header": "Remarks",
+        "kind": "text",
+        "position": 1
+      },
+      {
+        "column": "zone",
+        "dtype": "object",
+        "header": "ZONE",
+        "kind": "text",
+        "position": 2
+      },
+      {
+        "column": "pt_plant",
+        "dtype": "object",
+        "header": "PT-Plant",
+        "kind": "text",
+        "position": 3
+      },
+      {
+        "column": "segment",
+        "dtype": "object",
+        "header": "Segment",
+        "kind": "text",
+        "position": 4
+      },
+      {
+        "column": "catg",
+        "dtype": "object",
+        "header": "CATG",
+        "kind": "text",
+        "position": 5
+      },
+      {
+        "canonical_column": "plant",
+        "canonicaliser": "plant_code",
+        "column": "plant_raw",
+        "dtype": "int64",
+        "header": "PLANT",
+        "kind": "numeric",
+        "position": 6,
+        "sql_kind": "text"
+      },
+      {
+        "column": "order_date",
+        "dtype": "datetime64[ns]",
+        "header": "ORDER DATE",
+        "kind": "date",
+        "position": 7
+      },
+      {
+        "column": "po_date",
+        "dtype": "datetime64[ns]",
+        "header": "PO DATE",
+        "kind": "date",
+        "position": 8
+      },
+      {
+        "column": "sales_doc_type",
+        "dtype": "object",
+        "header": "SALES DOC TYPE",
+        "kind": "text",
+        "position": 9
+      },
+      {
+        "column": "ageing_days",
+        "dtype": "int64",
+        "header": "Ageing Days",
+        "kind": "numeric",
+        "position": 10
+      },
+      {
+        "column": "creator",
+        "dtype": "object",
+        "header": "CREATOR",
+        "kind": "text",
+        "position": 11
+      },
+      {
+        "column": "sales_order_no",
+        "dtype": "int64",
+        "header": "SALES ORDER NO.",
+        "kind": "numeric",
+        "position": 12
+      },
+      {
+        "column": "sales_document_item",
+        "dtype": "int64",
+        "header": "Sales Document Item",
+        "kind": "numeric",
+        "position": 13
+      },
+      {
+        "column": "po_no",
+        "dtype": "object",
+        "header": "PO NO.",
+        "kind": "text",
+        "position": 14
+      },
+      {
+        "column": "city_code_description",
+        "dtype": "object",
+        "header": "City Code Description",
+        "kind": "text",
+        "position": 15
+      },
+      {
+        "column": "sales_office",
+        "dtype": "object",
+        "header": "SALES OFFICE",
+        "kind": "text",
+        "position": 16
+      },
+      {
+        "column": "zone2",
+        "dtype": "object",
+        "header": "ZONE2",
+        "kind": "text",
+        "position": 17
+      },
+      {
+        "column": "ship_to_party",
+        "dtype": "int64",
+        "header": "SHIP TO PARTY",
+        "kind": "text",
+        "position": 18
+      },
+      {
+        "column": "sold_cust_name",
+        "dtype": "object",
+        "header": "SOLD. CUST. NAME",
+        "kind": "text",
+        "position": 19
+      },
+      {
+        "canonical_column": "material_number",
+        "canonicaliser": "material_code",
+        "column": "material_number_raw",
+        "dtype": "object",
+        "header": "Material Number",
+        "kind": "text",
+        "position": 20,
+        "sql_kind": "text"
+      },
+      {
+        "column": "material_desc",
+        "dtype": "object",
+        "header": "MATERIAL DESC.",
+        "kind": "text",
+        "position": 21
+      },
+      {
+        "column": "bal_for_prod_roll_mt",
+        "dtype": "float64",
+        "header": "BAL FOR PROD/ROLL(MT)",
+        "kind": "numeric",
+        "position": 22
+      }
+    ],
+    "storage": "view",
+    "table": "dump_orders_hk_so",
+    "text_columns": [
+      "Material Number"
+    ]
+  },
+  "orders:hk_str": {
+    "columns": [
+      {
+        "column": "cam",
+        "dtype": "object",
+        "header": "CAM",
+        "kind": "text",
+        "position": 0
+      },
+      {
+        "column": "remarks",
+        "dtype": "object",
+        "header": "REMARKS",
+        "kind": "text",
+        "position": 1
+      },
+      {
+        "column": "zone",
+        "dtype": "object",
+        "header": "ZONE",
+        "kind": "text",
+        "position": 2
+      },
+      {
+        "column": "pt_plant",
+        "dtype": "object",
+        "header": "PT-PLANT",
+        "kind": "text",
+        "position": 3
+      },
+      {
+        "column": "str_date",
+        "dtype": "datetime64[ns]",
+        "header": "STR Date",
+        "kind": "date",
+        "position": 4
+      },
+      {
+        "column": "mrk_cust_name",
+        "dtype": "object",
+        "header": "Mrk. Cust. Name",
+        "kind": "text",
+        "position": 5
+      },
+      {
+        "column": "catg2",
+        "dtype": "object",
+        "header": "CATG2",
+        "kind": "text",
+        "position": 6
+      },
+      {
+        "column": "material_description",
+        "dtype": "object",
+        "header": "Material Description",
+        "kind": "text",
+        "position": 7
+      },
+      {
+        "column": "actual_btp_mt",
+        "dtype": "float64",
+        "header": "Actual BTP (MT)",
+        "kind": "numeric",
+        "position": 8
+      },
+      {
+        "column": "despatch_quantity",
+        "dtype": "float64",
+        "header": "Despatch Quantity",
+        "kind": "numeric",
+        "position": 9
+      },
+      {
+        "column": "bal_to_desp_str_qty_despatch_qty",
+        "dtype": "float64",
+        "header": "Bal to Desp(STR QTY-Despatch QTY)",
+        "kind": "numeric",
+        "position": 10
+      }
+    ],
+    "storage": "view",
+    "table": "dump_orders_hk_str",
+    "text_columns": [
+      "MATERIAL NO",
+      "MATL_NO",
+      "Material Code",
+      "Material Number"
+    ]
+  },
+  "orders:jsr": {
+    "columns": [
+      {
+        "column": "typ",
+        "dtype": "object",
+        "header": "TYP",
+        "kind": "text",
+        "position": 0
+      },
+      {
+        "column": "auart",
+        "dtype": "object",
+        "header": "AUART",
+        "kind": "text",
+        "position": 1
+      },
+      {
+        "column": "mrpi",
+        "dtype": "object",
+        "header": "MRPI",
+        "kind": "text",
+        "position": 2
+      },
+      {
+        "column": "mfgpl",
+        "dtype": "int64",
+        "header": "MFGPL",
+        "kind": "text",
+        "position": 3
+      },
+      {
+        "column": "creator",
+        "dtype": "object",
+        "header": "CREATOR",
+        "kind": "text",
+        "position": 4
+      },
+      {
+        "column": "custno",
+        "dtype": "int64",
+        "header": "CUSTNO",
+        "kind": "text",
+        "position": 5
+      },
+      {
+        "column": "zone",
+        "dtype": "object",
+        "header": "ZONE",
+        "kind": "text",
+        "position": 6
+      },
+      {
+        "column": "customer",
+        "dtype": "object",
+        "header": "CUSTOMER",
+        "kind": "text",
+        "position": 7
+      },
+      {
+        "column": "destination",
+        "dtype": "object",
+        "header": "DESTINATION",
+        "kind": "text",
+        "position": 8
+      },
+      {
+        "column": "shipto",
+        "dtype": "int64",
+        "header": "SHIPTO",
+        "kind": "text",
+        "position": 9
+      },
+      {
+        "column": "age",
+        "dtype": "int64",
+        "header": "AGE",
+        "kind": "numeric",
+        "position": 10
+      },
+      {
+        "column": "dlvblk",
+        "dtype": "object",
+        "header": "DLVBLK",
+        "kind": "text",
+        "position": 11
+      },
+      {
+        "column": "blgblk",
+        "dtype": "object",
+        "header": "BLGBLK",
+        "kind": "text",
+        "position": 12
+      },
+      {
+        "column": "order_no",
+        "dtype": "int64",
+        "header": "ORDER_NO",
+        "kind": "numeric",
+        "position": 13
+      },
+      {
+        "column": "item_no",
+        "dtype": "int64",
+        "header": "ITEM_NO",
+        "kind": "text",
+        "position": 14
+      },
+      {
+        "canonical_column": "matl_no",
+        "canonicaliser": "material_code",
+        "column": "matl_no_raw",
+        "dtype": "object",
+        "header": "MATL_NO",
+        "kind": "text",
+        "position": 15,
+        "sql_kind": "text"
+      },
+      {
+        "column": "description",
+        "dtype": "object",
+        "header": "DESCRIPTION",
+        "kind": "text",
+        "position": 16
+      },
+      {
+        "column": "cam",
+        "dtype": "object",
+        "header": "CAM",
+        "kind": "text",
+        "position": 17
+      },
+      {
+        "column": "remarks",
+        "dtype": "object",
+        "header": "Remarks",
+        "kind": "text",
+        "position": 18
+      },
+      {
+        "column": "bal_to_desp",
+        "dtype": "float64",
+        "header": "Bal to Desp",
+        "kind": "numeric",
+        "position": 19
+      }
+    ],
+    "storage": "view",
+    "table": "dump_orders_jsr",
+    "text_columns": [
+      "MATL_NO"
+    ]
+  },
+  "receivables": {
+    "columns": [
+      {
+        "column": "customer_code",
+        "dtype": "int64",
+        "header": "Customer Code",
+        "kind": "text",
+        "position": 0
+      },
+      {
+        "column": "customer_name",
+        "dtype": "object",
+        "header": "Customer Name",
+        "kind": "text",
+        "position": 1
+      },
+      {
+        "column": "customer_pan",
+        "dtype": "object",
+        "header": "Customer PAN",
+        "kind": "text",
+        "position": 2
+      },
+      {
+        "column": "nature",
+        "dtype": "object",
+        "header": "Nature",
+        "kind": "text",
+        "position": 3
+      },
+      {
+        "column": "document_number",
+        "dtype": "int64",
+        "header": "Document Number",
+        "kind": "text",
+        "position": 4
+      },
+      {
+        "column": "reference",
+        "dtype": "object",
+        "header": "Reference",
+        "kind": "text",
+        "position": 5
+      },
+      {
+        "column": "posting_date",
+        "dtype": "datetime64[ns]",
+        "header": "Posting Date",
+        "kind": "date",
+        "position": 6
+      },
+      {
+        "column": "document_date",
+        "dtype": "datetime64[ns]",
+        "header": "Document Date",
+        "kind": "date",
+        "position": 7
+      },
+      {
+        "column": "doc_type",
+        "dtype": "object",
+        "header": "Doc Type",
+        "kind": "text",
+        "position": 8
+      },
+      {
+        "column": "sp_gl_ind",
+        "dtype": "object",
+        "header": "Sp. GL Ind",
+        "kind": "text",
+        "position": 9
+      },
+      {
+        "column": "doc_amount",
+        "dtype": "float64",
+        "header": "Doc Amount",
+        "kind": "numeric",
+        "position": 10
+      },
+      {
+        "column": "cleared_amount",
+        "dtype": "float64",
+        "header": "Cleared Amount",
+        "kind": "numeric",
+        "position": 11
+      },
+      {
+        "column": "open_amount",
+        "dtype": "float64",
+        "header": "Open Amount",
+        "kind": "numeric",
+        "position": 12
+      },
+      {
+        "column": "due_status",
+        "dtype": "object",
+        "header": "Due Status",
+        "kind": "text",
+        "position": 13
+      },
+      {
+        "column": "net_due_date",
+        "dtype": "datetime64[ns]",
+        "header": "Net Due Date",
+        "kind": "date",
+        "position": 14
+      },
+      {
+        "column": "credit_control_area",
+        "dtype": "int64",
+        "header": "Credit Control Area",
+        "kind": "text",
+        "position": 15
+      },
+      {
+        "column": "business_area",
+        "dtype": "int64",
+        "header": "Business Area",
+        "kind": "text",
+        "position": 16
+      },
+      {
+        "column": "sales_office_branch",
+        "dtype": "object",
+        "header": "Sales Office/Branch",
+        "kind": "text",
+        "position": 17
+      },
+      {
+        "column": "payment_term",
+        "dtype": "object",
+        "header": "Payment Term",
+        "kind": "text",
+        "position": 18
+      },
+      {
+        "column": "header_text",
+        "dtype": "object",
+        "header": "Header Text",
+        "kind": "text",
+        "position": 19
+      },
+      {
+        "column": "billing_doc",
+        "dtype": "float64",
+        "header": "Billing Doc",
+        "kind": "text",
+        "position": 20
+      },
+      {
+        "column": "clearning_doc",
+        "dtype": "float64",
+        "header": "Clearning Doc",
+        "kind": "numeric",
+        "position": 21
+      },
+      {
+        "column": "clearning_date",
+        "dtype": "float64",
+        "header": "Clearning Date",
+        "kind": "numeric",
+        "position": 22
+      },
+      {
+        "column": "gl_account",
+        "dtype": "int64",
+        "header": "GL Account",
+        "kind": "text",
+        "position": 23
+      },
+      {
+        "column": "recon_gl",
+        "dtype": "int64",
+        "header": "Recon GL",
+        "kind": "text",
+        "position": 24
+      },
+      {
+        "column": "offset_account",
+        "dtype": "int64",
+        "header": "Offset Account",
+        "kind": "text",
+        "position": 25
+      },
+      {
+        "column": "item_text",
+        "dtype": "object",
+        "header": "Item Text",
+        "kind": "text",
+        "position": 26
+      },
+      {
+        "column": "profit_center",
+        "dtype": "object",
+        "header": "Profit Center",
+        "kind": "text",
+        "position": 27
+      }
+    ],
+    "storage": "view",
+    "table": "dump_receivables",
+    "text_columns": []
+  },
+  "rfd": {
+    "columns": [
+      {
+        "column": "sl_no",
+        "dtype": "float64",
+        "header": "SL NO",
+        "kind": "numeric",
+        "position": 0
+      },
+      {
+        "column": "customer",
+        "dtype": "object",
+        "header": "CUSTOMER",
+        "kind": "text",
+        "position": 1
+      },
+      {
+        "column": "material_quality",
+        "dtype": "object",
+        "header": "MATERIAL  QUALITY ",
+        "kind": "text",
+        "position": 2
+      },
+      {
+        "column": "sm",
+        "dtype": "object",
+        "header": "SM",
+        "kind": "text",
+        "position": 3
+      },
+      {
+        "column": "ctl_code",
+        "dtype": "object",
+        "header": "CTL Code",
+        "kind": "text",
+        "position": 4
+      },
+      {
+        "column": "aging_days",
+        "dtype": "object",
+        "header": "Aging days",
+        "kind": "text",
+        "position": 5
+      },
+      {
+        "column": "section",
+        "dtype": "object",
+        "header": "Section",
+        "kind": "text",
+        "position": 6
+      },
+      {
+        "column": "od",
+        "dtype": "float64",
+        "header": "OD",
+        "kind": "numeric",
+        "position": 7
+      },
+      {
+        "column": "thickness",
+        "dtype": "object",
+        "header": "Thickness",
+        "kind": "text",
+        "position": 8
+      },
+      {
+        "column": "ctl",
+        "dtype": "object",
+        "header": "CTL ",
+        "kind": "text",
+        "position": 9
+      },
+      {
+        "column": "rfd_qty",
+        "dtype": "float64",
+        "header": "RFD Qty.",
+        "kind": "numeric",
+        "position": 10
+      },
+      {
+        "column": "weight",
+        "dtype": "float64",
+        "header": "WEIGHT",
+        "kind": "numeric",
+        "position": 11
+      },
+      {
+        "column": "remarks_dispatch",
+        "dtype": "object",
+        "header": "Remarks(Dispatch)",
+        "kind": "text",
+        "position": 12
+      },
+      {
+        "column": "unnamed_13",
+        "dtype": "float64",
+        "header": "Unnamed: 13",
+        "kind": "numeric",
+        "position": 13
+      },
+      {
+        "column": "unnamed_14",
+        "dtype": "float64",
+        "header": "Unnamed: 14",
+        "kind": "numeric",
+        "position": 14
+      },
+      {
+        "column": "unnamed_15",
+        "dtype": "float64",
+        "header": "Unnamed: 15",
+        "kind": "numeric",
+        "position": 15
+      },
+      {
+        "column": "unnamed_16",
+        "dtype": "float64",
+        "header": "Unnamed: 16",
+        "kind": "numeric",
+        "position": 16
+      },
+      {
+        "column": "unnamed_17",
+        "dtype": "float64",
+        "header": "Unnamed: 17",
+        "kind": "numeric",
+        "position": 17
+      },
+      {
+        "column": "unnamed_18",
+        "dtype": "float64",
+        "header": "Unnamed: 18",
+        "kind": "numeric",
+        "position": 18
+      },
+      {
+        "column": "unnamed_19",
+        "dtype": "float64",
+        "header": "Unnamed: 19",
+        "kind": "numeric",
+        "position": 19
+      },
+      {
+        "column": "unnamed_20",
+        "dtype": "float64",
+        "header": "Unnamed: 20",
+        "kind": "numeric",
+        "position": 20
+      }
+    ],
+    "storage": "view",
+    "table": "dump_rfd",
+    "text_columns": []
+  },
+  "schedule": {
+    "columns": [
+      {
+        "column": "sno",
+        "dtype": "float64",
+        "header": "SNO",
+        "kind": "numeric",
+        "position": 0
+      },
+      {
+        "column": "rm_loaction",
+        "dtype": "object",
+        "header": "RM Loaction",
+        "kind": "text",
+        "position": 1
+      },
+      {
+        "column": "customer_name",
+        "dtype": "object",
+        "header": "CUSTOMER NAME",
+        "kind": "text",
+        "position": 2
+      },
+      {
+        "column": "helper_customer",
+        "dtype": "object",
+        "header": "Helper Customer",
+        "kind": "text",
+        "position": 3
+      },
+      {
+        "column": "customer_code",
+        "dtype": "object",
+        "header": "CUSTOMER CODE",
+        "kind": "text",
+        "position": 4
+      },
+      {
+        "canonical_column": "material_no",
+        "canonicaliser": "material_code",
+        "column": "material_no_raw",
+        "dtype": "object",
+        "header": "MATERIAL NO",
+        "kind": "text",
+        "position": 5,
+        "sql_kind": "text"
+      },
+      {
+        "column": "key",
+        "dtype": "object",
+        "header": "Key",
+        "kind": "text",
+        "position": 6
+      },
+      {
+        "column": "material_des",
+        "dtype": "object",
+        "header": "MATERIAL DES",
+        "kind": "text",
+        "position": 7
+      },
+      {
+        "column": "grade",
+        "dtype": "object",
+        "header": "Grade",
+        "kind": "text",
+        "position": 8
+      },
+      {
+        "column": "h",
+        "dtype": "object",
+        "header": "h",
+        "kind": "text",
+        "position": 9
+      },
+      {
+        "column": "fc_nfc",
+        "dtype": "object",
+        "header": "FC/NFC",
+        "kind": "text",
+        "position": 10
+      },
+      {
+        "column": "hr_cr",
+        "dtype": "object",
+        "header": "HR/CR",
+        "kind": "text",
+        "position": 11
+      },
+      {
+        "column": "hr_cr_check",
+        "dtype": "object",
+        "header": "HR/CR Check",
+        "kind": "text",
+        "position": 12
+      },
+      {
+        "column": "chamferring",
+        "dtype": "object",
+        "header": "Chamferring ",
+        "kind": "text",
+        "position": 13
+      },
+      {
+        "column": "angle_cut",
+        "dtype": "object",
+        "header": "Angle Cut",
+        "kind": "text",
+        "position": 14
+      },
+      {
+        "column": "surface_critical",
+        "dtype": "object",
+        "header": "Surface Critical",
+        "kind": "text",
+        "position": 15
+      },
+      {
+        "column": "bucket",
+        "dtype": "object",
+        "header": "Bucket",
+        "kind": "text",
+        "position": 16
+      },
+      {
+        "column": "ctl_bucket",
+        "dtype": "object",
+        "header": "CTL Bucket",
+        "kind": "text",
+        "position": 17
+      },
+      {
+        "column": "check_if_ctl_bucket_is_in_sales_sheet_or_not",
+        "dtype": "float64",
+        "header": "Check if CTL bucket is in sales sheet or not",
+        "kind": "numeric",
+        "position": 18
+      },
+      {
+        "canonical_column": "plant",
+        "canonicaliser": "plant_code",
+        "column": "plant_raw",
+        "dtype": "object",
+        "header": "Plant",
+        "kind": "text",
+        "position": 19,
+        "sql_kind": "text"
+      },
+      {
+        "column": "c_4731_ll_stock",
+        "dtype": "object",
+        "header": "4731 LL Stock",
+        "kind": "text",
+        "position": 20
+      },
+      {
+        "column": "c_4318_8406_stock",
+        "dtype": "float64",
+        "header": "4318 + 8406 stock",
+        "kind": "numeric",
+        "position": 21
+      },
+      {
+        "column": "application",
+        "dtype": "object",
+        "header": "Application",
+        "kind": "text",
+        "position": 22
+      },
+      {
+        "column": "actual_od",
+        "dtype": "float64",
+        "header": "ACTUAL OD",
+        "kind": "numeric",
+        "position": 23
+      },
+      {
+        "column": "od",
+        "dtype": "float64",
+        "header": "OD",
+        "kind": "numeric",
+        "position": 24
+      },
+      {
+        "column": "id",
+        "dtype": "float64",
+        "header": "ID",
+        "kind": "numeric",
+        "position": 25
+      },
+      {
+        "column": "tickness",
+        "dtype": "float64",
+        "header": "TICKNESS",
+        "kind": "numeric",
+        "position": 26
+      },
+      {
+        "column": "length",
+        "dtype": "float64",
+        "header": "LENGTH",
+        "kind": "numeric",
+        "position": 27
+      },
+      {
+        "column": "uom",
+        "dtype": "object",
+        "header": "UoM",
+        "kind": "text",
+        "position": 28
+      },
+      {
+        "column": "source_plant",
+        "dtype": "object",
+        "header": "Source Plant",
+        "kind": "text",
+        "position": 29
+      },
+      {
+        "column": "commitment_date",
+        "dtype": "float64",
+        "header": "Commitment Date",
+        "kind": "numeric",
+        "position": 30
+      },
+      {
+        "column": "schedule_in_nos",
+        "dtype": "float64",
+        "header": "SCHEDULE in nos",
+        "kind": "numeric",
+        "position": 31
+      },
+      {
+        "column": "customer_remarks",
+        "dtype": "object",
+        "header": "Customer remarks",
+        "kind": "text",
+        "position": 32
+      },
+      {
+        "column": "dispatch",
+        "dtype": "float64",
+        "header": "DISPATCH",
+        "kind": "numeric",
+        "position": 33
+      },
+      {
+        "column": "bal_in_nos",
+        "dtype": "float64",
+        "header": "BAL IN NOS",
+        "kind": "numeric",
+        "position": 34
+      },
+      {
+        "column": "schedule_in_mt",
+        "dtype": "float64",
+        "header": "SCHEDULE IN MT",
+        "kind": "numeric",
+        "position": 35
+      },
+      {
+        "column": "dispatch_mt",
+        "dtype": "float64",
+        "header": "DISPATCH MT",
+        "kind": "numeric",
+        "position": 36
+      },
+      {
+        "column": "balance_for_disp",
+        "dtype": "float64",
+        "header": "BALANCE FOR DISP",
+        "kind": "numeric",
+        "position": 37
+      },
+      {
+        "column": "ctl_stock_in_nos",
+        "dtype": "float64",
+        "header": "CTL stock in nos",
+        "kind": "numeric",
+        "position": 38
+      },
+      {
+        "column": "ctl_stock",
+        "dtype": "float64",
+        "header": "CTL Stock",
+        "kind": "numeric",
+        "position": 39
+      },
+      {
+        "column": "total_long_stock_in_mt",
+        "dtype": "float64",
+        "header": "Total Long Stock in MT",
+        "kind": "numeric",
+        "position": 40
+      },
+      {
+        "column": "ll_stock",
+        "dtype": "float64",
+        "header": "LL Stock",
+        "kind": "numeric",
+        "position": 41
+      },
+      {
+        "column": "wip",
+        "dtype": "float64",
+        "header": "WIP",
+        "kind": "numeric",
+        "position": 42
+      },
+      {
+        "column": "balance_required_in_mt",
+        "dtype": "object",
+        "header": "BALANCE REQUIRED IN MT",
+        "kind": "text",
+        "position": 43
+      },
+      {
+        "column": "comp",
+        "dtype": "float64",
+        "header": "% COMP",
+        "kind": "numeric",
+        "position": 44
+      },
+      {
+        "column": "so",
+        "dtype": "float64",
+        "header": "so",
+        "kind": "numeric",
+        "position": 45
+      }
+    ],
+    "storage": "view",
+    "table": "dump_schedule",
+    "text_columns": []
+  },
+  "signoff:hosur": {
+    "columns": [
+      {
+        "column": "sales_order_no",
+        "dtype": "int64",
+        "header": "SALES ORDER NO.",
+        "kind": "numeric",
+        "position": 0
+      },
+      {
+        "column": "sales_document_item",
+        "dtype": "int64",
+        "header": "Sales Document Item",
+        "kind": "numeric",
+        "position": 1
+      },
+      {
+        "column": "sold_cust_name",
+        "dtype": "object",
+        "header": "SOLD. CUST. NAME",
+        "kind": "text",
+        "position": 2
+      },
+      {
+        "canonical_column": "material",
+        "canonicaliser": "material_code",
+        "column": "material_raw",
+        "dtype": "int64",
+        "header": "Material",
+        "kind": "text",
+        "position": 3,
+        "sql_kind": "text"
+      },
+      {
+        "column": "material_desc",
+        "dtype": "object",
+        "header": "MATERIAL DESC.",
+        "kind": "text",
+        "position": 4
+      },
+      {
+        "column": "grade",
+        "dtype": "object",
+        "header": "GRADE",
+        "kind": "text",
+        "position": 5
+      },
+      {
+        "column": "rm_grade",
+        "dtype": "object",
+        "header": "RM GRADE",
+        "kind": "text",
+        "position": 6
+      },
+      {
+        "column": "order_qty_in_mt",
+        "dtype": "float64",
+        "header": "Order Qty in MT",
+        "kind": "numeric",
+        "position": 7
+      },
+      {
+        "column": "basic_price",
+        "dtype": "float64",
+        "header": "BASIC PRICE",
+        "kind": "numeric",
+        "position": 8
+      },
+      {
+        "column": "round_od",
+        "dtype": "float64",
+        "header": "Round OD",
+        "kind": "numeric",
+        "position": 9
+      },
+      {
+        "column": "od",
+        "dtype": "float64",
+        "header": "OD",
+        "kind": "numeric",
+        "position": 10
+      },
+      {
+        "column": "id",
+        "dtype": "int64",
+        "header": "ID",
+        "kind": "numeric",
+        "position": 11
+      },
+      {
+        "column": "thickness",
+        "dtype": "float64",
+        "header": "THICKNESS",
+        "kind": "numeric",
+        "position": 12
+      },
+      {
+        "column": "length",
+        "dtype": "float64",
+        "header": "LENGTH",
+        "kind": "numeric",
+        "position": 13
+      },
+      {
+        "column": "column1",
+        "dtype": "float64",
+        "header": "Column1",
+        "kind": "text",
+        "position": 14
+      },
+      {
+        "column": "column2",
+        "dtype": "object",
+        "header": "Column2",
+        "kind": "text",
+        "position": 15
+      },
+      {
+        "column": "order_qty_in_mt3",
+        "dtype": "float64",
+        "header": "Order Qty in MT3",
+        "kind": "numeric",
+        "position": 16
+      },
+      {
+        "column": "wip",
+        "dtype": "float64",
+        "header": "WIP",
+        "kind": "numeric",
+        "position": 17
+      },
+      {
+        "column": "fg",
+        "dtype": "float64",
+        "header": "FG",
+        "kind": "numeric",
+        "position": 18
+      },
+      {
+        "column": "btr",
+        "dtype": "float64",
+        "header": "BTR",
+        "kind": "numeric",
+        "position": 19
+      },
+      {
+        "column": "sign_off",
+        "dtype": "float64",
+        "header": "SIGN OFF",
+        "kind": "numeric",
+        "position": 20
+      },
+      {
+        "column": "mill",
+        "dtype": "object",
+        "header": "MILL",
+        "kind": "text",
+        "position": 21
+      },
+      {
+        "column": "order_qty_sales_unit",
+        "dtype": "float64",
+        "header": "Order Qty.(Sales Unit)",
+        "kind": "numeric",
+        "position": 22
+      }
+    ],
+    "storage": "view",
+    "table": "dump_signoff_hosur",
+    "text_columns": []
+  },
+  "signoff:jsr": {
+    "columns": [
+      {
+        "column": "typ",
+        "dtype": "object",
+        "header": "TYP",
+        "kind": "text",
+        "position": 0
+      },
+      {
+        "column": "zone",
+        "dtype": "object",
+        "header": "ZONE",
+        "kind": "text",
+        "position": 1
+      },
+      {
+        "column": "key",
+        "dtype": "object",
+        "header": "Key",
+        "kind": "text",
+        "position": 2
+      },
+      {
+        "column": "sign_off",
+        "dtype": "object",
+        "header": "Sign Off",
+        "kind": "text",
+        "position": 3
+      },
+      {
+        "column": "sign_off_qty",
+        "dtype": "int64",
+        "header": "Sign Off Qty",
+        "kind": "numeric",
+        "position": 4
+      },
+      {
+        "column": "customer",
+        "dtype": "object",
+        "header": "CUSTOMER",
+        "kind": "text",
+        "position": 5
+      },
+      {
+        "column": "destination",
+        "dtype": "object",
+        "header": "DESTINATION",
+        "kind": "text",
+        "position": 6
+      },
+      {
+        "column": "auart",
+        "dtype": "object",
+        "header": "AUART",
+        "kind": "text",
+        "position": 7
+      },
+      {
+        "column": "intpo",
+        "dtype": "int64",
+        "header": "INTPO",
+        "kind": "numeric",
+        "position": 8
+      },
+      {
+        "column": "cdrw",
+        "dtype": "object",
+        "header": "CDRW",
+        "kind": "text",
+        "position": 9
+      },
+      {
+        "column": "bal_to_desp",
+        "dtype": "float64",
+        "header": "Bal to Desp",
+        "kind": "numeric",
+        "position": 10
+      },
+      {
+        "column": "bal_desp_nos",
+        "dtype": "int64",
+        "header": "Bal Desp(nos)",
+        "kind": "numeric",
+        "position": 11
+      },
+      {
+        "column": "ordtons",
+        "dtype": "int64",
+        "header": "ORDTONS",
+        "kind": "numeric",
+        "position": 12
+      },
+      {
+        "column": "bal_to_roll",
+        "dtype": "float64",
+        "header": "Bal to Roll",
+        "kind": "numeric",
+        "position": 13
+      },
+      {
+        "column": "fg_wip_available",
+        "dtype": "float64",
+        "header": "FG/WIP available",
+        "kind": "numeric",
+        "position": 14
+      },
+      {
+        "column": "specifi",
+        "dtype": "int64",
+        "header": "Specifi",
+        "kind": "numeric",
+        "position": 15
+      },
+      {
+        "column": "fini_od",
+        "dtype": "float64",
+        "header": "Fini OD",
+        "kind": "numeric",
+        "position": 16
+      },
+      {
+        "column": "fini_thick",
+        "dtype": "float64",
+        "header": "Fini Thick",
+        "kind": "numeric",
+        "position": 17
+      },
+      {
+        "column": "divn",
+        "dtype": "int64",
+        "header": "DIVN",
+        "kind": "numeric",
+        "position": 18
+      },
+      {
+        "column": "mstae",
+        "dtype": "object",
+        "header": "MSTAE",
+        "kind": "text",
+        "position": 19
+      },
+      {
+        "column": "sts",
+        "dtype": "object",
+        "header": "STS",
+        "kind": "text",
+        "position": 20
+      },
+      {
+        "column": "bfrsts",
+        "dtype": "object",
+        "header": "BFRSTS",
+        "kind": "text",
+        "position": 21
+      },
+      {
+        "column": "po_type",
+        "dtype": "float64",
+        "header": "PO_TYPE",
+        "kind": "numeric",
+        "position": 22
+      },
+      {
+        "column": "mrpi",
+        "dtype": "object",
+        "header": "MRPI",
+        "kind": "text",
+        "position": 23
+      },
+      {
+        "column": "mfgpl",
+        "dtype": "int64",
+        "header": "MFGPL",
+        "kind": "text",
+        "position": 24
+      },
+      {
+        "column": "creator",
+        "dtype": "object",
+        "header": "CREATOR",
+        "kind": "text",
+        "position": 25
+      },
+      {
+        "column": "custno",
+        "dtype": "int64",
+        "header": "CUSTNO",
+        "kind": "text",
+        "position": 26
+      },
+      {
+        "column": "shipto",
+        "dtype": "int64",
+        "header": "SHIPTO",
+        "kind": "text",
+        "position": 27
+      },
+      {
+        "column": "dlvblk",
+        "dtype": "float64",
+        "header": "DLVBLK",
+        "kind": "numeric",
+        "position": 28
+      },
+      {
+        "column": "blgblk",
+        "dtype": "float64",
+        "header": "BLGBLK",
+        "kind": "numeric",
+        "position": 29
+      },
+      {
+        "column": "order_no",
+        "dtype": "int64",
+        "header": "ORDER_NO",
+        "kind": "numeric",
+        "position": 30
+      },
+      {
+        "column": "item_no",
+        "dtype": "int64",
+        "header": "ITEM_NO",
+        "kind": "text",
+        "position": 31
+      },
+      {
+        "canonical_column": "matl_no",
+        "canonicaliser": "material_code",
+        "column": "matl_no_raw",
+        "dtype": "int64",
+        "header": "MATL_NO",
+        "kind": "text",
+        "position": 32,
+        "sql_kind": "text"
+      },
+      {
+        "column": "description",
+        "dtype": "object",
+        "header": "DESCRIPTION",
+        "kind": "text",
+        "position": 33
+      },
+      {
+        "column": "nrm_po",
+        "dtype": "float64",
+        "header": "NRM_PO",
+        "kind": "text",
+        "position": 34
+      },
+      {
+        "column": "cld_po",
+        "dtype": "float64",
+        "header": "CLD_PO",
+        "kind": "text",
+        "position": 35
+      },
+      {
+        "column": "finpo",
+        "dtype": "int64",
+        "header": "FINPO",
+        "kind": "text",
+        "position": 36
+      },
+      {
+        "column": "plan_mill",
+        "dtype": "float64",
+        "header": "PLAN_MILL",
+        "kind": "numeric",
+        "position": 37
+      },
+      {
+        "column": "process_grp",
+        "dtype": "float64",
+        "header": "PROCESS_GRP",
+        "kind": "numeric",
+        "position": 38
+      },
+      {
+        "column": "ctg",
+        "dtype": "object",
+        "header": "CTG",
+        "kind": "text",
+        "position": 39
+      },
+      {
+        "column": "spec",
+        "dtype": "int64",
+        "header": "SPEC",
+        "kind": "text",
+        "position": 40
+      },
+      {
+        "column": "sfin",
+        "dtype": "object",
+        "header": "SFIN",
+        "kind": "text",
+        "position": 41
+      },
+      {
+        "column": "od",
+        "dtype": "float64",
+        "header": "OD",
+        "kind": "numeric",
+        "position": 42
+      },
+      {
+        "column": "thk",
+        "dtype": "float64",
+        "header": "THK",
+        "kind": "numeric",
+        "position": 43
+      },
+      {
+        "column": "class",
+        "dtype": "object",
+        "header": "CLASS",
+        "kind": "text",
+        "position": 44
+      },
+      {
+        "column": "geometry",
+        "dtype": "object",
+        "header": "GEOMETRY",
+        "kind": "text",
+        "position": 45
+      },
+      {
+        "column": "in_dia",
+        "dtype": "float64",
+        "header": "IN_DIA",
+        "kind": "numeric",
+        "position": 46
+      },
+      {
+        "column": "ordq",
+        "dtype": "int64",
+        "header": "ORDQ",
+        "kind": "numeric",
+        "position": 47
+      },
+      {
+        "column": "ordum",
+        "dtype": "object",
+        "header": "ORDUM",
+        "kind": "text",
+        "position": 48
+      },
+      {
+        "column": "ordnos",
+        "dtype": "int64",
+        "header": "ORDNOS",
+        "kind": "numeric",
+        "position": 49
+      },
+      {
+        "column": "millnos",
+        "dtype": "int64",
+        "header": "MILLNOS",
+        "kind": "numeric",
+        "position": 50
+      },
+      {
+        "column": "milltons",
+        "dtype": "float64",
+        "header": "MILLTONS",
+        "kind": "numeric",
+        "position": 51
+      },
+      {
+        "column": "nrmlnos",
+        "dtype": "int64",
+        "header": "NRMLNOS",
+        "kind": "numeric",
+        "position": 52
+      },
+      {
+        "column": "nrmltons",
+        "dtype": "float64",
+        "header": "NRMLTONS",
+        "kind": "numeric",
+        "position": 53
+      },
+      {
+        "column": "inspnos",
+        "dtype": "int64",
+        "header": "INSPNOS",
+        "kind": "numeric",
+        "position": 54
+      },
+      {
+        "column": "insptons",
+        "dtype": "int64",
+        "header": "INSPTONS",
+        "kind": "numeric",
+        "position": 55
+      },
+      {
+        "column": "trfrnos",
+        "dtype": "int64",
+        "header": "TRFRNOS",
+        "kind": "numeric",
+        "position": 56
+      },
+      {
+        "column": "trfrtons",
+        "dtype": "float64",
+        "header": "TRFRTONS",
+        "kind": "numeric",
+        "position": 57
+      },
+      {
+        "column": "bal_transfer",
+        "dtype": "int64",
+        "header": "Bal Transfer",
+        "kind": "numeric",
+        "position": 58
+      },
+      {
+        "column": "bal_trnsf_tonnes",
+        "dtype": "float64",
+        "header": "Bal Trnsf. Tonnes",
+        "kind": "numeric",
+        "position": 59
+      },
+      {
+        "column": "despnos",
+        "dtype": "int64",
+        "header": "DESPNOS",
+        "kind": "numeric",
+        "position": 60
+      },
+      {
+        "column": "desptons",
+        "dtype": "float64",
+        "header": "DESPTONS",
+        "kind": "numeric",
+        "position": 61
+      },
+      {
+        "column": "stock",
+        "dtype": "float64",
+        "header": "Stock",
+        "kind": "numeric",
+        "position": 62
+      },
+      {
+        "column": "wrksq",
+        "dtype": "float64",
+        "header": "WRKSQ",
+        "kind": "numeric",
+        "position": 63
+      },
+      {
+        "column": "wrksq_so",
+        "dtype": "float64",
+        "header": "WRKSQ_SO",
+        "kind": "numeric",
+        "position": 64
+      },
+      {
+        "column": "brchq",
+        "dtype": "int64",
+        "header": "BRCHQ",
+        "kind": "numeric",
+        "position": 65
+      },
+      {
+        "column": "fg_sheet_stock",
+        "dtype": "float64",
+        "header": "FG Sheet Stock",
+        "kind": "numeric",
+        "position": 66
+      },
+      {
+        "column": "stodonos",
+        "dtype": "int64",
+        "header": "STODONOS",
+        "kind": "numeric",
+        "position": 67
+      },
+      {
+        "column": "stodotons",
+        "dtype": "float64",
+        "header": "STODOTONS",
+        "kind": "numeric",
+        "position": 68
+      },
+      {
+        "column": "cdespnos",
+        "dtype": "int64",
+        "header": "CDESPNOS",
+        "kind": "numeric",
+        "position": 69
+      },
+      {
+        "column": "cdesptons",
+        "dtype": "int64",
+        "header": "CDESPTONS",
+        "kind": "numeric",
+        "position": 70
+      },
+      {
+        "column": "balnos",
+        "dtype": "int64",
+        "header": "BALNOS",
+        "kind": "numeric",
+        "position": 71
+      },
+      {
+        "column": "bal_d_o_tonns",
+        "dtype": "float64",
+        "header": "Bal. D.O. Tonns",
+        "kind": "numeric",
+        "position": 72
+      },
+      {
+        "column": "baltons",
+        "dtype": "float64",
+        "header": "BALTONS",
+        "kind": "numeric",
+        "position": 73
+      },
+      {
+        "column": "frtind",
+        "dtype": "float64",
+        "header": "FRTIND",
+        "kind": "numeric",
+        "position": 74
+      },
+      {
+        "column": "do_to_be_indented",
+        "dtype": "float64",
+        "header": "DO to be indented",
+        "kind": "numeric",
+        "position": 75
+      },
+      {
+        "column": "age_b",
+        "dtype": "object",
+        "header": "AGE B",
+        "kind": "text",
+        "position": 76
+      },
+      {
+        "column": "f_ctg",
+        "dtype": "object",
+        "header": "F CTG",
+        "kind": "text",
+        "position": 77
+      }
+    ],
+    "storage": "view",
+    "table": "dump_signoff_jsr",
+    "text_columns": []
+  },
+  "signoff:khopoli": {
+    "columns": [
+      {
+        "column": "feasible",
+        "dtype": "object",
+        "header": "Feasible",
+        "kind": "text",
+        "position": 0
+      },
+      {
+        "column": "month",
+        "dtype": "int64",
+        "header": "Month",
+        "kind": "numeric",
+        "position": 1
+      },
+      {
+        "column": "updated_on",
+        "dtype": "int64",
+        "header": "Updated on",
+        "kind": "numeric",
+        "position": 2
+      },
+      {
+        "column": "sl_no",
+        "dtype": "int64",
+        "header": "SL No",
+        "kind": "numeric",
+        "position": 3
+      },
+      {
+        "column": "zone",
+        "dtype": "object",
+        "header": "ZONE",
+        "kind": "text",
+        "position": 4
+      },
+      {
+        "column": "branch",
+        "dtype": "object",
+        "header": "Branch",
+        "kind": "text",
+        "position": 5
+      },
+      {
+        "column": "order_key",
+        "dtype": "object",
+        "header": "Order Key",
+        "kind": "text",
+        "position": 6
+      },
+      {
+        "column": "desp_mode",
+        "dtype": "object",
+        "header": "Desp. Mode",
+        "kind": "text",
+        "position": 7
+      },
+      {
+        "column": "t_type",
+        "dtype": "object",
+        "header": "T-Type",
+        "kind": "text",
+        "position": 8
+      },
+      {
+        "column": "segment",
+        "dtype": "object",
+        "header": "Segment",
+        "kind": "text",
+        "position": 9
+      },
+      {
+        "column": "receiving_plant_city",
+        "dtype": "object",
+        "header": "Receiving Plant/City",
+        "kind": "text",
+        "position": 10
+      },
+      {
+        "column": "mat_group",
+        "dtype": "object",
+        "header": "Mat. Group",
+        "kind": "text",
+        "position": 11
+      },
+      {
+        "column": "order_age",
+        "dtype": "int64",
+        "header": "Order Age",
+        "kind": "numeric",
+        "position": 12
+      },
+      {
+        "column": "order_age_range",
+        "dtype": "object",
+        "header": "Order Age Range",
+        "kind": "text",
+        "position": 13
+      },
+      {
+        "canonical_column": "plant",
+        "canonicaliser": "plant_code",
+        "column": "plant_raw",
+        "dtype": "int64",
+        "header": "PLANT",
+        "kind": "numeric",
+        "position": 14,
+        "sql_kind": "text"
+      },
+      {
+        "column": "order_date",
+        "dtype": "int64",
+        "header": "ORDER DATE",
+        "kind": "numeric",
+        "position": 15
+      },
+      {
+        "column": "sales_doc_type",
+        "dtype": "object",
+        "header": "SALES DOC TYPE",
+        "kind": "text",
+        "position": 16
+      },
+      {
+        "column": "sales_order_no",
+        "dtype": "int64",
+        "header": "SALES ORDER NO.",
+        "kind": "numeric",
+        "position": 17
+      },
+      {
+        "column": "sales_document_item",
+        "dtype": "int64",
+        "header": "Sales Document Item",
+        "kind": "numeric",
+        "position": 18
+      },
+      {
+        "column": "po_no",
+        "dtype": "object",
+        "header": "PO NO.",
+        "kind": "text",
+        "position": 19
+      },
+      {
+        "column": "sales_office",
+        "dtype": "object",
+        "header": "SALES OFFICE",
+        "kind": "text",
+        "position": 20
+      },
+      {
+        "column": "sold_cust_name",
+        "dtype": "object",
+        "header": "SOLD. CUST. NAME",
+        "kind": "text",
+        "position": 21
+      },
+      {
+        "column": "oem",
+        "dtype": "object",
+        "header": "oem",
+        "kind": "text",
+        "position": 22
+      },
+      {
+        "canonical_column": "material",
+        "canonicaliser": "material_code",
+        "column": "material_raw",
+        "dtype": "int64",
+        "header": "Material",
+        "kind": "text",
+        "position": 23,
+        "sql_kind": "text"
+      },
+      {
+        "column": "material_desc",
+        "dtype": "object",
+        "header": "MATERIAL DESC.",
+        "kind": "text",
+        "position": 24
+      },
+      {
+        "column": "width_od",
+        "dtype": "float64",
+        "header": "WIDTH/OD",
+        "kind": "numeric",
+        "position": 25
+      },
+      {
+        "column": "id",
+        "dtype": "float64",
+        "header": "ID",
+        "kind": "numeric",
+        "position": 26
+      },
+      {
+        "column": "thickness",
+        "dtype": "float64",
+        "header": "THICKNESS",
+        "kind": "numeric",
+        "position": 27
+      },
+      {
+        "column": "length",
+        "dtype": "float64",
+        "header": "LENGTH",
+        "kind": "numeric",
+        "position": 28
+      },
+      {
+        "column": "grade",
+        "dtype": "object",
+        "header": "GRADE",
+        "kind": "text",
+        "position": 29
+      },
+      {
+        "column": "order_qty_in_mt",
+        "dtype": "float64",
+        "header": "Order Qty in MT",
+        "kind": "numeric",
+        "position": 30
+      },
+      {
+        "column": "finish_prod",
+        "dtype": "float64",
+        "header": "FINISH PROD",
+        "kind": "numeric",
+        "position": 31
+      },
+      {
+        "column": "stock_mt",
+        "dtype": "float64",
+        "header": "STOCK(MT)",
+        "kind": "numeric",
+        "position": 32
+      },
+      {
+        "column": "bal_for_prod_roll_mt",
+        "dtype": "float64",
+        "header": "BAL FOR PROD/ROLL(MT)",
+        "kind": "numeric",
+        "position": 33
+      },
+      {
+        "column": "actual_btp",
+        "dtype": "float64",
+        "header": "Actual BTP",
+        "kind": "numeric",
+        "position": 34
+      },
+      {
+        "column": "despatch_mt",
+        "dtype": "float64",
+        "header": "DESPATCH(MT)",
+        "kind": "numeric",
+        "position": 35
+      },
+      {
+        "column": "pending_for_despatch_mt",
+        "dtype": "float64",
+        "header": "PENDING FOR DESPATCH(MT)",
+        "kind": "numeric",
+        "position": 36
+      },
+      {
+        "column": "rolled_qty",
+        "dtype": "int64",
+        "header": "Rolled Qty",
+        "kind": "numeric",
+        "position": 37
+      },
+      {
+        "column": "sales_unit",
+        "dtype": "object",
+        "header": "Sales Unit",
+        "kind": "text",
+        "position": 38
+      },
+      {
+        "column": "end_finish",
+        "dtype": "object",
+        "header": "END_FINISH",
+        "kind": "text",
+        "position": 39
+      },
+      {
+        "column": "geometry",
+        "dtype": "object",
+        "header": "GEOMETRY",
+        "kind": "text",
+        "position": 40
+      },
+      {
+        "column": "division",
+        "dtype": "int64",
+        "header": "DIVISION",
+        "kind": "numeric",
+        "position": 41
+      },
+      {
+        "column": "mat_group2",
+        "dtype": "object",
+        "header": "Mat. Group2",
+        "kind": "text",
+        "position": 42
+      },
+      {
+        "column": "status_01",
+        "dtype": "object",
+        "header": "Status 01",
+        "kind": "text",
+        "position": 43
+      },
+      {
+        "column": "status_02",
+        "dtype": "object",
+        "header": "Status 02",
+        "kind": "text",
+        "position": 44
+      },
+      {
+        "column": "ref_standard",
+        "dtype": "object",
+        "header": "Ref. Standard",
+        "kind": "text",
+        "position": 45
+      },
+      {
+        "column": "wip_qty",
+        "dtype": "float64",
+        "header": "WIP QTY",
+        "kind": "numeric",
+        "position": 46
+      },
+      {
+        "column": "order_qty_sales_unit",
+        "dtype": "float64",
+        "header": "Order Qty.(Sales Unit)",
+        "kind": "numeric",
+        "position": 47
+      },
+      {
+        "column": "despatch_qty_sale_unit",
+        "dtype": "float64",
+        "header": "Despatch Qty (Sale. Unit)",
+        "kind": "numeric",
+        "position": 48
+      },
+      {
+        "column": "pending_for_despatch_sales_unit",
+        "dtype": "float64",
+        "header": "PENDING FOR DESPATCH(SALES UNIT)",
+        "kind": "numeric",
+        "position": 49
+      },
+      {
+        "column": "creator",
+        "dtype": "object",
+        "header": "CREATOR",
+        "kind": "text",
+        "position": 50
+      },
+      {
+        "column": "order_age3",
+        "dtype": "float64",
+        "header": "ORDER AGE3",
+        "kind": "numeric",
+        "position": 51
+      },
+      {
+        "column": "ageing_days",
+        "dtype": "float64",
+        "header": "Ageing Days",
+        "kind": "numeric",
+        "position": 52
+      },
+      {
+        "column": "ship_cust_city",
+        "dtype": "object",
+        "header": "SHIP. CUST. CITY",
+        "kind": "text",
+        "position": 53
+      },
+      {
+        "column": "ship_cust_name",
+        "dtype": "object",
+        "header": "SHIP. CUST. NAME",
+        "kind": "text",
+        "position": 54
+      },
+      {
+        "column": "incot",
+        "dtype": "object",
+        "header": "INCOT",
+        "kind": "text",
+        "position": 55
+      },
+      {
+        "column": "aug_26_sales_plan",
+        "dtype": "float64",
+        "header": "Aug'26 Sales Plan",
+        "kind": "numeric",
+        "position": 56
+      },
+      {
+        "column": "cam_indicated",
+        "dtype": "float64",
+        "header": "CAM indicated",
+        "kind": "numeric",
+        "position": 57
+      },
+      {
+        "column": "mes_btp_01_08_26",
+        "dtype": "float64",
+        "header": "MES BTP 01.08.26",
+        "kind": "numeric",
+        "position": 58
+      },
+      {
+        "column": "btp_range",
+        "dtype": "object",
+        "header": "BTP Range",
+        "kind": "text",
+        "position": 59
+      },
+      {
+        "column": "bal_to_desp_01_08_26",
+        "dtype": "float64",
+        "header": "Bal to Desp- 01.08.26",
+        "kind": "numeric",
+        "position": 60
+      },
+      {
+        "column": "stock_as_on_01_08_26",
+        "dtype": "float64",
+        "header": "Stock as on 01.08.26",
+        "kind": "numeric",
+        "position": 61
+      },
+      {
+        "column": "size",
+        "dtype": "object",
+        "header": "Size",
+        "kind": "text",
+        "position": 62
+      },
+      {
+        "column": "f_grade",
+        "dtype": "object",
+        "header": "F-GRADE",
+        "kind": "text",
+        "position": 63
+      },
+      {
+        "column": "m_type",
+        "dtype": "object",
+        "header": "M.type",
+        "kind": "text",
+        "position": 64
+      },
+      {
+        "column": "p_code",
+        "dtype": "object",
+        "header": "P.Code",
+        "kind": "text",
+        "position": 65
+      },
+      {
+        "column": "fin_type",
+        "dtype": "object",
+        "header": "Fin_type",
+        "kind": "text",
+        "position": 66
+      },
+      {
+        "column": "size_range",
+        "dtype": "object",
+        "header": "Size Range",
+        "kind": "text",
+        "position": 67
+      },
+      {
+        "column": "round_od",
+        "dtype": "float64",
+        "header": "Round OD",
+        "kind": "numeric",
+        "position": 68
+      },
+      {
+        "column": "p_od",
+        "dtype": "object",
+        "header": "P OD",
+        "kind": "text",
+        "position": 69
+      },
+      {
+        "column": "p_thk",
+        "dtype": "float64",
+        "header": "P THK",
+        "kind": "numeric",
+        "position": 70
+      },
+      {
+        "column": "hr_thk",
+        "dtype": "float64",
+        "header": "HR-THK",
+        "kind": "numeric",
+        "position": 71
+      },
+      {
+        "column": "mill_no",
+        "dtype": "object",
+        "header": "Mill no.",
+        "kind": "text",
+        "position": 72
+      },
+      {
+        "column": "cew_pass",
+        "dtype": "object",
+        "header": "CEW_PASS",
+        "kind": "text",
+        "position": 73
+      },
+      {
+        "column": "cew_indication",
+        "dtype": "object",
+        "header": "CEW Indication",
+        "kind": "text",
+        "position": 74
+      },
+      {
+        "column": "remarks",
+        "dtype": "object",
+        "header": "Remarks",
+        "kind": "text",
+        "position": 75
+      },
+      {
+        "column": "top_100",
+        "dtype": "object",
+        "header": "TOP 100",
+        "kind": "text",
+        "position": 76
+      },
+      {
+        "column": "yield_lose",
+        "dtype": "float64",
+        "header": "Yield Lose",
+        "kind": "numeric",
+        "position": 77
+      },
+      {
+        "column": "wip_wrt_order",
+        "dtype": "float64",
+        "header": "WIP wrt Order",
+        "kind": "numeric",
+        "position": 78
+      },
+      {
+        "column": "wip_covered_wrt_order",
+        "dtype": "float64",
+        "header": "WIP Covered wrt Order",
+        "kind": "numeric",
+        "position": 79
+      },
+      {
+        "column": "wip_uncovered",
+        "dtype": "float64",
+        "header": "WIP Uncovered",
+        "kind": "numeric",
+        "position": 80
+      },
+      {
+        "column": "yield_loss",
+        "dtype": "float64",
+        "header": "Yield Loss",
+        "kind": "numeric",
+        "position": 81
+      },
+      {
+        "column": "act_btr",
+        "dtype": "float64",
+        "header": "Act BTR",
+        "kind": "numeric",
+        "position": 82
+      },
+      {
+        "column": "btr_with_yield",
+        "dtype": "float64",
+        "header": "BTR with Yield",
+        "kind": "numeric",
+        "position": 83
+      },
+      {
+        "column": "bal_to_produce",
+        "dtype": "float64",
+        "header": "Bal to Produce",
+        "kind": "numeric",
+        "position": 84
+      },
+      {
+        "column": "sign_off",
+        "dtype": "float64",
+        "header": "Sign Off",
+        "kind": "numeric",
+        "position": 85
+      },
+      {
+        "column": "non_sign_off",
+        "dtype": "float64",
+        "header": "Non Sign Off",
+        "kind": "numeric",
+        "position": 86
+      },
+      {
+        "column": "desp_plan",
+        "dtype": "float64",
+        "header": "Desp Plan",
+        "kind": "numeric",
+        "position": 87
+      },
+      {
+        "column": "prod_wk",
+        "dtype": "object",
+        "header": "Prod WK",
+        "kind": "text",
+        "position": 88
+      },
+      {
+        "column": "w1",
+        "dtype": "float64",
+        "header": "W1",
+        "kind": "numeric",
+        "position": 89
+      },
+      {
+        "column": "w2",
+        "dtype": "float64",
+        "header": "W2",
+        "kind": "numeric",
+        "position": 90
+      },
+      {
+        "column": "w3",
+        "dtype": "float64",
+        "header": "W3",
+        "kind": "numeric",
+        "position": 91
+      },
+      {
+        "column": "w4",
+        "dtype": "float64",
+        "header": "W4",
+        "kind": "numeric",
+        "position": 92
+      },
+      {
+        "column": "total_plan",
+        "dtype": "float64",
+        "header": "total Plan",
+        "kind": "numeric",
+        "position": 93
+      },
+      {
+        "column": "w1_sign_off2",
+        "dtype": "float64",
+        "header": "W1 sign off2",
+        "kind": "numeric",
+        "position": 94
+      },
+      {
+        "column": "w2_sign_off2",
+        "dtype": "float64",
+        "header": "W2 sign off2",
+        "kind": "numeric",
+        "position": 95
+      },
+      {
+        "column": "w3_sign_off2",
+        "dtype": "float64",
+        "header": "W3 sign off2",
+        "kind": "numeric",
+        "position": 96
+      },
+      {
+        "column": "w4_sign_off2",
+        "dtype": "float64",
+        "header": "W4 sign off2",
+        "kind": "numeric",
+        "position": 97
+      },
+      {
+        "column": "total_sign_off2",
+        "dtype": "float64",
+        "header": "total sign off2",
+        "kind": "numeric",
+        "position": 98
+      }
+    ],
+    "storage": "view",
+    "table": "dump_signoff_khopoli",
+    "text_columns": []
+  },
+  "stock": {
+    "columns": [
+      {
+        "canonical_column": "material",
+        "canonicaliser": "material_code",
+        "column": "material_raw",
+        "dtype": "int64",
+        "header": "Material",
+        "kind": "text",
+        "position": 0,
+        "sql_kind": "text"
+      },
+      {
+        "column": "material_description",
+        "dtype": "object",
+        "header": "Material Description",
+        "kind": "text",
+        "position": 1
+      },
+      {
+        "column": "length",
+        "dtype": "float64",
+        "header": "LENGTH",
+        "kind": "numeric",
+        "position": 2
+      },
+      {
+        "column": "ctl_ll",
+        "dtype": "object",
+        "header": "CTL/LL",
+        "kind": "text",
+        "position": 3
+      },
+      {
+        "column": "batch",
+        "dtype": "object",
+        "header": "BATCH",
+        "kind": "text",
+        "position": 4
+      },
+      {
+        "column": "nos",
+        "dtype": "float64",
+        "header": "NOS",
+        "kind": "numeric",
+        "position": 5
+      },
+      {
+        "column": "kg",
+        "dtype": "float64",
+        "header": "KG",
+        "kind": "numeric",
+        "position": 6
+      },
+      {
+        "column": "mt",
+        "dtype": "float64",
+        "header": "MT",
+        "kind": "numeric",
+        "position": 7
+      },
+      {
+        "column": "base_unit_of_measure",
+        "dtype": "object",
+        "header": "Base Unit of Measure",
+        "kind": "text",
+        "position": 8
+      },
+      {
+        "column": "storage_location",
+        "dtype": "object",
+        "header": "Storage location",
+        "kind": "text",
+        "position": 9
+      },
+      {
+        "canonical_column": "plant",
+        "canonicaliser": "plant_code",
+        "column": "plant_raw",
+        "dtype": "int64",
+        "header": "Plant",
+        "kind": "numeric",
+        "position": 10,
+        "sql_kind": "text"
+      },
+      {
+        "column": "t_pkd_tube",
+        "dtype": "float64",
+        "header": "T-PKD_TUBE",
+        "kind": "numeric",
+        "position": 11
+      },
+      {
+        "column": "tube_qty_mtr",
+        "dtype": "float64",
+        "header": "Tube Qty.(Mtr)",
+        "kind": "numeric",
+        "position": 12
+      },
+      {
+        "column": "special_stock_number",
+        "dtype": "object",
+        "header": "Special stock number",
+        "kind": "text",
+        "position": 13
+      },
+      {
+        "column": "item_sd",
+        "dtype": "float64",
+        "header": "Item (SD)",
+        "kind": "numeric",
+        "position": 14
+      },
+      {
+        "column": "customer_name",
+        "dtype": "object",
+        "header": "CUSTOMER NAME",
+        "kind": "text",
+        "position": 15
+      },
+      {
+        "column": "ageing_days",
+        "dtype": "int64",
+        "header": "Ageing days",
+        "kind": "numeric",
+        "position": 16
+      },
+      {
+        "column": "age_wise",
+        "dtype": "object",
+        "header": "AGE WISE",
+        "kind": "text",
+        "position": 17
+      }
+    ],
+    "storage": "view",
+    "table": "dump_stock",
+    "text_columns": []
+  },
+  "transfers": {
+    "columns": [
+      {
+        "dtype": "float64",
+        "header": "Length for TATA Tubes Material"
+      },
+      {
+        "dtype": "float64",
+        "header": "DESP P LANT"
+      },
+      {
+        "dtype": "float64",
+        "header": "CUSTOMER  CD"
+      },
+      {
+        "dtype": "object",
+        "header": "CUSTOMER  NAME"
+      },
+      {
+        "dtype": "float64",
+        "header": "Billing  Document Number"
+      },
+      {
+        "dtype": "datetime64[ns]",
+        "header": "BILLING  DATE"
+      },
+      {
+        "dtype": "object",
+        "header": "MATERAIL NUMBER"
+      },
+      {
+        "dtype": "object",
+        "header": "Material   Description"
+      },
+      {
+        "dtype": "int64",
+        "header": "qty in no"
+      },
+      {
+        "dtype": "float64",
+        "header": "Quantity"
+      },
+      {
+        "dtype": "float64",
+        "header": "RATE/UNIT"
+      },
+      {
+        "dtype": "float64",
+        "header": "MATERIAL VAL"
+      },
+      {
+        "dtype": "float64",
+        "header": "ED AMOUNT"
+      },
+      {
+        "dtype": "float64",
+        "header": "CESSVAL"
+      },
+      {
+        "dtype": "float64",
+        "header": "TAX AMT"
+      },
+      {
+        "dtype": "float64",
+        "header": "DO/STO NO"
+      },
+      {
+        "dtype": "object",
+        "header": "VEHICLE NO"
+      },
+      {
+        "dtype": "float64",
+        "header": "TOTAL INV VALUE"
+      },
+      {
+        "dtype": "float64",
+        "header": "IGST Rate"
+      },
+      {
+        "dtype": "float64",
+        "header": "Billing Item"
+      },
+      {
+        "dtype": "object",
+        "header": "TYPE"
+      },
+      {
+        "dtype": "float64",
+        "header": "PAYER CD"
+      },
+      {
+        "dtype": "float64",
+        "header": "SHIP TO PARTY C"
+      },
+      {
+        "dtype": "object",
+        "header": "SHIPTO PARTY DISC"
+      },
+      {
+        "dtype": "object",
+        "header": "Addres of Ship to party"
+      },
+      {
+        "dtype": "object",
+        "header": "SALES  UNIT"
+      },
+      {
+        "dtype": "float64",
+        "header": "Domain for z_qty_meter"
+      },
+      {
+        "dtype": "float64",
+        "header": "SOP  VALUE"
+      },
+      {
+        "dtype": "float64",
+        "header": "LST/CST"
+      },
+      {
+        "dtype": "float64",
+        "header": "% IND"
+      },
+      {
+        "dtype": "float64",
+        "header": "ST AMT"
+      },
+      {
+        "dtype": "float64",
+        "header": "SERVICE TAX"
+      },
+      {
+        "dtype": "float64",
+        "header": "TO TAX"
+      },
+      {
+        "dtype": "float64",
+        "header": "VAT IND"
+      },
+      {
+        "dtype": "float64",
+        "header": "VAT/RETAIL SRLNO."
+      },
+      {
+        "dtype": "float64",
+        "header": "FREIGHT AMT"
+      },
+      {
+        "dtype": "float64",
+        "header": "TRNSHPD FRT VAL"
+      },
+      {
+        "dtype": "float64",
+        "header": "ENTRY/OCTROI"
+      },
+      {
+        "dtype": "float64",
+        "header": "PYMT TRMS"
+      },
+      {
+        "dtype": "datetime64[ns]",
+        "header": "DUE DATE"
+      },
+      {
+        "dtype": "float64",
+        "header": "REBATES"
+      },
+      {
+        "dtype": "float64",
+        "header": "CAM NO."
+      },
+      {
+        "dtype": "float64",
+        "header": "SO-LP"
+      },
+      {
+        "dtype": "float64",
+        "header": "DISC-SO-LP"
+      },
+      {
+        "dtype": "float64",
+        "header": "MRP"
+      },
+      {
+        "dtype": "float64",
+        "header": "DO/STO -Item No"
+      },
+      {
+        "dtype": "float64",
+        "header": "SO/STR No"
+      },
+      {
+        "dtype": "float64",
+        "header": "SO/STR-Item"
+      },
+      {
+        "dtype": "object",
+        "header": "TOC indicator"
+      },
+      {
+        "dtype": "float64",
+        "header": "DELIVERY"
+      },
+      {
+        "dtype": "object",
+        "header": "DESTN CD"
+      },
+      {
+        "dtype": "object",
+        "header": "DEST CD DESCR"
+      },
+      {
+        "dtype": "object",
+        "header": "REGION"
+      },
+      {
+        "dtype": "object",
+        "header": "TRANS IND"
+      },
+      {
+        "dtype": "float64",
+        "header": "TRNSHPD PLANT"
+      },
+      {
+        "dtype": "object",
+        "header": "TRANSPORTER NAME"
+      },
+      {
+        "dtype": "float64",
+        "header": "TRANSHIP VENDOR"
+      },
+      {
+        "dtype": "float64",
+        "header": "FRT. IND."
+      },
+      {
+        "dtype": "float64",
+        "header": "GR NO"
+      },
+      {
+        "dtype": "datetime64[ns]",
+        "header": "GR DATE"
+      },
+      {
+        "dtype": "float64",
+        "header": "GR QTY"
+      },
+      {
+        "dtype": "float64",
+        "header": "DELAY IN RECEIPT"
+      },
+      {
+        "dtype": "object",
+        "header": "TR GRP"
+      },
+      {
+        "dtype": "object",
+        "header": "MATERIAL GROUP"
+      },
+      {
+        "dtype": "float64",
+        "header": "STOCK DAYS"
+      },
+      {
+        "dtype": "float64",
+        "header": "CUSTOMER METERIAL"
+      },
+      {
+        "dtype": "float64",
+        "header": "CUST ACCT NO"
+      },
+      {
+        "dtype": "float64",
+        "header": "PCODE"
+      },
+      {
+        "dtype": "float64",
+        "header": "QCODE"
+      },
+      {
+        "dtype": "float64",
+        "header": "TDC NO"
+      },
+      {
+        "dtype": "float64",
+        "header": "LENGTH"
+      },
+      {
+        "dtype": "object",
+        "header": "CHAPTER ID"
+      },
+      {
+        "dtype": "object",
+        "header": "BATCH"
+      },
+      {
+        "dtype": "object",
+        "header": "Storage location"
+      },
+      {
+        "dtype": "float64",
+        "header": "Loading Charge"
+      },
+      {
+        "dtype": "float64",
+        "header": "C.A. INV NO"
+      },
+      {
+        "dtype": "float64",
+        "header": "P.O.Number"
+      },
+      {
+        "dtype": "float64",
+        "header": "PO ITEM"
+      },
+      {
+        "dtype": "float64",
+        "header": "PO DT"
+      },
+      {
+        "dtype": "float64",
+        "header": "FREIGHT ACCRUED(1ST LEG)"
+      },
+      {
+        "dtype": "float64",
+        "header": "FREIGHT ACCRUED(2ST LEG)"
+      },
+      {
+        "dtype": "float64",
+        "header": "IDLE FREIGHT"
+      },
+      {
+        "dtype": "float64",
+        "header": "Outer Diameter of Material"
+      },
+      {
+        "dtype": "float64",
+        "header": "Inner Diameter of Material"
+      },
+      {
+        "dtype": "float64",
+        "header": "Thickness for TATA Tubes Material"
+      },
+      {
+        "dtype": "object",
+        "header": "Mill (for TATA Tubes)"
+      },
+      {
+        "dtype": "object",
+        "header": "Material Category"
+      },
+      {
+        "dtype": "object",
+        "header": "Material Surface Finish"
+      },
+      {
+        "dtype": "object",
+        "header": "Material End Finish"
+      },
+      {
+        "dtype": "object",
+        "header": "Material Class"
+      },
+      {
+        "dtype": "float64",
+        "header": "Len 1 of Material"
+      },
+      {
+        "dtype": "float64",
+        "header": "Len 2 of Material"
+      },
+      {
+        "dtype": "float64",
+        "header": "Material Specification"
+      },
+      {
+        "dtype": "float64",
+        "header": "Transportation zone to or from which the"
+      },
+      {
+        "dtype": "float64",
+        "header": "Distribution Channel"
+      },
+      {
+        "dtype": "object",
+        "header": "Material Group 2"
+      },
+      {
+        "dtype": "float64",
+        "header": "Division"
+      },
+      {
+        "dtype": "float64",
+        "header": "Sales office"
+      },
+      {
+        "dtype": "float64",
+        "header": "Net Weight"
+      },
+      {
+        "dtype": "float64",
+        "header": "Gross Weight"
+      },
+      {
+        "dtype": "float64",
+        "header": "Tare Weight"
+      },
+      {
+        "dtype": "float64",
+        "header": "Wooden Pallet WT"
+      },
+      {
+        "dtype": "float64",
+        "header": "Customer change status"
+      },
+      {
+        "dtype": "object",
+        "header": "Material Draw Type"
+      },
+      {
+        "dtype": "object",
+        "header": "PLAN GROUP"
+      },
+      {
+        "dtype": "float64",
+        "header": "Exchange Rate for Postings to Financial"
+      },
+      {
+        "dtype": "object",
+        "header": "Sales Document Type"
+      },
+      {
+        "dtype": "float64",
+        "header": "Material Price Group"
+      },
+      {
+        "dtype": "float64",
+        "header": "Material Group 1"
+      },
+      {
+        "dtype": "float64",
+        "header": "Nielsen indicator"
+      },
+      {
+        "dtype": "object",
+        "header": "Country/Region Key"
+      },
+      {
+        "dtype": "float64",
+        "header": "Internal floating point from"
+      },
+      {
+        "dtype": "object",
+        "header": "SD Document Currency"
+      },
+      {
+        "dtype": "float64",
+        "header": "Subtotal 5 from Pricing Procedure for Pr"
+      },
+      {
+        "dtype": "float64",
+        "header": "Condition Contract"
+      },
+      {
+        "dtype": "float64",
+        "header": "Subtotal 4 from Pricing Procedure for Pr"
+      },
+      {
+        "dtype": "float64",
+        "header": "Condition Value"
+      },
+      {
+        "dtype": "float64",
+        "header": "Condition Value.1"
+      },
+      {
+        "dtype": "float64",
+        "header": "Condition Value.2"
+      },
+      {
+        "dtype": "float64",
+        "header": "Condition Value.3"
+      },
+      {
+        "dtype": "float64",
+        "header": "Condition Value.4"
+      },
+      {
+        "dtype": "float64",
+        "header": "Condition Value.5"
+      },
+      {
+        "dtype": "float64",
+        "header": "Condition Value.6"
+      },
+      {
+        "dtype": "float64",
+        "header": "Condition Value.7"
+      },
+      {
+        "dtype": "float64",
+        "header": "MARK  CUSTOMER"
+      },
+      {
+        "dtype": "object",
+        "header": "MARK DESTINATION"
+      },
+      {
+        "dtype": "float64",
+        "header": "Ship Mode"
+      },
+      {
+        "dtype": "object",
+        "header": "Billing Type"
+      },
+      {
+        "dtype": "float64",
+        "header": "Sales organization"
+      },
+      {
+        "dtype": "float64",
+        "header": "Period"
+      },
+      {
+        "dtype": "float64",
+        "header": "ADDLST AMT"
+      },
+      {
+        "dtype": "float64",
+        "header": "Standard price"
+      },
+      {
+        "dtype": "datetime64[ns]",
+        "header": "Field of type DATS"
+      },
+      {
+        "dtype": "float64",
+        "header": "Name"
+      },
+      {
+        "dtype": "float64",
+        "header": "Account Number of Supplier"
+      },
+      {
+        "dtype": "float64",
+        "header": "Sec.H.Ecess"
+      },
+      {
+        "dtype": "float64",
+        "header": "AR4 TYPE"
+      },
+      {
+        "dtype": "float64",
+        "header": "AR4 NO"
+      },
+      {
+        "dtype": "float64",
+        "header": "AR4 DATE"
+      },
+      {
+        "dtype": "float64",
+        "header": "PROD NO"
+      },
+      {
+        "dtype": "float64",
+        "header": "PROD ITEM"
+      },
+      {
+        "dtype": "float64",
+        "header": "PROD DATE"
+      },
+      {
+        "dtype": "datetime64[ns]",
+        "header": "DO/STO DATE"
+      },
+      {
+        "dtype": "float64",
+        "header": "POE DATE"
+      },
+      {
+        "dtype": "float64",
+        "header": "Social Security cess"
+      },
+      {
+        "dtype": "float64",
+        "header": "Additional Tax"
+      },
+      {
+        "dtype": "float64",
+        "header": "Finacial Charges"
+      },
+      {
+        "dtype": "float64",
+        "header": "Shopping Cart No"
+      },
+      {
+        "dtype": "float64",
+        "header": "Production Order No"
+      },
+      {
+        "dtype": "float64",
+        "header": "WBS Element"
+      },
+      {
+        "dtype": "float64",
+        "header": "VPRS Costs"
+      },
+      {
+        "dtype": "float64",
+        "header": "Customer Classification for Pricing Proc"
+      },
+      {
+        "dtype": "object",
+        "header": "Description"
+      },
+      {
+        "dtype": "object",
+        "header": "Plant GSTIN"
+      },
+      {
+        "dtype": "float64",
+        "header": "ETO IND"
+      },
+      {
+        "dtype": "float64",
+        "header": "Material Document"
+      },
+      {
+        "dtype": "float64",
+        "header": "HRPO/HRSPO."
+      },
+      {
+        "dtype": "float64",
+        "header": "Special NR TDC"
+      },
+      {
+        "dtype": "float64",
+        "header": "IGST Tax Value"
+      },
+      {
+        "dtype": "float64",
+        "header": "SGST Tax Value"
+      },
+      {
+        "dtype": "float64",
+        "header": "CGST Tax Value"
+      },
+      {
+        "dtype": "float64",
+        "header": "UTGST Tax Value"
+      },
+      {
+        "dtype": "float64",
+        "header": "Compensation cess"
+      },
+      {
+        "dtype": "object",
+        "header": "Mode of shipment"
+      },
+      {
+        "dtype": "float64",
+        "header": "HSN Code"
+      },
+      {
+        "dtype": "float64",
+        "header": "Bill To Party"
+      },
+      {
+        "dtype": "object",
+        "header": "Bill To Party Desc"
+      },
+      {
+        "dtype": "object",
+        "header": "Bill To Region"
+      },
+      {
+        "dtype": "object",
+        "header": "Bill-to GSTIN"
+      },
+      {
+        "dtype": "float64",
+        "header": "Exchange Rate for Price Determination"
+      },
+      {
+        "dtype": "float64",
+        "header": "Indicator for export status"
+      },
+      {
+        "dtype": "float64",
+        "header": "TCS Value(Goods)"
+      },
+      {
+        "dtype": "float64",
+        "header": "TCS Value(Others)"
+      },
+      {
+        "dtype": "float64",
+        "header": "Covid 19 Cess"
+      },
+      {
+        "dtype": "float64",
+        "header": "Forest Produce Cess"
+      },
+      {
+        "dtype": "float64",
+        "header": "Search term for conditions"
+      },
+      {
+        "dtype": "float64",
+        "header": "TRANS_TIME"
+      },
+      {
+        "dtype": "object",
+        "header": "SALES ORDER TYPE"
+      },
+      {
+        "dtype": "float64",
+        "header": "E1FORM INDICATOR"
+      },
+      {
+        "dtype": "float64",
+        "header": "CST NO"
+      },
+      {
+        "dtype": "float64",
+        "header": "LST NO"
+      },
+      {
+        "dtype": "float64",
+        "header": "RAIL RECEIPT NO"
+      },
+      {
+        "dtype": "float64",
+        "header": "RAIL RECEIPT DT"
+      },
+      {
+        "dtype": "object",
+        "header": "LORRY RECEIPT NO"
+      },
+      {
+        "dtype": "datetime64[ns]",
+        "header": "LORRY RECEIPT DT"
+      },
+      {
+        "dtype": "float64",
+        "header": "CONDITION TYPE"
+      },
+      {
+        "dtype": "object",
+        "header": "PLANT DESC"
+      },
+      {
+        "dtype": "float64",
+        "header": "WBS ELEMENT"
+      },
+      {
+        "dtype": "object",
+        "header": "DESP PLANT REGION"
+      },
+      {
+        "dtype": "object",
+        "header": "SALES ORD REASON CD"
+      },
+      {
+        "dtype": "float64",
+        "header": "SALES ORD REASON TXT"
+      },
+      {
+        "dtype": "float64",
+        "header": "Net Weight.1"
+      },
+      {
+        "dtype": "object",
+        "header": "Cast No"
+      },
+      {
+        "dtype": "object",
+        "header": "Valuation Type"
+      },
+      {
+        "dtype": "float64",
+        "header": "Post Trt"
+      },
+      {
+        "dtype": "float64",
+        "header": "PCR Number"
+      },
+      {
+        "dtype": "object",
+        "header": "Business Place"
+      },
+      {
+        "dtype": "datetime64[ns]",
+        "header": "SO/STR Creation Date"
+      },
+      {
+        "dtype": "object",
+        "header": "Invoice Type"
+      },
+      {
+        "dtype": "float64",
+        "header": "Taxable Value"
+      },
+      {
+        "dtype": "object",
+        "header": "Tracking no"
+      },
+      {
+        "dtype": "float64",
+        "header": "Self Loading Flagt"
+      },
+      {
+        "dtype": "object",
+        "header": "Invoice Registration Number(IRN)"
+      },
+      {
+        "dtype": "float64",
+        "header": "eWayBill Number"
+      },
+      {
+        "dtype": "datetime64[ns]",
+        "header": "eWay Bill Creation Date"
+      },
+      {
+        "dtype": "object",
+        "header": "eWay Bill Creation Time"
+      },
+      {
+        "dtype": "datetime64[ns]",
+        "header": "eWay Bill - Valid To"
+      },
+      {
+        "dtype": "float64",
+        "header": "Marketing Agent Code"
+      },
+      {
+        "dtype": "float64",
+        "header": "Marketing Agent"
+      },
+      {
+        "dtype": "float64",
+        "header": "FD Number"
+      },
+      {
+        "dtype": "float64",
+        "header": "LC Number"
+      },
+      {
+        "dtype": "float64",
+        "header": "LC Expiry Date"
+      },
+      {
+        "dtype": "float64",
+        "header": "BOE Number"
+      },
+      {
+        "dtype": "float64",
+        "header": "BOE Date"
+      },
+      {
+        "dtype": "float64",
+        "header": "TAXABLE VALUE LOCAL CURRENCY"
+      },
+      {
+        "dtype": "float64",
+        "header": "Incoterms"
+      },
+      {
+        "dtype": "float64",
+        "header": "SEC1 MAX"
+      },
+      {
+        "dtype": "float64",
+        "header": "SEC1 MAX.1"
+      },
+      {
+        "dtype": "float64",
+        "header": "Material No"
+      },
+      {
+        "dtype": "float64",
+        "header": "Material No.1"
+      },
+      {
+        "dtype": "float64",
+        "header": "charg"
+      },
+      {
+        "dtype": "float64",
+        "header": "charg.1"
+      },
+      {
+        "dtype": "object",
+        "header": "Supply Plant."
+      },
+      {
+        "dtype": "object",
+        "header": "Supply Plant..1"
+      },
+      {
+        "dtype": "float64",
+        "header": "Sales and Distribution Document Number"
+      },
+      {
+        "dtype": "float64",
+        "header": "Sales and Distribution Document Number.1"
+      },
+      {
+        "dtype": "float64",
+        "header": "Sales document item"
+      },
+      {
+        "dtype": "float64",
+        "header": "Sales document item.1"
+      },
+      {
+        "dtype": "float64",
+        "header": "Material Number"
+      },
+      {
+        "dtype": "float64",
+        "header": "Material Number.1"
+      },
+      {
+        "dtype": "float64",
+        "header": "Batch Number"
+      },
+      {
+        "dtype": "float64",
+        "header": "Batch Number.1"
+      },
+      {
+        "dtype": "float64",
+        "header": "SEC2 MAX"
+      },
+      {
+        "dtype": "float64",
+        "header": "SEC2 MAX.1"
+      }
+    ],
+    "storage": "row_json",
+    "table": "tsl_transfers",
+    "text_columns": [
+      "MATERAIL NUMBER"
+    ]
+  },
+  "vsm_stock": {
+    "columns": [
+      {
+        "column": "s_no",
+        "dtype": "float64",
+        "header": "S.NO",
+        "kind": "numeric",
+        "position": 0
+      },
+      {
+        "column": "section",
+        "dtype": "object",
+        "header": "Section",
+        "kind": "text",
+        "position": 1
+      },
+      {
+        "column": "column1",
+        "dtype": "float64",
+        "header": "Column1",
+        "kind": "text",
+        "position": 2
+      },
+      {
+        "column": "o_d",
+        "dtype": "float64",
+        "header": "O D",
+        "kind": "numeric",
+        "position": 3
+      },
+      {
+        "column": "id",
+        "dtype": "float64",
+        "header": "ID",
+        "kind": "numeric",
+        "position": 4
+      },
+      {
+        "column": "thk",
+        "dtype": "float64",
+        "header": "Thk.",
+        "kind": "numeric",
+        "position": 5
+      },
+      {
+        "column": "length",
+        "dtype": "float64",
+        "header": "Length",
+        "kind": "numeric",
+        "position": 6
+      },
+      {
+        "column": "wt_len",
+        "dtype": "object",
+        "header": "Wt/Len",
+        "kind": "text",
+        "position": 7
+      },
+      {
+        "column": "key",
+        "dtype": "object",
+        "header": "key",
+        "kind": "text",
+        "position": 8
+      },
+      {
+        "column": "length_key",
+        "dtype": "object",
+        "header": "length key",
+        "kind": "text",
+        "position": 9
+      },
+      {
+        "column": "grade",
+        "dtype": "object",
+        "header": "Grade",
+        "kind": "text",
+        "position": 10
+      },
+      {
+        "column": "fc_nfc",
+        "dtype": "object",
+        "header": "FC/NFC",
+        "kind": "text",
+        "position": 11
+      },
+      {
+        "column": "hr_cr",
+        "dtype": "object",
+        "header": "HR/CR",
+        "kind": "text",
+        "position": 12
+      },
+      {
+        "column": "nos",
+        "dtype": "float64",
+        "header": "NOS",
+        "kind": "numeric",
+        "position": 13
+      },
+      {
+        "column": "c_056",
+        "dtype": "object",
+        "header": "056",
+        "kind": "text",
+        "position": 14
+      },
+      {
+        "column": "c_0789",
+        "dtype": "float64",
+        "header": "0789",
+        "kind": "numeric",
+        "position": 15
+      },
+      {
+        "column": "c_0788",
+        "dtype": "float64",
+        "header": "0788",
+        "kind": "numeric",
+        "position": 16
+      },
+      {
+        "column": "schedule",
+        "dtype": "int64",
+        "header": "Schedule",
+        "kind": "numeric",
+        "position": 17
+      },
+      {
+        "column": "stock",
+        "dtype": "float64",
+        "header": "Stock",
+        "kind": "numeric",
+        "position": 18
+      },
+      {
+        "column": "in_transit",
+        "dtype": "float64",
+        "header": "In Transit",
+        "kind": "numeric",
+        "position": 19
+      },
+      {
+        "column": "column2",
+        "dtype": "float64",
+        "header": "Column2",
+        "kind": "numeric",
+        "position": 20
+      },
+      {
+        "column": "coverage",
+        "dtype": "float64",
+        "header": "Coverage",
+        "kind": "numeric",
+        "position": 21
+      },
+      {
+        "column": "c_056_order",
+        "dtype": "float64",
+        "header": "056 Order",
+        "kind": "numeric",
+        "position": 22
+      },
+      {
+        "column": "c_0789_order",
+        "dtype": "float64",
+        "header": "0789 Order",
+        "kind": "numeric",
+        "position": 23
+      },
+      {
+        "column": "c_0788_order",
+        "dtype": "float64",
+        "header": "0788 Order",
+        "kind": "numeric",
+        "position": 24
+      },
+      {
+        "column": "c_789_order",
+        "dtype": "float64",
+        "header": "789 Order",
+        "kind": "numeric",
+        "position": 25
+      },
+      {
+        "column": "order_qty_to_be_logged",
+        "dtype": "float64",
+        "header": "Order qty to be logged",
+        "kind": "numeric",
+        "position": 26
+      },
+      {
+        "column": "coverage_post_order",
+        "dtype": "float64",
+        "header": "Coverage post order",
+        "kind": "numeric",
+        "position": 27
+      },
+      {
+        "column": "remark",
+        "dtype": "object",
+        "header": "Remark",
+        "kind": "text",
+        "position": 28
+      },
+      {
+        "column": "unnamed_29",
+        "dtype": "object",
+        "header": "Unnamed: 29",
+        "kind": "text",
+        "position": 29
+      }
+    ],
+    "storage": "view",
+    "table": "dump_vsm_stock",
+    "text_columns": []
+  },
+  "vsm_tvsm": {
+    "columns": [
+      {
+        "column": "s_no",
+        "dtype": "object",
+        "header": "S.NO",
+        "kind": "text",
+        "position": 0
+      },
+      {
+        "column": "section",
+        "dtype": "object",
+        "header": "Section",
+        "kind": "text",
+        "position": 1
+      },
+      {
+        "column": "column1",
+        "dtype": "object",
+        "header": "Column1",
+        "kind": "text",
+        "position": 2
+      },
+      {
+        "column": "o_d",
+        "dtype": "object",
+        "header": "O D",
+        "kind": "text",
+        "position": 3
+      },
+      {
+        "column": "thk",
+        "dtype": "object",
+        "header": "Thk.",
+        "kind": "text",
+        "position": 4
+      },
+      {
+        "column": "wt_len",
+        "dtype": "object",
+        "header": "Wt/Len",
+        "kind": "text",
+        "position": 5
+      },
+      {
+        "column": "key",
+        "dtype": "object",
+        "header": "key",
+        "kind": "text",
+        "position": 6
+      },
+      {
+        "column": "grade",
+        "dtype": "object",
+        "header": "Grade",
+        "kind": "text",
+        "position": 7
+      },
+      {
+        "column": "fc_nfc",
+        "dtype": "object",
+        "header": "FC/NFC",
+        "kind": "text",
+        "position": 8
+      },
+      {
+        "column": "vsm_requirement",
+        "dtype": "object",
+        "header": "VSM Requirement",
+        "kind": "text",
+        "position": 9
+      },
+      {
+        "column": "vsm_sales",
+        "dtype": "float64",
+        "header": "VSM Sales",
+        "kind": "numeric",
+        "position": 10
+      },
+      {
+        "column": "vsm_stock",
+        "dtype": "float64",
+        "header": "VSM Stock",
+        "kind": "numeric",
+        "position": 11
+      },
+      {
+        "column": "rucha",
+        "dtype": "object",
+        "header": "Rucha",
+        "kind": "text",
+        "position": 12
+      },
+      {
+        "column": "metalman",
+        "dtype": "object",
+        "header": "Metalman",
+        "kind": "text",
+        "position": 13
+      },
+      {
+        "column": "marathwada",
+        "dtype": "object",
+        "header": "Marathwada",
+        "kind": "text",
+        "position": 14
+      },
+      {
+        "column": "rajsriya_tvs",
+        "dtype": "object",
+        "header": "Rajsriya tvs",
+        "kind": "text",
+        "position": 15
+      },
+      {
+        "column": "supangita",
+        "dtype": "object",
+        "header": "supangita",
+        "kind": "text",
+        "position": 16
+      },
+      {
+        "column": "pams_eng",
+        "dtype": "object",
+        "header": "pams eng",
+        "kind": "text",
+        "position": 17
+      },
+      {
+        "column": "column_col",
+        "dtype": "object",
+        "header": " ",
+        "kind": "text",
+        "position": 18
+      },
+      {
+        "column": "c_2",
+        "dtype": "object",
+        "header": " 2",
+        "kind": "text",
+        "position": 19
+      },
+      {
+        "column": "unnamed_20",
+        "dtype": "object",
+        "header": "Unnamed: 20",
+        "kind": "text",
+        "position": 20
+      }
+    ],
+    "storage": "view",
+    "table": "dump_vsm_tvsm",
+    "text_columns": []
+  },
+  "wip": {
+    "columns": [
+      {
+        "canonical_column": "plant",
+        "canonicaliser": "plant_code",
+        "column": "plant_raw",
+        "dtype": "float64",
+        "header": "Plant",
+        "kind": "numeric",
+        "position": 0,
+        "sql_kind": "text"
+      },
+      {
+        "column": "staorage_location",
+        "dtype": "object",
+        "header": "Staorage Location",
+        "kind": "text",
+        "position": 1
+      },
+      {
+        "column": "creation_date",
+        "dtype": "datetime64[ns]",
+        "header": "Creation Date",
+        "kind": "date",
+        "position": 2
+      },
+      {
+        "canonical_column": "material_no",
+        "canonicaliser": "material_code",
+        "column": "material_no_raw",
+        "dtype": "object",
+        "header": "Material No",
+        "kind": "text",
+        "position": 3,
+        "sql_kind": "text"
+      },
+      {
+        "column": "batch",
+        "dtype": "object",
+        "header": "Batch",
+        "kind": "text",
+        "position": 4
+      },
+      {
+        "column": "material_description",
+        "dtype": "object",
+        "header": "Material Description",
+        "kind": "text",
+        "position": 5
+      },
+      {
+        "column": "total_stock",
+        "dtype": "float64",
+        "header": "Total Stock",
+        "kind": "numeric",
+        "position": 6
+      },
+      {
+        "column": "upto_30_days",
+        "dtype": "int64",
+        "header": "Upto 30 days",
+        "kind": "numeric",
+        "position": 7
+      },
+      {
+        "column": "c_31_to_90_days",
+        "dtype": "float64",
+        "header": "31 to 90 days",
+        "kind": "numeric",
+        "position": 8
+      },
+      {
+        "column": "c_91_to_180_days",
+        "dtype": "int64",
+        "header": "91 to 180 days",
+        "kind": "numeric",
+        "position": 9
+      },
+      {
+        "column": "material_group",
+        "dtype": "object",
+        "header": "Material Group",
+        "kind": "text",
+        "position": 10
+      },
+      {
+        "column": "stock_in_transit",
+        "dtype": "int64",
+        "header": "Stock In Transit",
+        "kind": "numeric",
+        "position": 11
+      }
+    ],
+    "storage": "view",
+    "table": "dump_wip",
+    "text_columns": [
+      "Material No"
+    ]
+  },
+  "zmat": {
+    "columns": [
+      {
+        "column": "material_code",
+        "dtype": "int64",
+        "header": "Column1"
+      },
+      {
+        "column": "material_description",
+        "dtype": "object",
+        "header": "MATERIAL DESCRIPTION"
+      },
+      {
+        "column": "material_type",
+        "dtype": "object",
+        "header": "MATERIAL TYPE"
+      },
+      {
+        "column": "material_group",
+        "dtype": "object",
+        "header": "MATERIAL GROUP"
+      },
+      {
+        "column": "old_material_number",
+        "dtype": "object",
+        "header": "OLD MATERIAL NUMBER"
+      },
+      {
+        "column": "base_unit_of_measure",
+        "dtype": "object",
+        "header": "BASE UNIT OF MEASURE"
+      },
+      {
+        "column": "division",
+        "dtype": "int64",
+        "header": "DIVISION"
+      },
+      {
+        "column": "plant_raw",
+        "dtype": "int64",
+        "header": "PLANT"
+      },
+      {
+        "column": "material_grade",
+        "dtype": "object",
+        "header": "MATERIAL GRADE"
+      },
+      {
+        "column": "outer_diameter",
+        "dtype": "object",
+        "header": "OUTER DIAMETER OF MATERIAL"
+      },
+      {
+        "column": "inner_diameter",
+        "dtype": "float64",
+        "header": "INNER DIAMETER OF MATERIAL"
+      },
+      {
+        "column": "thickness",
+        "dtype": "float64",
+        "header": "THICKNESS FOR TATA TUBES MATERIAL"
+      },
+      {
+        "column": "length",
+        "dtype": "float64",
+        "header": "LENGTH FOR TATA TUBES MATERIAL (WITH 4 D"
+      },
+      {
+        "column": "weight_per_metre",
+        "dtype": "int64",
+        "header": "WEIGHT/METRE OF MATERIAL"
+      },
+      {
+        "column": "weight_per_metre_2",
+        "dtype": "float64",
+        "header": "WEIGHT/METRE OF MATERIAL2"
+      },
+      {
+        "column": "weight_per_number",
+        "dtype": "int64",
+        "header": "WEIGHT/NUMBER OF MATERIAL"
+      },
+      {
+        "column": "weight_per_number_2",
+        "dtype": "float64",
+        "header": "WEIGHT/NUMBER OF MATERIAL2"
+      },
+      {
+        "column": "item_type",
+        "dtype": "object",
+        "header": "ITEM TYPE (FOR MATERIALS)"
+      },
+      {
+        "column": "material_draw_type",
+        "dtype": "object",
+        "header": "MATERIAL DRAW TYPE"
+      },
+      {
+        "column": "material_category",
+        "dtype": "object",
+        "header": "MATERIAL CATEGORY"
+      },
+      {
+        "column": "material_specification",
+        "dtype": "object",
+        "header": "MATERIAL SPECIFICATION"
+      },
+      {
+        "column": "material_end_finish",
+        "dtype": "object",
+        "header": "MATERIAL END FINISH"
+      },
+      {
+        "column": "material_surface_finish",
+        "dtype": "object",
+        "header": "MATERIAL SURFACE FINISH"
+      },
+      {
+        "column": "material_geometry",
+        "dtype": "object",
+        "header": "MATERIAL GEOMETRY"
+      }
+    ],
+    "storage": "typed",
+    "table": "dump_zmat",
+    "text_columns": []
+  }
+}
