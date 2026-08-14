@@ -257,7 +257,7 @@ export const SLOTS: Record<string, DumpSlot> = {
     header: 2,
     usecols: null,
     keyColumn: "key",
-    required: ["key", "O D", "Thk.", "Length", "Grade", "FC/NFC", "Schedule", "Stock"],
+    required: ["key", "length key", "O D", "Thk.", "Length", "Grade", "FC/NFC", "Schedule", "Stock"],
   },
   "vsm_tvsm": {
     files: ["rm_tracker_tvsm.xlsx"],

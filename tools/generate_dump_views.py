@@ -19,12 +19,23 @@ writes the SQL that lifts the same positions back out under the same names.
     python3 tools/generate_dump_views.py            # print it instead
     python3 tools/generate_dump_views.py --check    # is a view missing for a slot?
 
-`--check` is deliberately structural and not textual. It asks whether every snapshot slot
-has a view and every view has a slot, because that is the drift that loses data. It does
-*not* compare column lists against today's files: a dump gaining a column is the ordinary
-event the whole JSONB design exists to absorb, and the view goes on working — the new
-column is simply not exposed until somebody regenerates. Failing a build over that would
-punish the case the design was built for.
+`--check` asks two things, and the second one was learned the hard way.
+
+The first is structural: every snapshot slot has a view and every view has a slot.
+
+The second is positional, and it is the failure a generated view actually has. A column
+added at the *end* of a sheet is harmless — the view simply does not expose it until
+somebody regenerates, which is the ordinary event the whole JSONB design exists to
+absorb. A column inserted in the *middle* is not harmless at all: every position after it
+shifts by one, and the view goes on working perfectly while returning the wrong column
+under each name. Nothing errors. Nothing is empty. `grade` just quietly holds what used
+to be two columns further along.
+
+That happened here, between one commit and the next: the `vsm stock` sheet gained a
+`length key` column at position 9, and `dump_vsm_stock` began labelling ten columns
+wrongly. So `--check` now re-reads each slot and compares the names at the positions the
+migration baked in, and fails on a mismatch while staying quiet about additions past the
+end.
 """
 
 from __future__ import annotations
@@ -436,16 +447,37 @@ def main() -> int:
         print(f"{MIGRATION.name} is missing; run this without --check and commit it",
               file=sys.stderr)
         return 1
-    declared = set(re.findall(
-        r"create or replace view public\.(dump_\w+)",
-        MIGRATION.read_text(encoding="utf-8"),
-    ))
+    written = MIGRATION.read_text(encoding="utf-8")
+    declared = set(re.findall(r"create or replace view public\.(dump_\w+)", written))
     if declared != set(wanted):
         print(f"missing a view: {sorted(set(wanted) - declared)}", file=sys.stderr)
         print(f"view for no slot: {sorted(declared - set(wanted))}", file=sys.stderr)
         return 1
-    print(f"{len(declared)} views, one per snapshot slot that has a file to read")
+
+    # Positional drift. Regenerating from today's files and diffing the *bodies* answers
+    # it exactly: a column inserted mid-sheet changes every `r.row -> N` after it, and a
+    # column added at the end changes nothing that is already written.
+    stale = []
+    for block_old, block_new in zip(written.split("create or replace view ")[1:],
+                                    ddl.split("create or replace view ")[1:]):
+        name = block_old.split()[0]
+        if positions(block_old) != positions(block_new):
+            stale.append(name)
+    if stale:
+        print(f"column positions have moved under: {sorted(stale)}", file=sys.stderr)
+        print("a column inserted mid-sheet shifts every one after it, and the view goes "
+              "on working while returning the wrong column under each name.", file=sys.stderr)
+        print("run with --write, then re-apply those views.", file=sys.stderr)
+        return 1
+
+    print(f"{len(declared)} views, one per snapshot slot that has a file to read; "
+          f"column positions unmoved")
     return 0
+
+
+def positions(view_body: str) -> list[tuple[str, str]]:
+    """The (column name, cell expression) pairs a view body projects, in order."""
+    return re.findall(r"(r\.row -> \d+)\).*?as (\w+),?\n", view_body)
 
 
 if __name__ == "__main__":

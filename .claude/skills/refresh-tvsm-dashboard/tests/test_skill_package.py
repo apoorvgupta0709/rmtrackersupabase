@@ -554,12 +554,20 @@ def snapshot_view_migration():
             / "20260814070000_a_view_per_snapshot_dump.sql").read_text(encoding="utf-8")
 
 
-def test_every_snapshot_slot_has_a_view_and_every_view_a_slot():
-    """The generated migration and the registry, compared.
+def test_the_snapshot_views_still_match_the_sheets_they_were_generated_from():
+    """Two ways a generated view goes wrong, and the second one is silent.
 
-    A snapshot slot is exposed as a view over its current batch rather than copied into a
-    table, so the view *is* the table as far as anyone querying is concerned. One missing
-    is a dump that silently cannot be read in SQL at all.
+    A slot with no view is a dump that cannot be read in SQL at all, which is loud enough
+    to find. The one worth a test is positional drift: the stored grid is positional, so a
+    column inserted in the *middle* of a sheet shifts every position after it, and the
+    view goes on working perfectly while returning the wrong column under each name.
+    Nothing errors and nothing is empty.
+
+    It has happened once already. The `vsm stock` sheet gained a `length key` column at
+    position 9 between one commit and the next, and `dump_vsm_stock` began labelling ten
+    columns wrongly. A column added at the *end* is harmless by contrast — the view simply
+    does not expose it — and this stays quiet about those, or it would fire on the
+    ordinary event the whole design exists to absorb.
     """
     result = subprocess.run(
         [sys.executable, str(REPO_ROOT / "tools" / "generate_dump_views.py"), "--check"],
