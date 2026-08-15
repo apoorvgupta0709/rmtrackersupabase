@@ -17,7 +17,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { fmtG } from "../lib/pipeline/format.ts";
+import { fmtG, pyRound } from "../lib/pipeline/format.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const dataPath = process.argv[2] ?? join(root, "data.json");
@@ -111,6 +111,7 @@ json.dump([format(v, "g") for v in values], sys.stdout)
 /* ---- compare --------------------------------------------------------------- */
 
 const faults = [];
+const faultsRound = [];
 for (const [i, value] of list.entries()) {
   const ours = fmtG(value);
   if (ours !== expected[i]) {
@@ -124,9 +125,43 @@ for (const [value, want] of [[NaN, "nan"], [Infinity, "inf"], [-Infinity, "-inf"
   if (ours !== want) faults.push(`${value}: python "${want}", fmtG "${ours}"`);
 }
 
+/* ---- and `pyRound`, which sits under the join keys the same way ------------ */
+
+// `norm_number` rounds to 4 before formatting, `norm_thickness` and `norm_od` to 2,
+// `fmt_nos` to 0 — so the same half-to-even question decides which governed gauge a wall
+// folds onto. Checked at every precision the pipeline actually uses.
+const roundExpected = JSON.parse(execFileSync("python3", ["-c", `
+import json, sys
+values, digits = json.load(sys.stdin)
+json.dump([[repr(round(v, d)) for v in values] for d in digits], sys.stdout)
+`], { input: JSON.stringify([list, [0, 2, 4]]), encoding: "utf8" }));
+
+for (const [d, digits] of [0, 2, 4].entries()) {
+  list.forEach((value, i) => {
+    // Compared through Python's own `repr`, so the comparison cannot be lost in a second
+    // round of formatting.
+    const ours = pyRound(value, digits);
+    const theirs = roundExpected[d][i];
+    const oursRepr = Number.isInteger(ours) && digits === 0 ? String(ours) : String(ours);
+    if (Number(theirs) !== Number(oursRepr)) {
+      faultsRound.push(`round(${value}, ${digits}): python ${theirs}, pyRound ${oursRepr}`);
+    }
+  });
+}
+
 console.log(`${list.length} distinct values checked — ${ADVERSARIAL.length} adversarial, `
   + `${fuzz.length} seeded fuzz, ${fromBuild} harvested from `
   + `${dataPath.split("/").pop()} — plus nan, inf and -inf.`);
+console.log(`pyRound checked at 0, 2 and 4 decimals over the same ${list.length} values.`);
+
+if (faultsRound.length) {
+  console.error(`\n${faultsRound.length} pyRound disagreement(s) with Python:`);
+  for (const fault of faultsRound.slice(0, 20)) console.error(`  - ${fault}`);
+  if (faultsRound.length > 20) {
+    console.error(`  … and ${faultsRound.length - 20} more, not shown.`);
+  }
+  process.exit(1);
+}
 
 if (faults.length) {
   console.error(`\n${faults.length} disagreement(s) with Python:`);

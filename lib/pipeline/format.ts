@@ -64,6 +64,47 @@ export function fmtG(value: number, precision = 6): string {
 }
 
 /**
+ * Python's `round(value, digits)`, which is also half-to-even and also not `Math.round`.
+ *
+ * `norm_number` rounds to 4 decimals before formatting, `norm_thickness` and `norm_od`
+ * round to 2, and `fmt_nos` rounds to a whole number — so this sits underneath the join
+ * keys just as `fmtG` sits underneath the drill-down keys. A wall written `1.225` deciding
+ * between `1.22` and `1.23` decides which governed thickness it folds onto, and therefore
+ * which bucket the tonnage lands in.
+ *
+ * Rounded off the exact decimal expansion for the same reason as `fmtG`: a tie is only a
+ * tie if every remaining digit is zero, which is a question about the value and not about
+ * how many digits a formatter chose to show.
+ */
+export function pyRound(value: number, digits = 0): number {
+  if (!Number.isFinite(value)) return value;
+  if (value === 0) return value;
+
+  const negative = value < 0;
+  const { digits: d, exponent: e } = exactDecimal(Math.abs(value));
+
+  // `value × 10^digits` is already an integer, so there is nothing below the cut.
+  const shift = e + digits;
+  if (shift >= 0) return value;
+
+  const k = -shift;
+  const scale = 10n ** BigInt(k);
+  const n = BigInt(d);
+  const quotient = n / scale;
+  const remainder = n % scale;
+  const half = scale / 2n;
+
+  let rounded = quotient;
+  if (remainder > half || (remainder === half && quotient % 2n === 1n)) rounded += 1n;
+
+  // Through a decimal string rather than arithmetic: `q / 10**digits` in floating point
+  // introduces exactly the error this function exists to control, whereas parsing a
+  // decimal literal is correctly rounded to the nearest double — which is what Python does.
+  const result = Number(`${rounded}e${-digits}`);
+  return negative ? -result : result;
+}
+
+/**
  * The exact decimal expansion of a positive finite double, as `digits × 10^exponent`.
  *
  * A double is `m × 2^e` for integers `m` and `e`. When `e >= 0` that is already an
