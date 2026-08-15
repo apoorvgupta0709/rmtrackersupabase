@@ -2972,7 +2972,13 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                     "qty": float(d["open_amount"]),
                     "unit": "INR",
                 }
-                for _, d in group.sort_values("days_overdue", ascending=False).iterrows()
+                # `mergesort` because the default `quicksort` is not stable, and a great
+                # many documents share an age: which of two rows the same number of days
+                # overdue comes first was decided by the sort's internals rather than by
+                # anything here, and so could move between pandas versions with nothing to
+                # say it had. Stable makes it the sheet's own order, which is a reason.
+                for _, d in group.sort_values(
+                    "days_overdue", ascending=False, kind="mergesort").iterrows()
             ]
             offset_group = offsets[offsets["Customer Name"].eq(name)]
             offset_key = f"OFFSET|{name}"
@@ -2990,7 +2996,10 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                     "qty": float(d["open_amount"]),
                     "unit": "INR",
                 }
-                for _, d in offset_group.sort_values("open_amount").iterrows()
+                # Stable, for the same reason as the ageing sort above: offsets of equal
+                # value are common, and their order should come from the sheet.
+                for _, d in offset_group.sort_values(
+                    "open_amount", kind="mergesort").iterrows()
                 if float(d["open_amount"] or 0) != 0
             ]
             aged = group[group["days_overdue"] > 90]["open_amount"].sum()
