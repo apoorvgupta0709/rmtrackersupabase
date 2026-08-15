@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
 import shutil
 import sys
@@ -931,7 +932,14 @@ def make_ctl_bucket(bucket, length_m):
     # while every resolution count still reads 100%.
     if bucket is None or pd.isna(bucket) or not str(bucket).strip() or pd.isna(length_m):
         return None
-    length = float(length_m)
+    # A length that is present but not a number raised out of here, where a length that is
+    # absent returns None one line above. Refusing both is the same decision: a CTL bucket
+    # whose length cannot be read is the "nan-0.46" fault wearing different clothes — it
+    # would pass validation, match nothing, and take its stock out of circulation.
+    try:
+        length = float(length_m)
+    except (TypeError, ValueError):
+        return None
     suffix = "1" if length >= 3.5 else norm_number(length, 4)
     return f"{bucket}-{suffix}"
 
@@ -958,10 +966,17 @@ def size_key(value):
 
 
 def fmt_nos(value):
-    """Whole pieces with Indian grouping, for text a planner reads on screen."""
+    """Whole pieces, thousand-grouped, for text a planner reads on screen.
+
+    `OverflowError` belongs in the guard beside the other two. An infinity passes
+    `float()` and is then refused by `round()`, so a cell holding one raised out of a
+    formatter whose whole job is to always produce something — and it raised in the
+    middle of building a copy document, where the alternative to a number is not a
+    traceback but the "0" this already returns for every other unusable cell.
+    """
     try:
         return f"{round(float(value)):,}"
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return "0"
 
 
@@ -1425,6 +1440,45 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
         .agg(lambda s: sorted(set(s)))
         .to_dict()
     )
+
+    # The material dimension, written out when asked for. Never on the build's path.
+    #
+    # These maps are where a material code becomes a bucket, and every tracker, stock frame
+    # and queue joins through them — but none of them is published, so the only way to see
+    # one is through a section built on top of it, by which point a disagreement has already
+    # been folded into a tonnage. The TypeScript port needs to be held to them directly and
+    # completely rather than inferred from downstream figures, and this is what lets a check
+    # enumerate every key instead of sampling the ones a section happened to touch.
+    if os.environ.get("DUMP_MATERIAL_DIMENSION"):
+        def _plain(value):
+            if isinstance(value, dict):
+                return {str(k): _plain(v) for k, v in value.items()}
+            if isinstance(value, (list, tuple, set, np.ndarray)):
+                return [_plain(v) for v in value]
+            if value is None or (isinstance(value, float) and (math.isnan(value) or math.isinf(value))):
+                return None
+            if isinstance(value, (np.integer, np.floating, np.bool_)):
+                return value.item()
+            if isinstance(value, pd.Timestamp):
+                return value.date().isoformat()
+            return value
+
+        Path(os.environ["DUMP_MATERIAL_DIMENSION"]).write_text(json.dumps({
+            "material_bucket": _plain(material_bucket.to_dict()),
+            "material_length": _plain(material_length.to_dict()),
+            "description_bucket": _plain(description_bucket.to_dict()),
+            "description_material": _plain(description_material.to_dict()),
+            "description_materials": _plain(description_materials.to_dict()),
+            "description_length": _plain(description_length.to_dict()),
+            "fg_codes_by_description": _plain(fg_codes_by_description),
+            # A tuple key cannot be JSON, so the pair is joined the way a detail key is.
+            "fg_codes_by_description_plant": {
+                f"{d}|{p}": _plain(codes)
+                for (d, p), codes in fg_codes_by_description_plant.items()
+            },
+            "direct": _plain(direct.to_dict(orient="index")),
+        }))
+        print(f"  material dimension written to {os.environ['DUMP_MATERIAL_DIMENSION']}")
 
     def fg_code_for_mother_tube(description_key, plant, bucket):
         """Finished-goods code an STR can be raised on for a mother-tube description.

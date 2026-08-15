@@ -21,8 +21,27 @@ import { readFileSync } from "node:fs";
 type Column = { column?: string; header: string; position?: number };
 type Manifest = {
   columns: Column[];
-  storage: "view" | "row_json";
+  storage: "view" | "row_json" | "typed";
   table: string;
+};
+
+/**
+ * The order each accumulating slot's rows are read back in — `sources.TABLES`'s
+ * `read_order or key`.
+ *
+ * Not decoration, and not only about paging. PostgREST pages by offset, and an unordered
+ * offset over a growing table can serve one row twice and skip another — that alone would
+ * justify it. But **zmat means it**: its rows are deduplicated again inside the pipeline
+ * with `keep="first"`, so "first" has to be the sheet's first and not whichever material
+ * code happens to sort lowest. That is why `dump_zmat` carries a `source_seq` column at
+ * all, and reading it in any other order silently keeps a different row of each duplicate
+ * group.
+ */
+const READ_ORDER: Record<string, string[]> = {
+  zmat: ["source_seq"],
+  bucketting: ["material_code"],
+  oem_key: ["customer"],
+  transfers: ["billing_document", "billing_item"],
 };
 
 export type Row = Record<string, unknown>;
@@ -93,13 +112,30 @@ export async function readSlot(
     });
   }
 
+  const order = (READ_ORDER[slot] ?? []).map((c) => `${c}.asc`).join(",");
+  const ordered = order ? `&order=${order}` : "";
+
+  if (manifest.storage === "typed") {
+    // A real table with named columns, outliving the batches it was filled from.
+    const wanted = manifest.columns.map((c) => c.column).filter(Boolean);
+    const raw = await selectAll(url, key,
+      `${manifest.table}?select=${wanted.join(",")}${ordered}`);
+    return raw.map((row) => {
+      const out: Row = {};
+      for (const column of manifest.columns) {
+        if (column.column) out[column.header] = row[column.column];
+      }
+      return out;
+    });
+  }
+
   // `row_json`: the whole line kept as jsonb.
   //
   // An accumulating table keys that object **by the sheet's own header** — `raw_rows` is
   // the one that holds a positional array, and assuming the two agree reads every column
   // as null without erroring, which is how this first came back with 174 rows and no OEM
   // on any of them. Both shapes are handled rather than one assumed.
-  const raw = await selectAll(url, key, `${manifest.table}?select=row`);
+  const raw = await selectAll(url, key, `${manifest.table}?select=row${ordered}`);
   return raw.map((entry) => {
     const cells = entry.row ?? {};
     const out: Row = {};
