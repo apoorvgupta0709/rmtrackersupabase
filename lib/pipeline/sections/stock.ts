@@ -51,6 +51,8 @@ export type StockResult = {
   rfdBackedMaterials: string[];
   /** Long-length rows with no owning customer: a shared, bucket-level pool. */
   transitStock: StockRow[];
+  /** Long-length, customer-owned rows — the TVS pool is read off these. */
+  llStock: StockRow[];
 };
 
 export type StockRow = {
@@ -59,6 +61,8 @@ export type StockRow = {
   bucket: string | null;
   plant: string | null;
   stock_mt: number;
+  /** TVS-proxy stock counts to the TVS pool even where the OEM key files it Direct. */
+  pool_oem: string | null;
 };
 
 export function stockPools(
@@ -346,6 +350,7 @@ export function stockPools(
     rfdUnrecovered,
     rfdBackedMaterials: [...backed].sort(),
     transitStock,
+    llStock,
   };
 }
 

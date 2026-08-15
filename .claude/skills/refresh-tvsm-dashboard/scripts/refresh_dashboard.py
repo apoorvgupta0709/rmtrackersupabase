@@ -2437,6 +2437,16 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
         }
         metric_details.update(details)
 
+    # The LL tracker, written out when asked for.
+    if os.environ.get("DUMP_LL"):
+        Path(os.environ["DUMP_LL"]).write_text(json.dumps({
+            "ll_rows": _plain(ll_rows),
+            "details": _plain({k: v for k, v in stock_details.items()
+                               if k.startswith("LLALL|")}),
+            "metric_details": _plain(metric_details),
+        }))
+        print(f"  ll tracker written to {os.environ['DUMP_LL']}")
+
     # 7. Sales summary classified through OEM_key_1_rev codes, with the governed
     # Boiler material-group override applied above.
     # Exclude workbook total/summary rows that have no customer code; otherwise the

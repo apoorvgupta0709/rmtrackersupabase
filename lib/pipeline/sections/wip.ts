@@ -31,6 +31,11 @@ export type WipResult = {
   wipUnmapped: Row[];
   governedBuckets: string[];
   customerSummary: Row[];
+  /** Read again by the LL tracker, which appends them under its own key. */
+  wipByBucket: Map<string, number>;
+  transitByBucket: Map<string, number>;
+  wipDetailByBucket: Map<string, Row[]>;
+  transitDetailByBucket: Map<string, Row[]>;
 };
 
 export function wipAndSummary(
@@ -188,7 +193,10 @@ export function wipAndSummary(
       unresolved_sales_lines: rows.filter((r) => (r.sales_mt as number) === 0).length,
     }));
 
-  return { group, details, wipUnmapped, governedBuckets, customerSummary };
+  return {
+    group, details, wipUnmapped, governedBuckets, customerSummary,
+    wipByBucket, transitByBucket, wipDetailByBucket, transitDetailByBucket,
+  };
 }
 
 /* ---- helpers --------------------------------------------------------------- */
