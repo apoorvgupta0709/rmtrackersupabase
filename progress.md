@@ -6,7 +6,7 @@ lives in the Next.js app and `.github/workflows/refresh.yml` can be deleted.
 **Read `.claude/context/memory.md` first** for the project itself. This file only covers the
 port. The plan it executes is at `~/.claude/plans/how-is-the-upload-witty-moore.md`.
 
-_Last updated: 2026-08-15, after S2._
+_Last updated: 2026-08-15, after S6._
 
 ---
 
@@ -47,7 +47,7 @@ exists to stop"); atomic cross-tab consistency via `current_build_id()`; and sec
 | 0 — migration drift | **done** (false alarm; see below) |
 | 1 — absorption into SQL | **not started** |
 | 2 — helpers + config | **done** |
-| 3 — sections | **3 of 17** (S1, S2, S10) |
+| 3 — sections | **7 of 17** (S1, S2, S3, S4, S5, S6, S10) |
 | 4–6 — QC gate, cutover, retire Python | not started |
 
 ### Ported and proven
@@ -59,6 +59,10 @@ exists to stop"); atomic cross-tab consistency via `current_build_id()`; and sec
 | `lib/pipeline/source.ts` | `readSlot`, `readSalesLedger` | used by the section checks |
 | `lib/pipeline/sections/material.ts` | **S1** governed material dimension | 300,023 keys across 9 maps |
 | `lib/pipeline/sections/sales.ts` | **S2** sales mapping | 2,063 keys across 7 lookups |
+| `lib/pipeline/sections/schedule.ts` | **S3** schedule facts | 396 groups, field for field, in order |
+| `lib/pipeline/sections/stock.ts` | **S4** stock pools + RFD 4731 | 396x13 fields, 542 detail keys, 58 RFD rows |
+| `lib/pipeline/sections/wip.ts` | **S5** WIP + customer summary | 396 groups, 16 summary rows, 126 LL keys |
+| `lib/pipeline/sections/lltracker.ts` | **S6** LL tracker | 92 buckets, 92 drill-downs, 460 metric cards |
 | `lib/pipeline/sections/overdue.ts` | **S10** overdue analysis | payload section + 38 drill-downs |
 
 ### Changes made to the Python
@@ -90,6 +94,8 @@ npx tsc --noEmit
 SC=/tmp/port
 mkdir -p $SC
 DUMP_MATERIAL_DIMENSION=$SC/dim.json DUMP_SALES_MAPS=$SC/sales.json \
+  DUMP_SCHEDULE_GROUP=$SC/schedule.json DUMP_STOCK=$SC/stock.json \
+  DUMP_WIP=$SC/wip.json DUMP_LL=$SC/ll.json \
   ./.venv/bin/python .claude/skills/refresh-tvsm-dashboard/scripts/refresh_from_supabase.py \
     --as-of 2026-08-14 --dry-run
 # It prints the temp dir it left data.json in; copy that to $SC/oracle.json.
@@ -100,6 +106,10 @@ node tools/check_normalise.mjs                                 # needs .venv
 node tools/check_section_material.mjs $SC/dim.json
 node tools/check_section_sales.mjs    $SC/sales.json $SC/dim.json
 node tools/check_section_overdue.mjs  $SC/oracle.json --as-of 2026-08-14
+node tools/check_section_schedule.mjs $SC/schedule.json
+node tools/check_section_stock.mjs    $SC/stock.json
+node tools/check_section_wip.mjs      $SC/wip.json
+node tools/check_section_ll.mjs       $SC/ll.json
 
 # Diff two whole payloads (used to prove a pipeline change moved nothing else).
 node tools/compare_pipeline_implementations.mjs a.json b.json --only ll_tracker --top 40
@@ -117,7 +127,7 @@ dumps have moved since, so diffing against it reports the calendar as a defect.
 
 ## The traps — read this before porting anything
 
-Eight silent faults in four sections. **None threw an exception. All would have shipped as
+Ten silent faults in seven sections. **None threw an exception. All would have shipped as
 wrong numbers that reconciled.** Assume the next one is there too.
 
 1. **Python rounds half to even; JavaScript rounds half away from zero** — in *both*
@@ -148,6 +158,17 @@ wrong numbers that reconciled.** Assume the next one is there too.
    at midnight on the 1st lands in the previous month — 76 August lines vanished and every
    derived figure was quietly light. pandas converts nothing. Use `toUtcMillis`/`toUtcDay`/
    `toUtcMonth`, never `Date.parse` directly. The VPS container must also run `TZ=UTC`.
+
+9. **A header can hold a character you cannot see.** Three WIP headers — `Material No`,
+   `Total Stock`, `Stock In Transit` — carry U+00A0, which is why the pipeline rewrites that
+   one slot's columns. A literal with an ordinary space matches nothing, silently and
+   totally: every WIP row read as unmapped and `shared_wip_mt` came out zero on all 396
+   groups. `readSlot` mirrors the rewrite for the slots the pipeline normalises, and *only*
+   those — `vsm_tvsm` has such headers and is deliberately left alone there.
+10. **`Series.astype(str)` is not `str()` on the value you have.** An empty cell in an
+   object column is a float NaN, so `astype(str)` writes the *string* `"nan"` — and
+   `helper_customer` and `uom` are grouped on. Rendering a blank as `""` would merge every
+   blank group into whatever else grouped empty, and the totals would still add up.
 
 Also standing: **`groupby` sorts its keys** and `dropna=False` puts the null group last, so
 insertion order silently reorders every section (`build_sections.seq` is a sort position).
@@ -180,13 +201,13 @@ Line numbers are current as of 2026-08-15 (`refresh_dashboard.py` is 6,788 lines
 |---|---|---|---|---|
 | 1 | Governed material dimension | 1361 | — | **done** |
 | 2 | Map sales | 1513 | S1 | **done** |
-| 3 | Schedule-line facts + SO join | 1670 | S1, S2 | next |
-| 4 | Map current stock (+ RFD 4731 write-off at 1985) | 1771 | S1 | |
-| 5 | WIP / ystockn | 2102 | S1 | |
-| 6 | TVSM LL tracker | 2246 | S1, S4, S5 | |
+| 3 | Schedule-line facts + SO join | 1670 | S1, S2 | **done** |
+| 4 | Map current stock (+ RFD 4731 write-off at 1985) | 1771 | S1 | **done** |
+| 5 | WIP / ystockn | 2102 | S1 | **done** |
+| 6 | TVSM LL tracker | 2246 | S1, S4, S5 | **done** |
 | 7 | Sales summary | 2409 | S2 | |
 | 8 | Missing mappings queues | 2459 | S1–S5 | |
-| 9 | Stock analysis | 2639 | S1, S4 | |
+| 9 | Stock analysis | 2639 | S1, S4 | **next** — last of the spine batch |
 | 10 | Overdue analysis | 2990 | — | **done** |
 | 11 | Megh SKU tracker | 3128 | S1, S2, S4 | largest block, 796 lines |
 | 12 | Inter-plant transfers | 3924 | S1 | |
