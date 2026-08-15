@@ -10,6 +10,7 @@ The deeper material lives where it belongs and is not duplicated here:
 | Need | Read |
 | --- | --- |
 | Session memory: state, open items, decisions, preferences | `.claude/context/memory.md` |
+| **The TypeScript port of the pipeline: state, traps, how to check** | `progress.md` |
 | Daily workflow, business rules, sign-in and admin model | `.claude/skills/refresh-tvsm-dashboard/SKILL.md` |
 | Full data logic, defect history, per-view specifications | `.claude/skills/refresh-tvsm-dashboard/references/data_contract.md` |
 | Governed constants the code is tested against | `.claude/skills/refresh-tvsm-dashboard/config/pipeline.json` |

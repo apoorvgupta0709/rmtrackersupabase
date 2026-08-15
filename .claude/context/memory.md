@@ -35,7 +35,9 @@ different source of frames and a different place to put the answer.
 
 **A port of that pipeline to TypeScript began 15 Aug**, so that the logic lives in the
 app and the Action can be deleted. Python stays authoritative until a section's parity is
-proven; nothing switches over on faith. Plan at
+proven; nothing switches over on faith. **State, the eight traps found so far, the recipe
+for the next section and every check command are in `progress.md` at the repo root — read
+that before touching the port.** Plan at
 `~/.claude/plans/how-is-the-upload-witty-moore.md`. Sized at **14–18 weeks** — `main()` is
 one ~5,500-line function and the surface is 29 payload keys, 30 sections and 34 drill-down
 prefixes. Why it is portable at all: the pipeline is *not* pandas-shaped — one `.merge()`,
