@@ -6,7 +6,7 @@ lives in the Next.js app and `.github/workflows/refresh.yml` can be deleted.
 **Read `.claude/context/memory.md` first** for the project itself. This file only covers the
 port. The plan it executes is at `~/.claude/plans/how-is-the-upload-witty-moore.md`.
 
-_Last updated: 2026-08-15, after S6._
+_Last updated: 2026-08-15, after S9 — the spine batch is complete._
 
 ---
 
@@ -47,7 +47,7 @@ exists to stop"); atomic cross-tab consistency via `current_build_id()`; and sec
 | 0 — migration drift | **done** (false alarm; see below) |
 | 1 — absorption into SQL | **not started** |
 | 2 — helpers + config | **done** |
-| 3 — sections | **7 of 17** (S1, S2, S3, S4, S5, S6, S10) |
+| 3 — sections | **8 of 17** (S1–S6, S9, S10) — **the coupled spine is done** |
 | 4–6 — QC gate, cutover, retire Python | not started |
 
 ### Ported and proven
@@ -63,6 +63,8 @@ exists to stop"); atomic cross-tab consistency via `current_build_id()`; and sec
 | `lib/pipeline/sections/stock.ts` | **S4** stock pools + RFD 4731 | 396x13 fields, 542 detail keys, 58 RFD rows |
 | `lib/pipeline/sections/wip.ts` | **S5** WIP + customer summary | 396 groups, 16 summary rows, 126 LL keys |
 | `lib/pipeline/sections/lltracker.ts` | **S6** LL tracker | 92 buckets, 92 drill-downs, 460 metric cards |
+| `lib/pipeline/sections/analysis.ts` | **S9** stock analysis + SAP-vs-RFD | 769 rows, 1,541 drill-downs, 3 tallies |
+| `lib/pipeline/numeric.ts` | `kahanSum`, `pairwiseSum` | pandas' two summations, used where each belongs |
 | `lib/pipeline/sections/overdue.ts` | **S10** overdue analysis | payload section + 38 drill-downs |
 
 ### Changes made to the Python
@@ -95,7 +97,7 @@ SC=/tmp/port
 mkdir -p $SC
 DUMP_MATERIAL_DIMENSION=$SC/dim.json DUMP_SALES_MAPS=$SC/sales.json \
   DUMP_SCHEDULE_GROUP=$SC/schedule.json DUMP_STOCK=$SC/stock.json \
-  DUMP_WIP=$SC/wip.json DUMP_LL=$SC/ll.json \
+  DUMP_WIP=$SC/wip.json DUMP_LL=$SC/ll.json DUMP_ANALYSIS=$SC/analysis.json \
   ./.venv/bin/python .claude/skills/refresh-tvsm-dashboard/scripts/refresh_from_supabase.py \
     --as-of 2026-08-14 --dry-run
 # It prints the temp dir it left data.json in; copy that to $SC/oracle.json.
@@ -110,6 +112,7 @@ node tools/check_section_schedule.mjs $SC/schedule.json
 node tools/check_section_stock.mjs    $SC/stock.json
 node tools/check_section_wip.mjs      $SC/wip.json
 node tools/check_section_ll.mjs       $SC/ll.json
+node tools/check_section_analysis.mjs $SC/analysis.json
 
 # Diff two whole payloads (used to prove a pipeline change moved nothing else).
 node tools/compare_pipeline_implementations.mjs a.json b.json --only ll_tracker --top 40
@@ -127,7 +130,7 @@ dumps have moved since, so diffing against it reports the calendar as a defect.
 
 ## The traps — read this before porting anything
 
-Ten silent faults in seven sections. **None threw an exception. All would have shipped as
+Twelve silent faults in eight sections. **None threw an exception. All would have shipped as
 wrong numbers that reconciled.** Assume the next one is there too.
 
 1. **Python rounds half to even; JavaScript rounds half away from zero** — in *both*
@@ -170,6 +173,19 @@ wrong numbers that reconciled.** Assume the next one is there too.
    `helper_customer` and `uom` are grouped on. Rendering a blank as `""` would merge every
    blank group into whatever else grouped empty, and the totals would still add up.
 
+11. **pandas has two summations and they disagree.** `Series.sum()` uses numpy's pairwise
+   reduction; `groupby().sum()` is Cython carrying a **Kahan** compensation term. One real
+   nine-row group gives `2.86649999999999982592` one way and `2.86650000000000027001` the
+   other — straddling the midpoint of a column published to three decimals. Use `kahanSum`
+   for group aggregates and `pairwiseSum` for whole-Series totals (`lib/pipeline/numeric.ts`).
+   `kahanSum` deliberately omits the final correction, as `group_sum` does: adding it back
+   is *more accurate* and stops matching. Summing better is the wrong instinct — the goal is
+   the same answer, not a good one.
+12. **A total can be published rounded and sorted unrounded.** Two rows both printed `0.366`
+   — one a single row at exactly 0.366, the other four rows summing to 0.365585 — and
+   rounding before the sort put them the wrong way round. Round on the way out; order on
+   the aggregate.
+
 Also standing: **`groupby` sorts its keys** and `dropna=False` puts the null group last, so
 insertion order silently reorders every section (`build_sections.seq` is a sort position).
 `sortedGroupKeys` in `overdue.ts` is the pattern.
@@ -207,7 +223,7 @@ Line numbers are current as of 2026-08-15 (`refresh_dashboard.py` is 6,788 lines
 | 6 | TVSM LL tracker | 2246 | S1, S4, S5 | **done** |
 | 7 | Sales summary | 2409 | S2 | |
 | 8 | Missing mappings queues | 2459 | S1–S5 | |
-| 9 | Stock analysis | 2639 | S1, S4 | **next** — last of the spine batch |
+| 9 | Stock analysis | 2639 | S1, S4 | **done** |
 | 10 | Overdue analysis | 2990 | — | **done** |
 | 11 | Megh SKU tracker | 3128 | S1, S2, S4 | largest block, 796 lines |
 | 12 | Inter-plant transfers | 3924 | S1 | |
@@ -220,9 +236,14 @@ Line numbers are current as of 2026-08-15 (`refresh_dashboard.py` is 6,788 lines
 **`overdue_analysis` was the only section standing free of the material dimension.** Every
 other one joins through S1 and/or S2, which is why those two came first.
 
-Per the plan, S3–S6 and S9 share intermediates and should move as **one or two batches, not
-five independent ports**. All four hard QC floors go live with them, so that is the phase
-that will overrun.
+**The spine is done.** S3–S6 and S9 shared intermediates and were ported as one batch, as
+the plan expected. What remains is genuinely independent work: S7 and S15/S16/S17 are leaves
+on S1/S2, S8 collects the queues the earlier sections already produce, and S11/S13/S14 hold
+the five hard algorithms.
+
+Suggested order from here: **S7** (50 lines, S2 only) to warm up, then **S8** (the queues are
+already computed — mostly assembly), then **S12**, **S15**, **S16**, **S17**, leaving
+**S11 Megh**, **S13 STR** and **S14 pricing** last.
 
 ### The five algorithms that need real thought
 
