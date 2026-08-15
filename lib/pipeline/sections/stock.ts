@@ -49,6 +49,16 @@ export type StockResult = {
   rfdRecovered: Row[];
   rfdUnrecovered: Row[];
   rfdBackedMaterials: string[];
+  /** Long-length rows with no owning customer: a shared, bucket-level pool. */
+  transitStock: StockRow[];
+};
+
+export type StockRow = {
+  row: Row;
+  material_key: string | null;
+  bucket: string | null;
+  plant: string | null;
+  stock_mt: number;
 };
 
 export function stockPools(
@@ -108,6 +118,7 @@ export function stockPools(
   const ctlStock = stock.filter((s) =>
     !s.is_long && s.flag === "CTL" && s.ctl_bucket !== null && s.plant === "789" && !s.is_transit);
   const llStock = stock.filter((s) => s.is_long && s.bucket !== null && !s.is_transit);
+  const transitStock = stock.filter((s) => s.is_long && s.bucket !== null && s.is_transit);
 
   const ctlPool789Mt = sumBy(ctlStock, (s) => key2(s.pool_oem, s.ctl_bucket), (s) => s.stock_mt);
   const ctlPool789Nos = sumBy(ctlStock, (s) => key2(s.pool_oem, s.ctl_bucket), (s) => s.stock_nos);
@@ -334,6 +345,7 @@ export function stockPools(
     rfdRecovered,
     rfdUnrecovered,
     rfdBackedMaterials: [...backed].sort(),
+    transitStock,
   };
 }
 

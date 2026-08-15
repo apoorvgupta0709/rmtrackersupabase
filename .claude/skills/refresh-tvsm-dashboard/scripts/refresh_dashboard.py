@@ -2263,6 +2263,17 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
         )
     )
 
+    # WIP, transit and the customer summary, written out when asked for.
+    if os.environ.get("DUMP_WIP"):
+        Path(os.environ["DUMP_WIP"]).write_text(json.dumps({
+            "group": _plain(schedule_group.to_dict(orient="records")),
+            "details": _plain({k: v for k, v in stock_details.items() if k.startswith("LL|")}),
+            "wip_unmapped": _plain(wip_unmapped),
+            "governed_buckets": _plain(governed_buckets),
+            "customer_summary": _plain(customer_summary.to_dict(orient="records")),
+        }))
+        print(f"  wip written to {os.environ['DUMP_WIP']}")
+
     # 6. TVSM LL tracker at bucket level.
     tvs_schedule = schedule_group[schedule_group["OEM"].eq("TVS")]
     tsl_schedule = tvs_schedule.groupby("bucket")["schedule_mt"].sum()

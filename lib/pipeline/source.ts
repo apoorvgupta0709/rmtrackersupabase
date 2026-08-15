@@ -47,6 +47,25 @@ const READ_ORDER: Record<string, string[]> = {
 export type Row = Record<string, unknown>;
 
 /**
+ * Slots whose headers carry a non-breaking space, and which the pipeline therefore
+ * rewrites to an ordinary one before reading them.
+ *
+ * `wip.columns = [str(c).replace("\xa0", " ") for c in wip.columns]` is the line this
+ * mirrors, and it is load-bearing: three of that dump's headers — `Material No`,
+ * `Total Stock` and `Stock In Transit` — hold U+00A0, so a literal typed with an ordinary
+ * space matches nothing. The failure is silent and total. Every WIP row read as unmapped,
+ * `shared_wip_mt` came out zero on all 396 groups, and the header printed to a terminal
+ * looks exactly like the one that does not match it.
+ *
+ * Only the slots the pipeline itself normalises are listed: `vsm_tvsm` also has such
+ * headers and is deliberately *not* rewritten there, so its code keys on the real ones.
+ */
+const NBSP_HEADERS = new Set(["wip"]);
+
+const header = (slot: string, name: string): string =>
+  (NBSP_HEADERS.has(slot) ? name.replace(/\u00a0/g, " ") : name);
+
+/**
  * PostgREST answers at most this many rows and **says nothing about having stopped**.
  *
  * Paging that halts on an empty page is correct; paging that halts on a page shorter than
@@ -154,7 +173,7 @@ export async function readSlot(
     return raw.map((row) => {
       const out: Row = {};
       for (const column of manifest.columns) {
-        if (column.column) out[column.header] = row[column.column];
+        if (column.column) out[header(slot, column.header)] = row[column.column];
       }
       return out;
     });
@@ -171,7 +190,7 @@ export async function readSlot(
     return raw.map((row) => {
       const out: Row = {};
       for (const column of manifest.columns) {
-        if (column.column) out[column.header] = row[column.column];
+        if (column.column) out[header(slot, column.header)] = row[column.column];
       }
       return out;
     });
@@ -188,11 +207,11 @@ export async function readSlot(
     const cells = entry.row ?? {};
     const out: Row = {};
     if (Array.isArray(cells)) {
-      manifest.columns.forEach((column, i) => { out[column.header] = cells[i] ?? null; });
+      manifest.columns.forEach((column, i) => { out[header(slot, column.header)] = cells[i] ?? null; });
     } else {
       const byHeader = cells as Record<string, unknown>;
       for (const column of manifest.columns) {
-        out[column.header] = byHeader[column.header] ?? null;
+        out[header(slot, column.header)] = byHeader[column.header] ?? null;
       }
     }
     return out;
