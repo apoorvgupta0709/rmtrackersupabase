@@ -33,6 +33,48 @@ The pipeline is still `scripts/refresh_dashboard.py` and does all the work; the 
 Action's entry point is `scripts/refresh_from_supabase.py`, which only hands it a
 different source of frames and a different place to put the answer.
 
+**A port of that pipeline to TypeScript began 15 Aug**, so that the logic lives in the
+app and the Action can be deleted. Python stays authoritative until a section's parity is
+proven; nothing switches over on faith. Plan at
+`~/.claude/plans/how-is-the-upload-witty-moore.md`. Sized at **14–18 weeks** — `main()` is
+one ~5,500-line function and the surface is 29 payload keys, 30 sections and 34 drill-down
+prefixes. Why it is portable at all: the pipeline is *not* pandas-shaped — one `.merge()`,
+no `merge_asof`/`rolling`/`pivot`, 56 row loops, and the seven `np.*` uses are `np.where`
+and NaN cleanup. pandas is an Excel reader and a `GROUP BY` engine.
+
+- **Done so far:** `tools/compare_pipeline_implementations.mjs` (payload differ, ported
+  from `compare_pipeline_backends.py`'s rules), `lib/pipeline/format.ts` (`fmtG`,
+  `pyRound`) and `lib/pipeline/normalise.ts` (19 helpers), each with a check that asks
+  CPython rather than a transcription — `tools/check_format_g.mjs`,
+  `tools/check_normalise.mjs`. The repo's `.venv` already holds the pinned pandas 2.3.3.
+- **Python rounds half to even and JavaScript rounds half away from zero**, in *both*
+  `round()` and `%g`. `toFixed`/`toPrecision`/`Math.round` therefore cannot be used
+  anywhere a key or a governed gauge is decided: `2814.125` formats as `2814.12` against
+  `2814.13`, and a wall written 1.225 picks a different `THICKNESS_GROUPS` fold. Both are
+  now computed off the exact decimal expansion in BigInt.
+- **The two languages switch to exponential notation at different magnitudes** — Python
+  outside a decimal exponent of `[-4, 16)`, JavaScript outside `(-7, 21)`. Nine helpers are
+  `str()` followed by a regex, so this alone moved twenty answers. `pyStr` handles it. The
+  seam that *cannot* be closed: Python distinguishes `int` from `float`, so `str(5.0)` is
+  `"5.0"` where JavaScript writes `"5"`; a column pandas typed float against one a snapshot
+  view typed `text` can disagree with neither side wrong.
+- **`0` is falsy in Python and `NaN` is truthy** — `str(key or "")` makes `key_family(0)`
+  None, and `if not bucket` lets a NaN through, which is how `"nan-0.46"` was built.
+  `Number("")` is `0` where `float("")` raises, so float literals are validated, not coerced.
+- **Two latent defects in the pipeline, found by the harness and not reproduced:**
+  `fmt_nos` of an infinity raises OverflowError (`float("inf")` succeeds, `round()` refuses,
+  and only TypeError/ValueError are caught), and `make_ctl_bucket` calls `float(length_m)`
+  unguarded. Neither is reachable from a current dump; both would be worth fixing in place.
+- **The database is at 410 MB of the free plan's 500 MB** — `detail_rows` 152 MB,
+  `tsl_sales` 101 MB for 22,419 rows (4.6 KB each, the whole line kept as `row jsonb`),
+  `raw_rows` 67 MB. A build is ~28,000 rows and ~22 MB, so **the parity harness must never
+  write shadow builds**; it diffs payloads in memory. Promoting the ~15 columns the
+  pipeline reads out of `tsl_sales.row` into typed columns would return 60–70 MB.
+- **Concurrency for the ported trigger is a `refresh_runs` claim row, not an advisory
+  lock** — PostgREST pools connections, so a session lock can outlive its request. And the
+  Supabase HTTP gateway cuts a request at ~60s (`service_role` itself has no
+  `statement_timeout`), so no single RPC may be the whole run.
+
 The daily pack now includes `orders.xlsx`, the sales-planning order book (sheets
 `jsr`, `hk_so`, `hk_str`). It feeds the **Order logged** column on the long-length
 tracker and **Orders logged as per sales planning** on the Megh tab, beside the
