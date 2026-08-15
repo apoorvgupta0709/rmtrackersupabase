@@ -2107,6 +2107,18 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             for _, row in group.iterrows()
         ]
 
+    # The stock pools and the RFD reconciliation, written out when asked for.
+    if os.environ.get("DUMP_STOCK"):
+        Path(os.environ["DUMP_STOCK"]).write_text(json.dumps({
+            "group": _plain(schedule_group.to_dict(orient="records")),
+            "details": _plain({k: v for k, v in stock_details.items()
+                               if k.startswith("CTL|") or k.startswith("LL|")}),
+            "rfd_recovered": _plain(rfd_recovered),
+            "rfd_unrecovered": _plain(rfd_unrecovered),
+            "rfd_backed_materials": sorted(str(c) for c in rfd_backed_materials),
+        }))
+        print(f"  stock written to {os.environ['DUMP_STOCK']}")
+
     # 5. WIP/ystockn is an approved shared LL stock source.
     # The dump ends with a plant subtotal and a grand total, both carrying no material
     # code and each repeating the file's entire tonnage. Drop them before anything else
