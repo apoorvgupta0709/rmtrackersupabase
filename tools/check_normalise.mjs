@@ -101,6 +101,7 @@ const UNARY = {
   descriptionShape: "description_shape",
   splitCodes: "split_codes",
   fmtNos: "fmt_nos",
+  sizeKey: "size_key",
 };
 
 // Pairs, sampled rather than crossed: the full product of the build's strings against its

@@ -352,6 +352,28 @@ export function keyFamily(key: unknown): string | null {
   return text || null;
 }
 
+/**
+ * Read OD, second dimension and thickness out of a bucket or contract key.
+ *
+ * Both are written `dim1-dim2-thickness…`, with the second dimension left empty or zero
+ * for a round tube. Returning it as `0` either way keeps the two sides of the join
+ * comparable, and the remaining parts come back so the caller can read the grade off a
+ * bucket or the variant suffix off a contract key.
+ *
+ * Buckets carrying a review note instead of a size ("check tdc for grade") reach here too,
+ * so the parts are coerced rather than converted: a non-numeric part means no size.
+ */
+export function sizeKey(
+  value: unknown,
+): [number, number, number, string[]] | null {
+  const parts = pyOr(value, "").trim().split("-");
+  if (parts.length < 3) return null;
+
+  const [dim1, dim2, thickness] = parts.slice(0, 3).map((part) => toNumber(part.trim()));
+  if (dim1 === null || thickness === null) return null;
+  return [dim1, dim2 ?? 0, thickness, parts];
+}
+
 /* ---- descriptions ---------------------------------------------------------- */
 
 const DESCRIPTION_DIMENSIONS =
