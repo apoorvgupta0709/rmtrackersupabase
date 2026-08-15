@@ -1768,6 +1768,14 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     schedule_group["open_balance_mt"] = schedule_group["balance_mt"].clip(lower=0)
     schedule_group["over_dispatch_mt"] = (-schedule_group["balance_mt"]).clip(lower=0)
 
+    # The grouped schedule, written out when asked for. Never on the build's path.
+    if os.environ.get("DUMP_SCHEDULE_GROUP"):
+        Path(os.environ["DUMP_SCHEDULE_GROUP"]).write_text(json.dumps({
+            "rows": int(len(schedule_group)),
+            "group": _plain(schedule_group.to_dict(orient="records")),
+        }))
+        print(f"  schedule group written to {os.environ['DUMP_SCHEDULE_GROUP']}")
+
     # 4. Map current stock.
     stock["material_key"] = stock["Material"].map(norm_code)
     stock["bucket"] = stock["material_key"].map(material_bucket)
