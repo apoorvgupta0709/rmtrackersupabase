@@ -122,6 +122,46 @@ export function toNumber(value: unknown): number | null {
   return parsed === null || Number.isNaN(parsed) ? null : parsed;
 }
 
+/* ---- dates ----------------------------------------------------------------- */
+
+/**
+ * A date cell as UTC milliseconds, or null. **Never the host's timezone.**
+ *
+ * `Date.parse` reads a bare date (`2026-08-01`) as UTC but a bare date-*time*
+ * (`2026-08-01T00:00:00`) as **local**, and the ledger stores the second form for all
+ * 22,642 of its lines. On any host east of Greenwich that moves an invoice billed at
+ * midnight on the first of the month into the month before: 76 August lines went missing
+ * this way, and the symptom was not an error but a sales total quietly 4% light.
+ *
+ * pandas reads a naive timestamp as written and does no zone conversion, so a naive
+ * literal is completed to UTC here rather than left to the platform. The same reasoning
+ * covers `as_of` — the container must run in UTC, because month-end ageing keys off it.
+ */
+export function toUtcMillis(value: unknown): number | null {
+  if (isNa(value)) return null;
+  const text = pyStr(value).trim();
+  if (!text) return null;
+  const naive = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/.test(text);
+  const parsed = Date.parse(naive ? `${text.replace(" ", "T")}Z` : text);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+/** The whole UTC day a date cell falls on, as a day number. */
+export const toUtcDay = (value: unknown): number | null => {
+  const ms = toUtcMillis(value);
+  return ms === null ? null : Math.floor(ms / 86_400_000);
+};
+
+/** The month a date cell falls in, as `YYYY-MM`. */
+export const toUtcMonth = (value: unknown): string | null => {
+  const ms = toUtcMillis(value);
+  return ms === null ? null : new Date(ms).toISOString().slice(0, 7);
+};
+
+/** A day number back as `YYYY-MM-DD`. */
+export const utcDayIso = (day: number | null): string | null =>
+  day === null ? null : new Date(day * 86_400_000).toISOString().slice(0, 10);
+
 /* ---- text and codes -------------------------------------------------------- */
 
 /** A material or customer code: digits as an integer, anything else upper-cased. */

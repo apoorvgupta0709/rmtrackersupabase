@@ -56,6 +56,54 @@ export type Row = Record<string, unknown>;
  */
 const PAGE = 1000;
 
+/**
+ * The sales ledger: every TSL line ever uploaded, in one settled order.
+ *
+ * The stored `row` is the named line exactly as the read produced it, so this reconstitutes
+ * the frame the file-backed backend assembles. The query orders by the key only so paging
+ * is stable over a growing table; **the order that matters is applied afterwards**, oldest
+ * invoice first, because several published fields are taken off whichever line of a group
+ * comes first. Left to the query, a file-backed run would order by which extracts happen
+ * to sit in `dumps/` and this one by the primary key, and the two would quietly disagree
+ * about the length shown against a long-length SKU.
+ */
+export async function readSalesLedger(
+  { url, key }: { url: string; key: string },
+): Promise<Row[]> {
+  const rows = await selectAll(url, key,
+    "tsl_sales?select=billing_document,billing_item,row"
+    + "&order=billing_document.asc,billing_item.asc");
+
+  const lines: Row[] = rows.map((r) => ({
+    ...(r.row as Record<string, unknown>),
+    billing_document: r.billing_document,
+    billing_item: r.billing_item,
+  }));
+
+  const day = (value: unknown): number | null => {
+    if (value === null || value === undefined) return null;
+    const parsed = Date.parse(String(value).length <= 10
+      ? `${String(value)}T00:00:00Z` : String(value));
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+
+  // Stable, and absent dates last, exactly as `sales_ledger_order` settles it.
+  return lines
+    .map((line, index) => ({ line, index, billed: day(line["BILLING  DATE"]) }))
+    .sort((a, b) => {
+      if (a.billed === null && b.billed === null) return a.index - b.index;
+      if (a.billed === null) return 1;
+      if (b.billed === null) return -1;
+      if (a.billed !== b.billed) return a.billed - b.billed;
+      const doc = String(a.line.billing_document).localeCompare(
+        String(b.line.billing_document));
+      if (doc !== 0) return doc;
+      const item = String(a.line.billing_item).localeCompare(String(b.line.billing_item));
+      return item !== 0 ? item : a.index - b.index;
+    })
+    .map((entry) => entry.line);
+}
+
 export function manifests(root: string): Record<string, Manifest> {
   return JSON.parse(readFileSync(
     `${root}/.claude/skills/refresh-tvsm-dashboard/config/dump_columns.json`, "utf8"));

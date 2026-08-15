@@ -21,7 +21,9 @@
  */
 
 import { pyRound } from "../format.ts";
-import { firstUnique, isNa, normCode, normText, pyStr, toNumber } from "../normalise.ts";
+import {
+  firstUnique, isNa, normCode, normText, pyStr, toNumber, toUtcDay, utcDayIso,
+} from "../normalise.ts";
 import type { Row } from "../source.ts";
 
 /** A receivable falls due this many days after the invoice date. */
@@ -62,27 +64,11 @@ export type OverdueResult = {
   excluded: Record<string, { documents: number; amount: number }>;
 };
 
-/* ---- dates ----------------------------------------------------------------- */
-
-/**
- * A date cell as a UTC day number, or null.
- *
- * UTC throughout and never the host's zone: `as_of` drives the ageing arithmetic, and a
- * container running in IST would move every document across the day boundary and quietly
- * re-age the whole book.
- */
-function toDay(value: unknown): number | null {
-  if (isNa(value)) return null;
-  const text = pyStr(value).trim();
-  if (!text) return null;
-  const parsed = Date.parse(text.length <= 10 ? `${text}T00:00:00Z` : text);
-  return Number.isNaN(parsed) ? null : Math.floor(parsed / 86_400_000);
-}
-
-const isoDay = (day: number | null): string | null =>
-  day === null ? null : new Date(day * 86_400_000).toISOString().slice(0, 10);
-
 /* ---- the section ----------------------------------------------------------- */
+//
+// Dates go through `toUtcDay`, never the host's zone: `as_of` drives the ageing
+// arithmetic, and a container running in IST would move every document across the day
+// boundary and quietly re-age the whole book.
 
 type Prepared = {
   row: Row;
@@ -114,7 +100,7 @@ export function overdueAnalysis(
     if (key !== null) oemMap.set(key, row["OEM"]);
   }
 
-  const asOfDay = toDay(asOf);
+  const asOfDay = toUtcDay(asOf);
   if (asOfDay === null) throw new Error(`as_of is not a date: ${asOf}`);
 
   const prepared: Prepared[] = receivables.map((row) => {
@@ -127,7 +113,7 @@ export function overdueAnalysis(
       oem = CONVERSION_AGENT_OEM_BY_CODE[customerKey];
     }
 
-    const invoiceDay = toDay(row["Document Date"]);
+    const invoiceDay = toUtcDay(row["Document Date"]);
     const dueDay = invoiceDay === null ? null : invoiceDay + RECEIVABLE_DUE_DAYS;
 
     // Billing Doc is the invoice number; Document Number is the accounting document.
@@ -190,8 +176,8 @@ export function overdueAnalysis(
       .map((d) => ({
         invoice_no: d.invoiceNo,
         document: `${pyStr(d.row["Doc Type"])} ${pyStr(d.row["Document Number"])}`,
-        invoice_date: isoDay(d.invoiceDay),
-        due_date: isoDay(d.dueDay),
+        invoice_date: utcDayIso(d.invoiceDay),
+        due_date: utcDayIso(d.dueDay),
         age_days: d.daysOverdue,
         qty: d.openAmount,
         unit: "INR",
@@ -203,7 +189,7 @@ export function overdueAnalysis(
       .map((d) => ({
         document: `${pyStr(d.row["Doc Type"])} ${pyStr(d.row["Document Number"])}`,
         nature: d.row["Nature"],
-        posted_on: isoDay(d.invoiceDay),
+        posted_on: utcDayIso(d.invoiceDay),
         reference: d.invoiceNo === null ? null : String(d.invoiceNo),
         qty: d.openAmount,
         unit: "INR",

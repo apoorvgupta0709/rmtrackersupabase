@@ -187,6 +187,28 @@ def pricing_override_key(row) -> str:
     )
 
 
+def _plain(value):
+    """A pandas/numpy value as something `json.dumps` will take.
+
+    Only ever reached from the `DUMP_*` blocks, which write the pipeline's internal maps
+    out so the TypeScript port can be held to them key for key. None of those maps is
+    published, so without this the only way to see one is through a figure already derived
+    from it — by which point a disagreement has been folded into a tonnage.
+    """
+    if isinstance(value, dict):
+        return {str(k): _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, np.ndarray)):
+        return [_plain(v) for v in value]
+    if value is None or (isinstance(value, float)
+                         and (math.isnan(value) or math.isinf(value))):
+        return None
+    if isinstance(value, (np.integer, np.floating, np.bool_)):
+        return value.item()
+    if isinstance(value, pd.Timestamp):
+        return value.date().isoformat()
+    return value
+
+
 def none_if_nan(value):
     """A blank cell as `None`, so it crosses into JSON as null rather than the text "nan"."""
     return None if pd.isna(value) else value
@@ -1450,19 +1472,6 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     # completely rather than inferred from downstream figures, and this is what lets a check
     # enumerate every key instead of sampling the ones a section happened to touch.
     if os.environ.get("DUMP_MATERIAL_DIMENSION"):
-        def _plain(value):
-            if isinstance(value, dict):
-                return {str(k): _plain(v) for k, v in value.items()}
-            if isinstance(value, (list, tuple, set, np.ndarray)):
-                return [_plain(v) for v in value]
-            if value is None or (isinstance(value, float) and (math.isnan(value) or math.isinf(value))):
-                return None
-            if isinstance(value, (np.integer, np.floating, np.bool_)):
-                return value.item()
-            if isinstance(value, pd.Timestamp):
-                return value.date().isoformat()
-            return value
-
         Path(os.environ["DUMP_MATERIAL_DIMENSION"]).write_text(json.dumps({
             "material_bucket": _plain(material_bucket.to_dict()),
             "material_length": _plain(material_length.to_dict()),
@@ -1631,6 +1640,32 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
         if r.material_key:
             so_by_customer_material[(r.customer_key, r.material_key)] = value
             so_by_material[r.material_key] = value
+
+    # The sales mapping, written out when asked for. Never on the build's path — the same
+    # arrangement, and for the same reason, as the material dimension above: none of these
+    # is published, so the only way to see one is through a figure already derived from it.
+    if os.environ.get("DUMP_SALES_MAPS"):
+        def _pair(mapping):
+            """A tuple-keyed lookup as JSON, joined the way a detail key is."""
+            return {
+                "|".join("" if k is None or (isinstance(k, float) and pd.isna(k)) else str(k)
+                         for k in key): _plain(value)
+                for key, value in mapping.items()
+            }
+
+        Path(os.environ["DUMP_SALES_MAPS"]).write_text(json.dumps({
+            "published_month": published_month,
+            "ledger_rows": int(len(sales_all)),
+            "published_rows": int(len(sales)),
+            "sales_lookup": _pair(sales_lookup),
+            "code_oem": _plain(code_oem),
+            "so_by_customer_ctl": _pair(so_by_customer_ctl),
+            "so_by_ctl_plant": _pair(so_by_ctl_plant),
+            "so_by_ctl": _plain(so_by_ctl),
+            "so_by_customer_material": _pair(so_by_customer_material),
+            "so_by_material": _plain(so_by_material),
+        }))
+        print(f"  sales maps written to {os.environ['DUMP_SALES_MAPS']}")
 
     # 3. Create schedule-line facts and join sales by customer code + CTL bucket.
     schedule["schedule_qty"] = pd.to_numeric(schedule["SCHEDULE in nos"], errors="coerce").fillna(0)
