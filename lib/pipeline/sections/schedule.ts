@@ -22,6 +22,7 @@
  *    entire history.
  */
 
+import { kahanSum } from "../numeric.ts";
 import {
   firstUnique, isNa, makeCtlBucket, normBucket, normCode, normText, pyStr, splitCodes,
   toNumber, validBucket,
@@ -192,7 +193,7 @@ export function scheduleFacts(
 
 /* ---- helpers --------------------------------------------------------------- */
 
-const sum = (values: number[]): number => values.reduce((a, b) => a + b, 0);
+const sum = kahanSum;
 
 /** `max` skipping absent values; a column that is entirely absent stays absent. */
 function maxOf(values: (number | null)[]): number | null {

@@ -16,6 +16,7 @@
  *    count one physical pile once per customer that can see it.
  */
 
+import { kahanSum } from "../numeric.ts";
 import { pyRound } from "../format.ts";
 import {
   compareNaturalBucket, firstUnique, isNa, normCode, normDesc, pyStr, shapeMatchesBucket,
@@ -36,6 +37,8 @@ export type WipResult = {
   transitByBucket: Map<string, number>;
   wipDetailByBucket: Map<string, Row[]>;
   transitDetailByBucket: Map<string, Row[]>;
+  /** Every WIP row, for section 9's source-coverage tally. */
+  wipRows: { bucket: string | null; wip_mt: number }[];
 };
 
 export function wipAndSummary(
@@ -196,12 +199,13 @@ export function wipAndSummary(
   return {
     group, details, wipUnmapped, governedBuckets, customerSummary,
     wipByBucket, transitByBucket, wipDetailByBucket, transitDetailByBucket,
+    wipRows: wip,
   };
 }
 
 /* ---- helpers --------------------------------------------------------------- */
 
-const sum = (values: number[]): number => values.reduce((a, b) => a + b, 0);
+const sum = kahanSum;
 const maxOf = (values: number[]): number | null => {
   const present = values.filter((v) => Number.isFinite(v));
   return present.length ? Math.max(...present) : null;
@@ -212,9 +216,13 @@ const py = (value: unknown): string =>
   (value === null || value === undefined ? "None" : String(value));
 
 function sumBy<T>(rows: T[], key: (r: T) => string, value: (r: T) => number): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const row of rows) out.set(key(row), (out.get(key(row)) ?? 0) + value(row));
-  return out;
+  const groups = new Map<string, number[]>();
+  for (const row of rows) {
+    const k = key(row);
+    (groups.get(k) ?? groups.set(k, []).get(k)!).push(value(row));
+  }
+  // Kahan, because these are groupby sums.
+  return new Map([...groups].map(([k, vs]) => [k, kahanSum(vs)]));
 }
 
 /** `groupby([...], dropna=False)` in pandas' sorted order, absent last on each level. */

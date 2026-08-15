@@ -26,6 +26,7 @@
  *    recovered from OD, thickness and cut length against what SAP actually holds at 4731.
  */
 
+import { kahanSum } from "../numeric.ts";
 import { pyRound } from "../format.ts";
 import {
   descriptionShape, firstUnique, isNa, makeCtlBucket, normCode, normDesc, normNumber,
@@ -53,16 +54,46 @@ export type StockResult = {
   transitStock: StockRow[];
   /** Long-length, customer-owned rows — the TVS pool is read off these. */
   llStock: StockRow[];
+  /** Every stock row, as section 9 reads them. */
+  allStock: StockRow[];
+  /** Every RFD row after size recovery, as section 9 reconciles them. */
+  rfd: RfdRow[];
+};
+
+export type RfdRow = {
+  row: Row;
+  material_key: string | null;
+  bucket: string | null;
+  length_m: number | null;
+  ctl_bucket: string | null;
+  stock_nos: number;
+  stock_mt: number;
+  backed_materials: string | null;
 };
 
 export type StockRow = {
   row: Row;
   material_key: string | null;
+  description_key: string | null;
   bucket: string | null;
+  length_m: number | null;
+  ctl_bucket: string | null;
   plant: string | null;
   stock_mt: number;
+  stock_nos: number;
+  nos_is_weight: boolean;
+  ageing_days: number;
+  ageing_days_month_end: number;
+  is_high_age: boolean;
+  is_long: boolean;
+  is_transit: boolean;
+  flag: string;
+  OEM: string | null;
+  customer_name_key: string | null;
   /** TVS-proxy stock counts to the TVS pool even where the OEM key files it Direct. */
   pool_oem: string | null;
+  /** Filled in by section 9's reconciliation, which runs after this section. */
+  rfd_status?: string | null;
 };
 
 export function stockPools(
@@ -351,6 +382,8 @@ export function stockPools(
     rfdBackedMaterials: [...backed].sort(),
     transitStock,
     llStock,
+    allStock: stock,
+    rfd,
   };
 }
 
@@ -363,9 +396,13 @@ const key2 = (a: unknown, b: unknown): string => `${py(a)} ${py(b)}`;
 const key3 = (a: unknown, b: unknown, c: unknown): string => `${py(a)} ${py(b)} ${py(c)}`;
 
 function sumBy<T>(rows: T[], key: (row: T) => string, value: (row: T) => number): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const row of rows) out.set(key(row), (out.get(key(row)) ?? 0) + value(row));
-  return out;
+  const groups = new Map<string, number[]>();
+  for (const row of rows) {
+    const k = key(row);
+    (groups.get(k) ?? groups.set(k, []).get(k)!).push(value(row));
+  }
+  // Kahan, because these are groupby sums.
+  return new Map([...groups].map(([k, vs]) => [k, kahanSum(vs)]));
 }
 
 /**

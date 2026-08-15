@@ -2723,8 +2723,11 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             oldest_age=("ageing_days_month_end", "max"),
             rfd_status=("rfd_status", first_unique),
         )
+        # `mergesort` for the same reason as the overdue drill-downs: the default is not
+        # stable, and materials tie on both age and tonnage, so which of two rows printed
+        # first was decided by the sort's internals rather than by anything here.
         for _, agg in grouped.sort_values(
-            ["oldest_age", "stock_mt"], ascending=[False, False]
+            ["oldest_age", "stock_mt"], ascending=[False, False], kind="mergesort"
         ).iterrows():
             plant = agg["Plant"]
             material = agg["material_key"]
@@ -2744,7 +2747,7 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                     age_me=("ageing_days_month_end", "max"),
                     age_now=("ageing_days", "max"),
                 )
-                .sort_values("age_me", ascending=False)
+                .sort_values("age_me", ascending=False, kind="mergesort")
             )
             batch_rows = [
                 {
@@ -2942,7 +2945,7 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                 dropna=False, as_index=False,
             )
             .agg(stock_mt=("stock_mt", "sum"), batches=("BATCH", "nunique"))
-            .sort_values("stock_mt", ascending=False)
+            .sort_values("stock_mt", ascending=False, kind="mergesort")
             .iterrows()
         )
     ]
@@ -3027,6 +3030,20 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
         "ll": build_stock_analysis(stock_scoped[is_long.reindex(stock_scoped.index, fill_value=False)], "STOCKLL"),
         "source_coverage": source_coverage,
     }
+
+    # The stock analysis and its reconciliation, written out when asked for.
+    if os.environ.get("DUMP_ANALYSIS"):
+        Path(os.environ["DUMP_ANALYSIS"]).write_text(json.dumps({
+            "stock_analysis": _plain(stock_analysis),
+            "stock_unmapped": _plain(stock_unmapped),
+            "details": _plain({k: v for k, v in stock_details.items()
+                               if k.startswith("STOCKCTL|") or k.startswith("STOCKLL|")
+                               or k.startswith("SRCGAP|")}),
+            "rfd_unbacked_mt": float(rfd_unbacked_mt),
+            "rfd_unbacked_materials": int(rfd_unbacked_materials),
+            "rfd_partly_backed_materials": int(rfd_partly_backed_materials),
+        }))
+        print(f"  analysis written to {os.environ['DUMP_ANALYSIS']}")
 
     # 10. Overdue analysis for TVS ancillaries, from the yf65 receivables ageing file.
     overdue_rows = []
