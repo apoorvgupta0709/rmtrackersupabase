@@ -864,8 +864,19 @@ that the package still sits where Claude Code looks — the repo root is
   rate is set some other way.
 
 - **Migration filenames in the repo have drifted from the versions actually applied**, and
-  the 14 Aug work widened the gap deliberately: production carries **45**, the repo 19
-  files. Eight of those forty-five are the retyped views and the zmat rekey, applied one
+  the 14 Aug work widened the gap deliberately: production carries **45**, the repo 20
+  files. **The ledger is what differs, not the schema — verified 15 Aug** by comparing
+  production against the repo directly: all 13 snapshot views match on column count *and*
+  on every type the late fixes retyped (`billing_doc`, `po_no`, `matl_no`, `item_no`,
+  `custno`, `column1`/`column2`, the receivables org codes); all 14 expected functions,
+  all 21 tables, all 25 indexes and all 41 policies exist and are created by some repo
+  file; the `trend_customer_sku_history → customerView` grant is present. So a version
+  stamp missing from `list_migrations` does **not** imply a missing object — check the
+  object, not the stamp.
+  - **Going forward, keep the two aligned**: apply new SQL with the MCP `apply_migration`,
+    then commit the repo file under the *same* version stamp the tool assigned. Never run
+    `supabase db push` — most repo files are not idempotent (`create table` and
+    `create policy` without guards), so a replay against production would fail partway. Eight of those forty-five are the retyped views and the zmat rekey, applied one
   statement at a time and *not* written to a repo file of their own — the view DDL is
   regenerated from `tools/generate_dump_views.py --write`, which is the reproducible
   definition, and `20260814123112` is the last of them. The MCP tool takes SQL rather than a file, and the views were applied in batches
@@ -884,7 +895,10 @@ that the package still sits where Claude Code looks — the repo root is
   pricing and upload-path ones the previous session recorded as unapplied are in fact
   applied, as `20260812073426` and `20260812073526`; `megh_reco_prefix_grant` landed as
   `20260812165102` against a repo file named `..._megh_reco_and_the_fourth_conversion_code`;
-  and `20260809185703 uploader_write_policies` is applied with **no repo file at all**.
+  and `20260809185703 uploader_write_policies` is carried by
+  `20260812130000_record_the_upload_path_the_database_already_has.sql`, which holds
+  `is_uploader`, `promote_upload` and the three insert policies (it was written to be a
+  no-op where they already exist — so it is *recorded*, not missing).
   Nothing is applied automatically — there is no `supabase db push` in any workflow — so
   check with `list_migrations` rather than by reading `supabase/migrations/`.
 - **"SKU trend by customer" and "SKU history — average month" now close on the same two
