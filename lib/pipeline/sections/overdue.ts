@@ -35,11 +35,25 @@ export const BILLING_DOC_TYPES = new Set(["RV", "RD"]);
 /** Documents that *reduce* what an ancillary owes. A debit balance does not. */
 export const OFFSET_NATURES = new Set(["CREDIT NOTE", "OTHER CREDIT BALANCE", "COLLECTION"]);
 
-/** Conversion agents, routed to the OEM they convert for. */
+/**
+ * Conversion agents, routed to the OEM they convert for.
+ *
+ * **All four of them.** Megh converts for a fourth OEM and this map once did not say so.
+ * The effect was narrower than it looks, because `OEM_key_1_rev codes` already files that
+ * one customer under `Rane` where it files the other three Megh codes under `Direct` — so
+ * the sales summary was already right and only the **code repository** was wrong, its scope
+ * being "OEM is TVS, or the code is a conversion agent". Three bill-to/ship-to/plant
+ * combinations at 150.631 MT sat outside it and so could never appear in a price change
+ * request.
+ *
+ * Spelt `Rane`, exactly as the OEM key spells it: `RANE` would be a second name for the
+ * same OEM and would split every figure that groups on it.
+ */
 export const CONVERSION_AGENT_OEM_BY_CODE: Record<string, string> = {
   "943209": "TVS",    // MEGH STEELS PRIVATE LIMITED - TVS A
   "943210": "HMSIL",  // MEGH STEELS PRIVATE LIMITED - HMSIL
   "943211": "RE",     // MEGH STEELS PRIVATE LIMITED - RE
+  "943213": "Rane",   // MEGH STEELS PRIVATE LIMITED - RANE
 };
 
 export type OverdueRow = {
