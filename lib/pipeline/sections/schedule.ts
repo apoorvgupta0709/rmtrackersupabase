@@ -59,6 +59,39 @@ export type ScheduleGroup = {
   over_dispatch_mt: number;
 };
 
+/**
+ * A schedule row's bucket and CTL bucket, recovered from the material code where the sheet
+ * leaves them blank.
+ *
+ * Exported because section 8 queues the rows this cannot place, and a queue built from a
+ * second derivation would disagree with the tracker about what is unmapped — the exact
+ * failure that once emptied the queue while the rows stayed unmapped.
+ */
+export function scheduleBuckets(
+  row: Row,
+  dimension: MaterialDimension,
+): { bucket: string | null; ctlBucket: string | null } {
+  const materialKey = normCode(row["MATERIAL NO"]);
+
+  // The sheet's own bucket where it says something, the code's where it does not.
+  const ownBucket = normBucket(row["Bucket"]);
+  const recovered = materialKey === null
+    ? undefined : dimension.materialBucket.get(materialKey);
+  const bucket = validBucket(ownBucket) ? ownBucket : (recovered ?? null);
+
+  const ownCtl = normBucket(row["CTL Bucket"]);
+  const directCtl = materialKey === null
+    ? undefined : dimension.direct.get(materialKey)?.["CTL Bucket"];
+  const recoveredCtl = validBucket(directCtl)
+    ? (directCtl as string)
+    : makeCtlBucket(
+      recovered ?? null,
+      materialKey === null ? null : dimension.materialLength.get(materialKey) ?? null);
+  const ctlBucket = validBucket(ownCtl) ? ownCtl : recoveredCtl;
+
+  return { bucket, ctlBucket };
+}
+
 export function scheduleFacts(
   scheduleRows: Row[],
   dimension: MaterialDimension,
@@ -93,22 +126,7 @@ export function scheduleFacts(
           ?? pick(nameKey === null ? undefined : oemMap.get(nameKey));
 
       const materialKey = normCode(row["MATERIAL NO"]);
-
-      // The sheet's own bucket where it says something, the code's where it does not.
-      const ownBucket = normBucket(row["Bucket"]);
-      const recovered = materialKey === null
-        ? undefined : dimension.materialBucket.get(materialKey);
-      const bucket = validBucket(ownBucket) ? ownBucket : (recovered ?? null);
-
-      const ownCtl = normBucket(row["CTL Bucket"]);
-      const directCtl = materialKey === null
-        ? undefined : dimension.direct.get(materialKey)?.["CTL Bucket"];
-      const recoveredCtl = validBucket(directCtl)
-        ? (directCtl as string)
-        : makeCtlBucket(
-          recovered ?? null,
-          materialKey === null ? null : dimension.materialLength.get(materialKey) ?? null);
-      const ctlBucket = validBucket(ownCtl) ? ownCtl : recoveredCtl;
+      const { bucket, ctlBucket } = scheduleBuckets(row, dimension);
 
       return {
         scheduleQty,
