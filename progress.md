@@ -6,7 +6,7 @@ lives in the Next.js app and `.github/workflows/refresh.yml` can be deleted.
 **Read `.claude/context/memory.md` first** for the project itself. This file only covers the
 port. The plan it executes is at `~/.claude/plans/how-is-the-upload-witty-moore.md`.
 
-_Last updated: 2026-08-16, after S12._
+_Last updated: 2026-08-16, after S15._
 
 ---
 
@@ -47,7 +47,7 @@ exists to stop"); atomic cross-tab consistency via `current_build_id()`; and sec
 | 0 — migration drift | **done** (false alarm; see below) |
 | 1 — absorption into SQL | **not started** |
 | 2 — helpers + config | **done** |
-| 3 — sections | **11 of 17** (S1–S10, S12) — the coupled spine is done |
+| 3 — sections | **12 of 17** (S1–S10, S12, S15) — the coupled spine is done |
 | 4–6 — QC gate, cutover, retire Python | not started |
 
 ### Ported and proven
@@ -68,6 +68,7 @@ exists to stop"); atomic cross-tab consistency via `current_build_id()`; and sec
 | `lib/pipeline/sections/salessummary.ts` | **S7** sales summary | 7 OEM rows, 7 customer cards |
 | `lib/pipeline/sections/missing.ts` | **S8** queues + SO cascade | 3 queue rows, 396 tracker rows |
 | `lib/pipeline/sections/transfers.ts` | **S12** inter-plant transfers | 255 rows, 255 drill-downs |
+| `lib/pipeline/sections/repository.ts` | **S15** code repository | 305 rows + 8 window figures |
 | `lib/pipeline/sections/overdue.ts` | **S10** overdue analysis | payload section + 38 drill-downs |
 
 ### Changes made to the Python
@@ -120,6 +121,7 @@ node tools/check_section_analysis.mjs $SC/analysis.json
 node tools/check_section_salessummary.mjs $SC/oracle.json --as-of 2026-08-14
 node tools/check_section_missing.mjs      $SC/oracle.json --as-of 2026-08-14
 node tools/check_section_transfers.mjs    $SC/oracle.json --as-of 2026-08-14
+node tools/check_section_repository.mjs   $SC/oracle.json --as-of 2026-08-14
 
 # Diff two whole payloads (used to prove a pipeline change moved nothing else).
 node tools/compare_pipeline_implementations.mjs a.json b.json --only ll_tracker --top 40
@@ -137,7 +139,7 @@ dumps have moved since, so diffing against it reports the calendar as a defect.
 
 ## The traps — read this before porting anything
 
-Twelve silent faults in eight sections. **None threw an exception. All would have shipped as
+Thirteen silent faults in ten sections. **None threw an exception. All would have shipped as
 wrong numbers that reconciled.** Assume the next one is there too.
 
 1. **Python rounds half to even; JavaScript rounds half away from zero** — in *both*
@@ -193,6 +195,13 @@ wrong numbers that reconciled.** Assume the next one is there too.
    rounding before the sort put them the wrong way round. Round on the way out; order on
    the aggregate.
 
+13. **Transcribe a constant whole, and check its length.** `CONVERSION_AGENT_OEM_BY_CODE`
+   has four entries with a long comment between the third and the fourth; I copied three.
+   The pipeline's own comment records that this exact omission happened before and cost
+   *only* the code repository — the sales summary was unaffected because the OEM key files
+   that customer correctly — so it is invisible everywhere except one section. Copy the
+   comments with the constant: they are the reason it has four entries.
+
 Also standing: **`groupby` sorts its keys** and `dropna=False` puts the null group last, so
 insertion order silently reorders every section (`build_sections.seq` is a sort position).
 `sortedGroupKeys` in `overdue.ts` is the pattern.
@@ -236,7 +245,7 @@ Line numbers are current as of 2026-08-15 (`refresh_dashboard.py` is 6,788 lines
 | 12 | Inter-plant transfers | 3924 | S1 | **done** |
 | 13 | STR plan (Hosur 8406) | 4122 | S1, S4, S12 | allocation waterfall at ~4345 |
 | 14 | SKU pricing | 4542 | S1, S3 | **`pricing.ts` already ports the formula** |
-| 15 | Code repository | 5332 | S1, S2 | |
+| 15 | Code repository | 5332 | S1, S2 | **done** |
 | 16 | Order book (+ sign-off at 5171) | 4849 | S1 | |
 | 17 | Past sales trend | 5432 | S2 | dynamic month columns |
 
@@ -248,10 +257,15 @@ the plan expected. What remains is genuinely independent work: S7 and S15/S16/S1
 on S1/S2, S8 collects the queues the earlier sections already produce, and S11/S13/S14 hold
 the five hard algorithms.
 
-Remaining, in suggested order: **S15** code repository, **S16** order book + sign-off,
-**S17** past sales trend, then the three that hold the hard algorithms — **S11 Megh**
-(796 lines, the BOP assignment), **S13 STR** (the allocation waterfall) and **S14 pricing**
-(where `pricing.ts` already gives the formula a head start).
+Remaining, in suggested order: **S16** order book + sign-off (note 16b also writes 39
+entries into section 8's queue), **S17** past sales trend (dynamic month columns), then the
+three holding the hard algorithms — **S11 Megh** (796 lines, the BOP mutual-exclusion
+assignment), **S13 STR** (the allocation waterfall) and **S14 pricing** (where `pricing.ts`
+already gives the formula a head start, leaving `contract_row_for_size`'s four-stage
+narrowing as the real work).
+
+**Two of the five hard algorithms are already done**: section 8's four-level SO cascade, and
+section 4's RFD size recovery.
 
 **A published section is often its own oracle.** S7, S8, S12 and S10 needed no `DUMP_*` at
 all — their output is in `data.json`. Only the intermediates (S1–S6, S9) need one. But watch
