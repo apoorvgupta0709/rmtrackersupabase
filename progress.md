@@ -6,7 +6,7 @@ lives in the Next.js app and `.github/workflows/refresh.yml` can be deleted.
 **Read `.claude/context/memory.md` first** for the project itself. This file only covers the
 port. The plan it executes is at `~/.claude/plans/how-is-the-upload-witty-moore.md`.
 
-_Last updated: 2026-08-15, after S9 — the spine batch is complete._
+_Last updated: 2026-08-16, after S12._
 
 ---
 
@@ -47,7 +47,7 @@ exists to stop"); atomic cross-tab consistency via `current_build_id()`; and sec
 | 0 — migration drift | **done** (false alarm; see below) |
 | 1 — absorption into SQL | **not started** |
 | 2 — helpers + config | **done** |
-| 3 — sections | **8 of 17** (S1–S6, S9, S10) — **the coupled spine is done** |
+| 3 — sections | **11 of 17** (S1–S10, S12) — the coupled spine is done |
 | 4–6 — QC gate, cutover, retire Python | not started |
 
 ### Ported and proven
@@ -65,6 +65,9 @@ exists to stop"); atomic cross-tab consistency via `current_build_id()`; and sec
 | `lib/pipeline/sections/lltracker.ts` | **S6** LL tracker | 92 buckets, 92 drill-downs, 460 metric cards |
 | `lib/pipeline/sections/analysis.ts` | **S9** stock analysis + SAP-vs-RFD | 769 rows, 1,541 drill-downs, 3 tallies |
 | `lib/pipeline/numeric.ts` | `kahanSum`, `pairwiseSum` | pandas' two summations, used where each belongs |
+| `lib/pipeline/sections/salessummary.ts` | **S7** sales summary | 7 OEM rows, 7 customer cards |
+| `lib/pipeline/sections/missing.ts` | **S8** queues + SO cascade | 3 queue rows, 396 tracker rows |
+| `lib/pipeline/sections/transfers.ts` | **S12** inter-plant transfers | 255 rows, 255 drill-downs |
 | `lib/pipeline/sections/overdue.ts` | **S10** overdue analysis | payload section + 38 drill-downs |
 
 ### Changes made to the Python
@@ -113,6 +116,10 @@ node tools/check_section_stock.mjs    $SC/stock.json
 node tools/check_section_wip.mjs      $SC/wip.json
 node tools/check_section_ll.mjs       $SC/ll.json
 node tools/check_section_analysis.mjs $SC/analysis.json
+# These four read the published build directly — no DUMP_* needed.
+node tools/check_section_salessummary.mjs $SC/oracle.json --as-of 2026-08-14
+node tools/check_section_missing.mjs      $SC/oracle.json --as-of 2026-08-14
+node tools/check_section_transfers.mjs    $SC/oracle.json --as-of 2026-08-14
 
 # Diff two whole payloads (used to prove a pipeline change moved nothing else).
 node tools/compare_pipeline_implementations.mjs a.json b.json --only ll_tracker --top 40
@@ -221,12 +228,12 @@ Line numbers are current as of 2026-08-15 (`refresh_dashboard.py` is 6,788 lines
 | 4 | Map current stock (+ RFD 4731 write-off at 1985) | 1771 | S1 | **done** |
 | 5 | WIP / ystockn | 2102 | S1 | **done** |
 | 6 | TVSM LL tracker | 2246 | S1, S4, S5 | **done** |
-| 7 | Sales summary | 2409 | S2 | |
-| 8 | Missing mappings queues | 2459 | S1–S5 | |
+| 7 | Sales summary | 2409 | S2 | **done** |
+| 8 | Missing mappings queues | 2459 | S1–S5 | **done** |
 | 9 | Stock analysis | 2639 | S1, S4 | **done** |
 | 10 | Overdue analysis | 2990 | — | **done** |
 | 11 | Megh SKU tracker | 3128 | S1, S2, S4 | largest block, 796 lines |
-| 12 | Inter-plant transfers | 3924 | S1 | |
+| 12 | Inter-plant transfers | 3924 | S1 | **done** |
 | 13 | STR plan (Hosur 8406) | 4122 | S1, S4, S12 | allocation waterfall at ~4345 |
 | 14 | SKU pricing | 4542 | S1, S3 | **`pricing.ts` already ports the formula** |
 | 15 | Code repository | 5332 | S1, S2 | |
@@ -241,9 +248,16 @@ the plan expected. What remains is genuinely independent work: S7 and S15/S16/S1
 on S1/S2, S8 collects the queues the earlier sections already produce, and S11/S13/S14 hold
 the five hard algorithms.
 
-Suggested order from here: **S7** (50 lines, S2 only) to warm up, then **S8** (the queues are
-already computed — mostly assembly), then **S12**, **S15**, **S16**, **S17**, leaving
-**S11 Megh**, **S13 STR** and **S14 pricing** last.
+Remaining, in suggested order: **S15** code repository, **S16** order book + sign-off,
+**S17** past sales trend, then the three that hold the hard algorithms — **S11 Megh**
+(796 lines, the BOP assignment), **S13 STR** (the allocation waterfall) and **S14 pricing**
+(where `pricing.ts` already gives the formula a head start).
+
+**A published section is often its own oracle.** S7, S8, S12 and S10 needed no `DUMP_*` at
+all — their output is in `data.json`. Only the intermediates (S1–S6, S9) need one. But watch
+the scope: three `SALES|` keys belong to the reconciliation, 39 of the queue's 42 entries to
+section 16b, and three `customer_lines` columns to section 17. Scope those out explicitly
+and *print what was scoped*, or a check quietly grades itself against work it did not do.
 
 ### The five algorithms that need real thought
 
