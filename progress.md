@@ -247,7 +247,8 @@ Line numbers are current as of 2026-08-15 (`refresh_dashboard.py` is 6,788 lines
 | 14 | SKU pricing | 4542 | S1, S3 | **`pricing.ts` already ports the formula** |
 | 15 | Code repository | 5332 | S1, S2 | **done** |
 | 16 | Order book (+ sign-off at 5171) | 4849 | S1 | |
-| 17 | Past sales trend | 5432 | S2 | dynamic month columns |
+| 17a | Trend: segments, buckets, customer SKUs | 5490 | S2, S3, S8 | independent — **do this one** |
+| 17b | Trend: Megh sales history | ~5570 | **S11** | must follow the Megh tab |
 
 **`overdue_analysis` was the only section standing free of the material dimension.** Every
 other one joins through S1 and/or S2, which is why those two came first.
@@ -257,12 +258,23 @@ the plan expected. What remains is genuinely independent work: S7 and S15/S16/S1
 on S1/S2, S8 collects the queues the earlier sections already produce, and S11/S13/S14 hold
 the five hard algorithms.
 
-Remaining, in suggested order: **S16** order book + sign-off (note 16b also writes 39
-entries into section 8's queue), **S17** past sales trend (dynamic month columns), then the
-three holding the hard algorithms — **S11 Megh** (796 lines, the BOP mutual-exclusion
-assignment), **S13 STR** (the allocation waterfall) and **S14 pricing** (where `pricing.ts`
-already gives the formula a head start, leaving `contract_row_for_size`'s four-stage
-narrowing as the real work).
+**Section 17 is two halves and the order matters** — checked 16 Aug, and it corrects what
+this file said before:
+
+- **17a** (`trend_all` segments, `schedule_flags`, `trend_months`, `trend_buckets`,
+  `trend_customer_skus`, the `TRENDBUCKET|` drill-downs) depends only on S2, S3 and S8 and
+  can be ported now. Roughly lines 5490–5570 and 5619–5740.
+- **17b** (`megh_history`, `MEGHSALES|` drill-downs, the `history_*` columns that section 8's
+  check scopes out) reads `megh_rows`, `megh_codes` and `code_to_vsm_key` from **S11**, so it
+  cannot be done until the Megh tab is. Roughly 5570–5630.
+- The **quarterly price-difference working** starts around 5742 and is separate again.
+
+Remaining, in suggested order: **17a**, then **S16** order book + sign-off (note 16b also
+writes 39 entries into section 8's queue, so porting it lets that check's scope tighten),
+then the three holding the hard algorithms — **S11 Megh** (796 lines, the BOP
+mutual-exclusion assignment), **S13 STR** (the allocation waterfall) and **S14 pricing**
+(where `pricing.ts` already gives the formula a head start, leaving `contract_row_for_size`'s
+four-stage narrowing as the real work). **17b** falls out of S11.
 
 **Two of the five hard algorithms are already done**: section 8's four-level SO cascade, and
 section 4's RFD size recovery.
