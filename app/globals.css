@@ -2,32 +2,45 @@
  * Mill-floor instrumentation.
  *
  * This is not a product dashboard; it is the screen someone checks at 12:10 IST to find
- * out whether a size is short before the plant rolls it. So it reads like a technical
- * drawing: blueprint stock rather than white, graphite ink, hairline rules, registration
- * marks in the corners, and every figure set in tabular mono so columns of tonnage line
- * up on the decimal. The one warm colour is furnace orange, spent sparingly, on the
- * things that mean act now.
+ * out whether a size is short before the plant rolls it. So it stays an instrument: a
+ * white sheet, graphite ink, hairline rules, registration marks in the corners, and
+ * every figure set in tabular mono so columns of tonnage line up on the decimal.
+ *
+ * Two colours, and each means exactly one thing.
+ *
+ *  - **Blue is the only interactive colour.** Buttons, links, hovers, focus rings, the
+ *    highlight on a filtered column. If it is blue, you can press it.
+ *  - **Red, amber and green are severity, and never decoration.** They appear only on
+ *    the figures that carry coverage, stock ageing and overdue — the three things that
+ *    mean act now — so a colour down a column of tonnage is always a verdict and never
+ *    merely "this one opens". Everything else stays graphite. See the `.sev-*` block at
+ *    the foot of this file for what that costs and why the hover keeps its colour.
  */
 
 :root {
-  --paper: #f4f2ee;
-  --paper-deep: #eae6df;
-  --surface: #fffdfa;
+  --paper: #ffffff;
+  /* The quiet grey that separates from the page, now that the page and the card are the
+     same white: row hover, the sticky totals row, every input, the ops chip. Nine rules
+     depend on it being distinguishable from --surface. */
+  --paper-deep: #f4f6f8;
+  --surface: #ffffff;
   --ink: #16181c;
   --ink-soft: #4a4f57;
   --ink-faint: #878b91;
-  --rule: #d9d4ca;
-  --rule-strong: #b9b2a5;
+  --rule: #e4e7eb;
+  --rule-strong: #c4c9d0;
 
-  --furnace: #d64500;
-  --furnace-soft: #fbeadf;
-  --steel: #1f4e5f;
+  --accent: #1a56db;
+  --accent-deep: #1443ad;
+  --accent-soft: #e8f0fe;
 
-  --pass: #16704a;
-  --warn: #9a5b06;
-  --fail: #a5251c;
-
-  --grid: rgba(22, 24, 28, 0.045);
+  /* Severity. One vocabulary, shared by the build stamp and the figures in the tables,
+     so the word on the header and the ink on a cell can never mean different things. */
+  --ok: #16704a;
+  --attention: #9a5b06;
+  --alert: #a5251c;
+  --alert-soft: #fdf0ef;
+  --attention-soft: #fdf6ec;
 
   --display: var(--font-display), "Helvetica Neue", sans-serif;
   --mono: var(--font-mono), ui-monospace, monospace;
@@ -49,24 +62,9 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Graph paper, barely there. Enough to say "drawing", not enough to read through. */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  background-image:
-    linear-gradient(var(--grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-  background-size: 28px 28px;
-}
-
-body > * { position: relative; z-index: 1; }
-
 h1, h2, h3 { font-weight: 600; letter-spacing: -0.015em; margin: 0; }
 
-a { color: var(--steel); text-underline-offset: 3px; }
+a { color: var(--accent); text-underline-offset: 3px; }
 
 /* ---- Type helpers ------------------------------------------------------- */
 
@@ -118,16 +116,16 @@ input[type="email"], input[type="password"], input[type="text"], select {
   font-family: var(--mono);
   font-size: 14px;
   color: var(--ink);
-  background: var(--paper);
+  background: var(--paper-deep);
   border: 1px solid var(--rule-strong);
   border-radius: 0;
   outline: none;
   transition: border-color 120ms ease, background 120ms ease;
 }
 input:focus, select:focus {
-  border-color: var(--furnace);
+  border-color: var(--accent);
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--furnace);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 button {
@@ -137,14 +135,14 @@ button {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   padding: 11px 20px;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--accent);
   border-radius: 0;
-  background: var(--ink);
+  background: var(--accent);
   color: var(--paper);
   cursor: pointer;
   transition: transform 90ms ease, background 120ms ease, color 120ms ease;
 }
-button:hover:not(:disabled) { background: var(--furnace); border-color: var(--furnace); }
+button:hover:not(:disabled) { background: var(--accent-deep); border-color: var(--accent-deep); }
 button:active:not(:disabled) { transform: translateY(1px); }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
 
@@ -154,9 +152,9 @@ button.ghost {
   border-color: var(--rule-strong);
 }
 button.ghost:hover:not(:disabled) {
-  background: var(--ink);
+  background: var(--accent);
   color: var(--paper);
-  border-color: var(--ink);
+  border-color: var(--accent);
 }
 
 /* ---- Status stamp ------------------------------------------------------- */
@@ -178,9 +176,12 @@ button.ghost:hover:not(:disabled) {
   width: 5px; height: 5px;
   background: currentColor;
 }
-.stamp.pass { color: var(--pass); }
-.stamp.warn { color: var(--warn); }
-.stamp.fail { color: var(--fail); }
+/* The class names are the build's own status words, lowercased, so they are not free to
+   rename here — `layout.tsx` writes `stamp ${build.status.toLowerCase()}`. Only the ink
+   is shared with the severity vocabulary. */
+.stamp.pass { color: var(--ok); }
+.stamp.warn { color: var(--attention); }
+.stamp.fail { color: var(--alert); }
 
 /* ---- Notices ------------------------------------------------------------ */
 
@@ -191,8 +192,8 @@ button.ghost:hover:not(:disabled) {
   background: var(--paper-deep);
   color: var(--ink-soft);
 }
-.notice.bad { border-left-color: var(--fail); color: var(--fail); background: #fdf1f0; }
-.notice.warn { border-left-color: var(--warn); color: var(--warn); background: #fdf6ec; }
+.notice.bad { border-left-color: var(--alert); color: var(--alert); background: var(--alert-soft); }
+.notice.warn { border-left-color: var(--attention); color: var(--attention); background: var(--attention-soft); }
 
 /* ---- Data table --------------------------------------------------------- */
 
@@ -222,7 +223,7 @@ tbody td {
   border-bottom: 1px solid var(--rule);
   white-space: nowrap;
 }
-tbody tr:hover td { background: var(--paper); }
+tbody tr:hover td { background: var(--paper-deep); }
 td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
 /* The totals row is the other half of the same complaint: a total you have to scroll
@@ -235,7 +236,7 @@ tfoot td {
   position: sticky;
   bottom: 0;
   z-index: 2;
-  background: var(--paper);
+  background: var(--paper-deep);
   box-shadow: inset 0 1px 0 var(--rule-strong);
 }
 
@@ -274,16 +275,16 @@ tfoot td {
   font-family: var(--mono);
   font-size: 13px;
   color: var(--ink);
-  background: var(--paper);
+  background: var(--paper-deep);
   border: 1px solid var(--rule-strong);
   border-radius: 0;
   outline: none;
   transition: border-color 120ms ease, background 120ms ease;
 }
 .filters input[type="search"]:focus {
-  border-color: var(--furnace);
+  border-color: var(--accent);
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--furnace);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 button.chip {
@@ -294,20 +295,20 @@ button.chip {
   color: var(--ink-soft);
   border-color: var(--rule-strong);
 }
-button.chip:hover:not(:disabled) { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+button.chip:hover:not(:disabled) { background: var(--accent); color: var(--paper); border-color: var(--accent); }
 
 button.linkish {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--furnace);
+  color: var(--accent);
   font-family: inherit;
   font-size: inherit;
   letter-spacing: normal;
   text-transform: none;
   text-decoration: underline;
 }
-button.linkish:hover:not(:disabled) { background: none; color: var(--furnace); }
+button.linkish:hover:not(:disabled) { background: none; color: var(--accent-deep); }
 
 .th-inner { display: inline-flex; align-items: center; gap: 6px; }
 th.num .th-inner { flex-direction: row-reverse; }
@@ -324,11 +325,11 @@ button.th-filter {
   cursor: pointer;
 }
 button.th-label:hover:not(:disabled),
-button.th-filter:hover:not(:disabled) { background: none; color: var(--furnace); }
+button.th-filter:hover:not(:disabled) { background: none; color: var(--accent); }
 button.th-label:active:not(:disabled),
 button.th-filter:active:not(:disabled) { transform: none; }
 
-.th-sort { margin-left: 4px; font-size: 8px; color: var(--furnace); }
+.th-sort { margin-left: 4px; font-size: 8px; color: var(--accent); }
 
 button.th-filter {
   font-size: 13px;
@@ -339,8 +340,8 @@ button.th-filter {
 
 /* A filtered column has to look filtered from across the sheet: a reader who cannot
    see which header is narrowing the table reads the subtotal as the whole. */
-thead th[data-filtered="1"] { background: var(--furnace-soft); color: var(--furnace); }
-thead th[data-filtered="1"] .th-filter { color: var(--furnace); }
+thead th[data-filtered="1"] { background: var(--accent-soft); color: var(--accent); }
+thead th[data-filtered="1"] .th-filter { color: var(--accent); }
 
 .filter-pop {
   position: fixed;
@@ -359,12 +360,12 @@ thead th[data-filtered="1"] .th-filter { color: var(--furnace); }
   font-family: var(--mono);
   font-size: 12.5px;
   color: var(--ink);
-  background: var(--paper);
+  background: var(--paper-deep);
   border: 1px solid var(--rule-strong);
   border-radius: 0;
   outline: none;
 }
-.filter-pop input[type="search"]:focus { border-color: var(--furnace); background: var(--surface); }
+.filter-pop input[type="search"]:focus { border-color: var(--accent); background: var(--surface); }
 
 .filter-pop-actions { display: flex; gap: 6px; }
 .filter-pop-actions button {
@@ -377,9 +378,9 @@ thead th[data-filtered="1"] .th-filter { color: var(--furnace); }
   border-color: var(--rule);
 }
 .filter-pop-actions button:hover:not(:disabled) {
-  background: var(--ink);
+  background: var(--accent);
   color: var(--paper);
-  border-color: var(--ink);
+  border-color: var(--accent);
 }
 
 .filter-pop-list { overflow-y: auto; flex: 1; min-height: 0; }
@@ -396,8 +397,8 @@ thead th[data-filtered="1"] .th-filter { color: var(--furnace); }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.filter-pop-list label:hover { background: var(--paper); }
-.filter-pop-list input[type="checkbox"] { accent-color: var(--furnace); flex: none; }
+.filter-pop-list label:hover { background: var(--paper-deep); }
+.filter-pop-list input[type="checkbox"] { accent-color: var(--accent); flex: none; }
 .filter-pop-list span { overflow: hidden; text-overflow: ellipsis; }
 .filter-pop-empty { padding: 10px 4px; color: var(--ink-faint); font-size: 12.5px; }
 
@@ -428,7 +429,7 @@ select.picker {
 }
 .assign select:disabled { opacity: 0.6; cursor: progress; }
 .assign .hint { font-size: 10px; letter-spacing: 0.06em; }
-.assign-error { font-size: 11px; color: var(--fail); max-width: 320px; white-space: normal; }
+.assign-error { font-size: 11px; color: var(--alert); max-width: 320px; white-space: normal; }
 .assigned { font-family: var(--mono); font-size: 12.5px; }
 
 /* ---- Remarking an overdue invoice ---------------------------------------- */
@@ -451,9 +452,9 @@ select.picker {
 .remark input::placeholder { color: var(--ink-soft); opacity: 0.55; }
 .remark input:hover { border-bottom-color: var(--rule-strong); }
 .remark input:focus {
-  background: var(--paper);
+  background: var(--paper-deep);
   border-color: var(--rule-strong);
-  outline: 2px solid var(--furnace);
+  outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
 .remark input:disabled { opacity: 0.6; cursor: progress; }
@@ -475,7 +476,7 @@ select.picker {
   font-size: 11px;
   white-space: nowrap;
   border: 1px solid var(--rule-strong);
-  background: var(--paper);
+  background: var(--paper-deep);
 }
 .ops-chip button {
   padding: 0 2px;
@@ -485,7 +486,7 @@ select.picker {
   background: none;
   border: 0;
 }
-.ops-chip button:hover:not(:disabled) { color: var(--furnace); background: none; }
+.ops-chip button:hover:not(:disabled) { color: var(--accent); background: none; }
 .ops-add {
   padding: 0 5px;
   font-size: 13px;
@@ -494,7 +495,7 @@ select.picker {
   background: none;
   border: 1px dashed var(--rule-strong);
 }
-.ops-add:hover:not(:disabled) { color: var(--furnace); border-color: var(--furnace); background: none; }
+.ops-add:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); background: none; }
 .ops select { width: auto; min-width: 150px; padding: 3px 5px; font-size: 12px; }
 .ops .hint { font-size: 10px; letter-spacing: 0.06em; }
 .ops .linkish { font-size: 10px; }
@@ -514,9 +515,9 @@ select.picker {
 }
 .po-price input:hover { border-bottom-color: var(--rule-strong); }
 .po-price input:focus {
-  background: var(--paper);
+  background: var(--paper-deep);
   border-color: var(--rule-strong);
-  outline: 2px solid var(--furnace);
+  outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
 .po-price input:disabled { opacity: 0.6; cursor: progress; }
@@ -525,8 +526,9 @@ select.picker {
 /* A figure that opens the lines behind it. It is marked, not restyled: a pill or a
    colour would break the decimal alignment down a column of tonnage and would make a
    sheet of buttons rather than a sheet of numbers. The dotted rule under it says the
-   figure is openable and takes no width; the furnace ink arrives on hover, where the
-   pointer already is. */
+   figure is openable and takes no width; the accent arrives on hover, where the pointer
+   already is. On a cell carrying severity the hover keeps the verdict's colour instead —
+   see the `.sev-*` block below. */
 
 button.drill {
   padding: 0;
@@ -545,8 +547,8 @@ button.drill {
 button.drill:hover:not(:disabled),
 button.drill:focus-visible {
   background: none;
-  color: var(--furnace);
-  border-bottom-color: var(--furnace);
+  color: var(--accent);
+  border-bottom-color: var(--accent);
 }
 
 .modal {
@@ -596,8 +598,42 @@ button.drill:focus-visible {
   color: var(--ink-soft);
   border-color: var(--rule-strong);
 }
-.modal-close:hover:not(:disabled) { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.modal-close:hover:not(:disabled) { background: var(--accent); color: var(--paper); border-color: var(--accent); }
 .modal-body { overflow: auto; flex: 1; min-height: 0; padding: 14px 16px; }
+
+/* ---- Severity ink -------------------------------------------------------- */
+/* Red, amber and green go on the figures that carry coverage, stock ageing and overdue,
+   and on nothing else. That restraint is the whole point: there are 35 columns on this
+   dashboard whose figures open a breakup, and inking all of them would make colour mean
+   "this one is clickable" — which the dotted rule under a `.drill` already says, for
+   free, without spending a colour on it. Colour here always means a verdict.
+   `views.ts` decides which columns qualify; see the `severity` field on a Column.
+
+   The class goes on the `<td>`, not on the figure inside it, and that is what makes the
+   rule short: `button.drill` declares `color: inherit`, so one class inks a plain figure
+   and a clickable one identically with no branching in the cell renderer. */
+
+td.sev-alert     { color: var(--alert); font-weight: 600; }
+td.sev-attention { color: var(--attention); }
+td.sev-ok        { color: var(--ok); }
+
+/* Alert also takes a weight, because colour must not be the only thing carrying the
+   signal — a red-green reader would otherwise see an ordinary number. The figures are
+   tabular mono, so a weight change costs no decimal alignment. */
+
+/* Hover must not trade the verdict away for the accent. The default `.drill` hover turns
+   the figure blue, which on an inked cell would mean a critical size stops looking
+   critical at exactly the moment the pointer is on it. So on these cells only the rule
+   moves, and the ink stays what it was. */
+td.sev-alert button.drill:hover:not(:disabled),
+td.sev-alert button.drill:focus-visible,
+td.sev-attention button.drill:hover:not(:disabled),
+td.sev-attention button.drill:focus-visible,
+td.sev-ok button.drill:hover:not(:disabled),
+td.sev-ok button.drill:focus-visible {
+  color: inherit;
+  border-bottom-color: currentColor;
+}
 
 /* ---- Page load ---------------------------------------------------------- */
 /* One orchestrated reveal, staggered down the page. Nothing else animates on load. */

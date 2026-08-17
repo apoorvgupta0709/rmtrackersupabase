@@ -339,8 +339,8 @@ export default async function ViewPage({
               style={{
                 padding: "5px 10px",
                 border: "1px solid",
-                borderColor: unit === option ? "var(--furnace)" : "var(--rule-strong)",
-                color: unit === option ? "var(--furnace)" : "var(--ink-soft)",
+                borderColor: unit === option ? "var(--accent)" : "var(--rule-strong)",
+                color: unit === option ? "var(--accent)" : "var(--ink-soft)",
                 textDecoration: "none",
               }}
             >

@@ -106,7 +106,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               className="label"
               style={{
                 padding: "10px 14px 12px",
-                color: "var(--furnace)",
+                color: "var(--accent)",
                 textDecoration: "none",
                 borderBottom: "2px solid transparent",
                 whiteSpace: "nowrap",

@@ -119,7 +119,7 @@ function PreviewGrid({ mapping, keyName }: { mapping: SheetMapping; keyName: str
           <thead>
             <tr>
               {order.map((i) => (
-                <th key={i} style={{ color: lead.includes(i) ? "var(--furnace)" : undefined }}>
+                <th key={i} style={{ color: lead.includes(i) ? "var(--accent)" : undefined }}>
                   {visibleName(mapping.columns[i])}
                 </th>
               ))}

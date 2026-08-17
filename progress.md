@@ -6,7 +6,7 @@ lives in the Next.js app and `.github/workflows/refresh.yml` can be deleted.
 **Read `.claude/context/memory.md` first** for the project itself. This file only covers the
 port. The plan it executes is at `~/.claude/plans/how-is-the-upload-witty-moore.md`.
 
-_Last updated: 2026-08-17, after S14._
+_Last updated: 2026-08-17, after S13._
 
 ---
 
@@ -47,7 +47,7 @@ exists to stop"); atomic cross-tab consistency via `current_build_id()`; and sec
 | 0 — migration drift | **done** (false alarm; see below) |
 | 1 — absorption into SQL | **not started** |
 | 2 — helpers + config | **done** |
-| 3 — sections | **14 of 17** (S1–S10, S12, S14, S15, 17a) — 3 of 5 hard algorithms done |
+| 3 — sections | **15 of 17** (S1–S10, S12–S15, 17a) — 4 of 5 hard algorithms done |
 | 4–6 — QC gate, cutover, retire Python | not started |
 
 ### Ported and proven
@@ -71,6 +71,7 @@ exists to stop"); atomic cross-tab consistency via `current_build_id()`; and sec
 | `lib/pipeline/sections/repository.ts` | **S15** code repository | 305 rows + 8 window figures |
 | `lib/pipeline/sections/trend.ts` | **17a** sales trend | 109 buckets, 571 SKUs, 692 drill-downs |
 | `lib/pipeline/sections/pricing.ts` | **S14** SKU pricing | 375 rows, 9 refusals, 1,101 build-ups |
+| `lib/pipeline/sections/str.ts` | **S13** STR plan | 58 buckets, 290 drill-downs |
 | `lib/pipeline/sections/overdue.ts` | **S10** overdue analysis | payload section + 38 drill-downs |
 
 ### Changes made to the Python
@@ -86,6 +87,15 @@ All verified payload-neutral except the one intended ordering change.
   absent length but raised for an unreadable one.
 - `_plain()` module-level helper, plus two **env-gated** dumps (`DUMP_MATERIAL_DIMENSION`,
   `DUMP_SALES_MAPS`) that write internal maps for the parity checks. Never on the build's path.
+- **Two new assignment overrides, 17 Aug** — `megh_sku` on `vsm_key` in the three-frame loop,
+  and `ctl_bucket` on `rfd["ctl_bucket"]`. Both are guarded by an empty-dict test and both
+  sets are empty today, so all 17 checks stayed green; the change is payload-neutral *until
+  somebody answers those queues*, which is the point of it.
+  **The CTL one is ported**, because S4 carries `rfd_unrecovered`: `stockPools` takes an
+  eighth argument `assignments`, and `check_section_stock.mjs` passes the same set the
+  pipeline reads. Porting it later, after an RFD assignment existed, would have shown up as
+  a section that had silently stopped matching. The `megh_sku` one needs no port yet — the
+  Megh section is not among the 13.
 
 ---
 
@@ -268,7 +278,7 @@ Line numbers are current as of 2026-08-15 (`refresh_dashboard.py` is 6,788 lines
 | 10 | Overdue analysis | 2990 | — | **done** |
 | 11 | Megh SKU tracker | 3128 | S1, S2, S4 | largest block, 796 lines |
 | 12 | Inter-plant transfers | 3924 | S1 | **done** |
-| 13 | STR plan (Hosur 8406) | 4122 | S1, S4, S12 | allocation waterfall at ~4345 |
+| 13 | STR plan (Hosur 8406) | 4122 | S1, S4, S12 | **done** |
 | 14 | SKU pricing | 4542 | S1, S3 | **done** |
 | 15 | Code repository | 5332 | S1, S2 | **done** |
 | 16 | Order book (+ sign-off at 5171) | 4849 | S1, **S11** | blocked — see below |

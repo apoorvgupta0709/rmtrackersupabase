@@ -92,12 +92,21 @@ export default function LoginForm() {
             margin: 0,
           }}
         >
+          {/*
+            The tile fill has to differ from the `dl`'s own background, which is showing
+            through the 1px gaps as the grid lines. It used to be `--paper`, which is now
+            the same white as `--surface` — so the lines would have survived and the tiles
+            would simply have merged into the gradient behind them.
+          */}
           {[
             ["Tabs", "11"],
             ["Dumps read", "15"],
             ["Masters", "3"],
           ].map(([term, value]) => (
-            <div key={term} style={{ background: "var(--paper)", padding: "14px 16px" }}>
+            <div
+              key={term}
+              style={{ background: "var(--surface)", padding: "14px 16px" }}
+            >
               <dt className="label">{term}</dt>
               <dd className="figure" style={{ margin: "4px 0 0", fontSize: 22 }}>
                 {value}
