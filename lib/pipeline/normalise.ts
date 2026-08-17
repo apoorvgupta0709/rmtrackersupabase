@@ -82,6 +82,26 @@ export function pyStr(value: unknown): string {
 }
 
 /**
+ * `str(value)` where the value is known to be a **float**.
+ *
+ * The seam `pyStr` documents but cannot close on its own: Python distinguishes `int` from
+ * `float`, so `str(189.0)` is `"189.0"` where JavaScript writes `"189"`. Usually there is no
+ * way to know which the value was — but where the code that produced it is a `round(x, 1)`
+ * or a pandas float column, there is, and it matters: the `PRICEBUILD|` drill-down keys
+ * interpolate the length directly, so every one of 2,202 keys came out a character short and
+ * opened nothing.
+ *
+ * A `NaN` renders `"nan"` for the same reason — a missing material code is a float NaN in
+ * the frame, and the key carries it as such rather than as an empty string.
+ */
+export function pyStrFloat(value: unknown): string {
+  if (isNa(value)) return "nan";
+  const text = pyStr(value);
+  // Python's float repr always shows a point or an exponent; JavaScript's does not.
+  return /[.e]/i.test(text) ? text : `${text}.0`;
+}
+
+/**
  * `value or fallback`, where Python's falsiness is not JavaScript's.
  *
  * `0` is falsy in Python, so `str(key or "")` turns a zero key into the empty string and

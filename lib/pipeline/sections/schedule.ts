@@ -92,15 +92,20 @@ export function scheduleBuckets(
   return { bucket, ctlBucket };
 }
 
-export function scheduleFacts(
+/**
+ * Every schedule line, derived — the frame sections 14 and 17 read before it is grouped.
+ *
+ * Section 3 groups these; section 14 prices them one customer, material and cut length at a
+ * time, which is a different grain. Exported so both work off one derivation rather than
+ * two that could disagree about which lines are demand at all.
+ */
+export function scheduleLines(
   scheduleRows: Row[],
   dimension: MaterialDimension,
   sales: SalesMapping,
   oemMap: Map<string, unknown>,
-): ScheduleGroup[] {
-  /* ---- per line ----------------------------------------------------------- */
-
-  const lines = scheduleRows
+) {
+  return scheduleRows
     .map((row) => {
       const scheduleQty = toNumber(row["SCHEDULE in nos"]) ?? 0;
 
@@ -129,6 +134,9 @@ export function scheduleFacts(
       const { bucket, ctlBucket } = scheduleBuckets(row, dimension);
 
       return {
+        // Kept so section 14 can price off the sheet's own cells — `MATERIAL DES`,
+        // `LENGTH` and the three value-add flags — at its own grain.
+        row,
         scheduleQty,
         scheduleMt: statedMt ?? derivedMt,
         OEM: oem ?? null,
@@ -150,6 +158,17 @@ export function scheduleFacts(
     // Applied after the quantity is read and before anything groups: a line with no
     // scheduled quantity is not demand.
     .filter((line) => line.scheduleQty > 0);
+}
+
+export type ScheduleLine = ReturnType<typeof scheduleLines>[number];
+
+export function scheduleFacts(
+  scheduleRows: Row[],
+  dimension: MaterialDimension,
+  sales: SalesMapping,
+  oemMap: Map<string, unknown>,
+): ScheduleGroup[] {
+  const lines = scheduleLines(scheduleRows, dimension, sales, oemMap);
 
   /* ---- grouped ------------------------------------------------------------ */
 
