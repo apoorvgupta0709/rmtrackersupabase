@@ -104,6 +104,16 @@ export function stockPools(
   dimension: MaterialDimension,
   oemMap: Map<string, unknown>,
   asOf: string,
+  /**
+   * The owner's own answers from the Missing mappings tab, by scope.
+   *
+   * Only `ctl_bucket` is read here — `bucket` was already applied inside
+   * `materialDimension`, at the one join every section reads through. RFD is the one queue
+   * that does not go through that join: it reads the material master's own `CTL Bucket`
+   * column, so a bucket assigned anywhere else cannot reach it and it needs a space of its
+   * own. See the same override in `refresh_dashboard.py`, which this must match exactly.
+   */
+  assignments: { ctl_bucket?: Record<string, string> } = {},
 ): StockResult {
   /* ---- stock, per row ----------------------------------------------------- */
 
@@ -161,6 +171,8 @@ export function stockPools(
 
   /* ---- RFD 4731 ----------------------------------------------------------- */
 
+  const ctlAssignments = assignments.ctl_bucket ?? {};
+
   const rfd = rfdRows.map((row) => {
     // Only all-digit codes: `CTL Code` also holds notes such as `6 M CODE`.
     const codes = splitCodes(row["CTL Code"]).filter((c) => /^\d+$/.test(c));
@@ -178,8 +190,16 @@ export function stockPools(
       ?? (rfdLength === null ? null : (rfdLength <= 10 ? rfdLength : rfdLength / 1000));
 
     const directCtl = directRow?.["CTL Bucket"];
-    const ctlBucket = validBucket(directCtl)
+    const resolvedCtl = validBucket(directCtl)
       ? (directCtl as string) : makeCtlBucket(bucket, lengthM);
+    // Applied last, so it wins — an override and not a fallback, because a row whose
+    // `CTL Code` resolves to the *wrong* bucket is exactly the case being corrected.
+    // Keyed on the listed code, which is what the queue publishes and so what the browser
+    // recorded the decision against; a row whose `CTL Code` is blank names nothing to hold
+    // a decision and is left as the master resolved it.
+    const listed = isNa(row["CTL Code"]) ? null : normCode(pyStr(row["CTL Code"]).trim());
+    const ctlBucket =
+      (listed === null ? undefined : ctlAssignments[listed]) ?? resolvedCtl;
 
     return {
       row,
