@@ -6,7 +6,7 @@ lives in the Next.js app and `.github/workflows/refresh.yml` can be deleted.
 **Read `.claude/context/memory.md` first** for the project itself. This file only covers the
 port. The plan it executes is at `~/.claude/plans/how-is-the-upload-witty-moore.md`.
 
-_Last updated: 2026-08-17, after 17a._
+_Last updated: 2026-08-17, after 17a and the contract-grid reader._
 
 ---
 
@@ -56,7 +56,7 @@ exists to stop"); atomic cross-tab consistency via `current_build_id()`; and sec
 |---|---|---|
 | `lib/pipeline/format.ts` | `fmtG` (Python `%g`), `pyRound` (Python `round`) | 28,583 values vs CPython, at 3 precisions |
 | `lib/pipeline/normalise.ts` | 20 helpers, config tables, UTC date helpers | 647,491 comparisons vs the pipeline's own functions |
-| `lib/pipeline/source.ts` | `readSlot`, `readSalesLedger` | used by the section checks |
+| `lib/pipeline/source.ts` | `readSlot`, `readSalesLedger`, `readCellGrid` | used by the section checks; the grid read is proven against all 71 contract keys the build quotes |
 | `lib/pipeline/sections/material.ts` | **S1** governed material dimension | 300,023 keys across 9 maps |
 | `lib/pipeline/sections/sales.ts` | **S2** sales mapping | 2,063 keys across 7 lookups |
 | `lib/pipeline/sections/schedule.ts` | **S3** schedule facts | 396 groups, field for field, in order |
@@ -257,7 +257,7 @@ Line numbers are current as of 2026-08-15 (`refresh_dashboard.py` is 6,788 lines
 | 13 | STR plan (Hosur 8406) | 4122 | S1, S4, S12 | allocation waterfall at ~4345 |
 | 14 | SKU pricing | 4542 | S1, S3 | **`pricing.ts` already ports the formula** |
 | 15 | Code repository | 5332 | S1, S2 | **done** |
-| 16 | Order book (+ sign-off at 5171) | 4849 | S1 | |
+| 16 | Order book (+ sign-off at 5171) | 4849 | S1, **S11** | blocked — see below |
 | 17a | Trend: segments, buckets, customer SKUs | 5490 | S2, S3, S8 | **done** |
 | 17b | Trend: Megh sales history | ~5570 | **S11** | must follow the Megh tab |
 
@@ -268,6 +268,15 @@ other one joins through S1 and/or S2, which is why those two came first.
 the plan expected. What remains is genuinely independent work: S7 and S15/S16/S17 are leaves
 on S1/S2, S8 collects the queues the earlier sections already produce, and S11/S13/S14 hold
 the five hard algorithms.
+
+**S11 is the critical path, and it blocks more than it looks** — checked 17 Aug:
+
+- **S16** order book reads `megh_code_length_bucket` (defined at ~L3701, inside S11).
+- **S16b** sign-off reads `megh_rows`, `code_to_vsm_key` and `megh_order_plan`.
+- **17b** trend history reads `megh_rows`, `megh_codes`, `code_to_vsm_key`.
+
+So porting S11 unblocks three things at once. **S13 (STR) and S14 (pricing) are clear of it**
+and can be done in either order — grep the ranges for `megh_` before assuming otherwise.
 
 **Section 17 is two halves and the order matters** — checked 16 Aug, and it corrects what
 this file said before:

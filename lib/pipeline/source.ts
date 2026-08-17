@@ -123,6 +123,40 @@ export async function readSalesLedger(
     .map((entry) => entry.line);
 }
 
+/**
+ * A slot's raw cell grid, straight out of `raw_rows`.
+ *
+ * For the one family that keeps no table. `contract:*` is read with `header=None` because
+ * its quarters are *column offsets* rather than named fields — `PRICING_SHEETS` addresses
+ * them as 66, 67, 69 — so there are no column names to give a view, and
+ * `SLOTS_WITHOUT_A_TABLE` says so explicitly rather than leaving it looking like an
+ * omission.
+ *
+ * Ordered by `seq`, which is the row's position in the sheet, and checked against the row
+ * count the batch was written with. That check is not ceremony: PostgREST's 1,000-row cap
+ * is silent, and a short read of a price sheet would price the sizes that arrived and quietly
+ * drop the rest.
+ */
+export async function readCellGrid(
+  slot: string,
+  { url, key }: { url: string; key: string },
+): Promise<unknown[][]> {
+  const batches = await selectAll(url, key,
+    `raw_batches?select=id,row_count&slot=eq.${encodeURIComponent(slot)}`
+    + "&status=eq.current&order=uploaded_at.desc");
+  if (batches.length === 0) return [];
+
+  const batch = batches[0];
+  const rows = await selectAll(url, key,
+    `raw_rows?select=seq,row&batch_id=eq.${batch.id}&order=seq.asc`);
+
+  if (typeof batch.row_count === "number" && rows.length !== batch.row_count) {
+    throw new Error(`${slot}: read ${rows.length} rows of ${batch.row_count} the batch `
+      + "was written with");
+  }
+  return rows.map((r) => (r.row ?? []) as unknown[]);
+}
+
 export function manifests(root: string): Record<string, Manifest> {
   return JSON.parse(readFileSync(
     `${root}/.claude/skills/refresh-tvsm-dashboard/config/dump_columns.json`, "utf8"));
