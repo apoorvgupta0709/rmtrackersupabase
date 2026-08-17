@@ -6,7 +6,7 @@ lives in the Next.js app and `.github/workflows/refresh.yml` can be deleted.
 **Read `.claude/context/memory.md` first** for the project itself. This file only covers the
 port. The plan it executes is at `~/.claude/plans/how-is-the-upload-witty-moore.md`.
 
-_Last updated: 2026-08-17, after 17a and the contract-grid reader._
+_Last updated: 2026-08-17, after S14._
 
 ---
 
@@ -47,7 +47,7 @@ exists to stop"); atomic cross-tab consistency via `current_build_id()`; and sec
 | 0 — migration drift | **done** (false alarm; see below) |
 | 1 — absorption into SQL | **not started** |
 | 2 — helpers + config | **done** |
-| 3 — sections | **13 of 17** (S1–S10, S12, S15, 17a) — the coupled spine is done |
+| 3 — sections | **14 of 17** (S1–S10, S12, S14, S15, 17a) — 3 of 5 hard algorithms done |
 | 4–6 — QC gate, cutover, retire Python | not started |
 
 ### Ported and proven
@@ -70,6 +70,7 @@ exists to stop"); atomic cross-tab consistency via `current_build_id()`; and sec
 | `lib/pipeline/sections/transfers.ts` | **S12** inter-plant transfers | 255 rows, 255 drill-downs |
 | `lib/pipeline/sections/repository.ts` | **S15** code repository | 305 rows + 8 window figures |
 | `lib/pipeline/sections/trend.ts` | **17a** sales trend | 109 buckets, 571 SKUs, 692 drill-downs |
+| `lib/pipeline/sections/pricing.ts` | **S14** SKU pricing | 375 rows, 9 refusals, 1,101 build-ups |
 | `lib/pipeline/sections/overdue.ts` | **S10** overdue analysis | payload section + 38 drill-downs |
 
 ### Changes made to the Python
@@ -124,6 +125,8 @@ node tools/check_section_missing.mjs      $SC/oracle.json --as-of 2026-08-14
 node tools/check_section_transfers.mjs    $SC/oracle.json --as-of 2026-08-14
 node tools/check_section_repository.mjs   $SC/oracle.json --as-of 2026-08-14
 node tools/check_section_trend.mjs        $SC/oracle.json --as-of 2026-08-14
+node tools/check_section_pricing.mjs      $SC/oracle.json --as-of 2026-08-14
+node tools/check_contract_grid.mjs        $SC/oracle.json
 
 # Diff two whole payloads (used to prove a pipeline change moved nothing else).
 node tools/compare_pipeline_implementations.mjs a.json b.json --only ll_tracker --top 40
@@ -141,7 +144,7 @@ dumps have moved since, so diffing against it reports the calendar as a defect.
 
 ## The traps — read this before porting anything
 
-Fourteen silent faults in eleven sections. **None threw an exception. All would have shipped as
+Sixteen silent faults in twelve sections. **None threw an exception. All would have shipped as
 wrong numbers that reconciled.** Assume the next one is there too.
 
 1. **Python rounds half to even; JavaScript rounds half away from zero** — in *both*
@@ -213,6 +216,17 @@ wrong numbers that reconciled.** Assume the next one is there too.
    made every bucket lookup miss while the rows still rendered — correct buckets, zero
    tonnage against each.
 
+15. **A key built by string interpolation needs each field rendered as Python renders
+   *that* type.** The `PRICEBUILD|` keys carry a length and a material code: the length is a
+   float throughout, so Python writes `189.0` where JavaScript writes `189`; the code is a
+   *string* from `norm_code` and writes as itself, **except** when absent, where it is a
+   float NaN and writes `nan`. Getting one right and the other wrong still leaves every key
+   opening nothing. `pyStrFloat` closes the float half — the seam `pyStr` calls unclosable
+   *is* closable wherever the producing code says which type it made, and only there.
+16. **One list can be published to two precisions.** `pricing_unpriced` rounds its
+   no-governed-bucket half to three decimals and extends its no-contract half on unrounded.
+   Rounding both is the difference between agreeing and nearly agreeing.
+
 Also standing: **`groupby` sorts its keys** and `dropna=False` puts the null group last, so
 insertion order silently reorders every section (`build_sections.seq` is a sort position).
 `sortedGroupKeys` in `overdue.ts` is the pattern.
@@ -255,7 +269,7 @@ Line numbers are current as of 2026-08-15 (`refresh_dashboard.py` is 6,788 lines
 | 11 | Megh SKU tracker | 3128 | S1, S2, S4 | largest block, 796 lines |
 | 12 | Inter-plant transfers | 3924 | S1 | **done** |
 | 13 | STR plan (Hosur 8406) | 4122 | S1, S4, S12 | allocation waterfall at ~4345 |
-| 14 | SKU pricing | 4542 | S1, S3 | **`pricing.ts` already ports the formula** |
+| 14 | SKU pricing | 4542 | S1, S3 | **done** |
 | 15 | Code repository | 5332 | S1, S2 | **done** |
 | 16 | Order book (+ sign-off at 5171) | 4849 | S1, **S11** | blocked — see below |
 | 17a | Trend: segments, buckets, customer SKUs | 5490 | S2, S3, S8 | **done** |
