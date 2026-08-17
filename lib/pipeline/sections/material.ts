@@ -33,6 +33,10 @@ import type { Row } from "../source.ts";
 /** zmat's `MATERIAL TYPE` for a finished good. */
 export const FG_MATERIAL_TYPE = "FERT";
 
+/** A mother tube standing in WIP carries a `PTM-` description; its finished good a `TUB-`. */
+export const WIP_DESCRIPTION_PREFIX = "PTM";
+export const FG_DESCRIPTION_PREFIX = "TUB";
+
 export type MaterialDimension = {
   /** Bucketting's own rows, by material code. */
   direct: Map<string, { Bucket: string | null; "LL or CTL": unknown; "CTL Bucket": string | null; Length: unknown }>;
@@ -182,6 +186,38 @@ export function materialDimension(
     fgCodesByDescription,
     fgCodesByDescriptionPlant,
   };
+}
+
+/**
+ * The finished-goods code an STR can be raised on for a mother-tube description.
+ *
+ * An STR can only be raised on a finished-goods code. Mother tubes standing in WIP carry a
+ * `PTM-` description; the finished goods that will be booked against them carry the same
+ * description under `TUB-`, so the code is recovered by swapping the prefix.
+ *
+ * Returns `[null, null]` when the swapped description is not in zmat, which is how a mother
+ * tube with no finished equivalent is told apart from one that simply has no stock.
+ */
+export function fgCodeForMotherTube(
+  dimension: MaterialDimension,
+  descriptionKey: string | null,
+  plant: string | null,
+  bucket: string | null,
+): [string | null, string | null] {
+  const text = descriptionKey ?? "";
+  if (!text.startsWith(WIP_DESCRIPTION_PREFIX)) return [null, null];
+  const fgKey = FG_DESCRIPTION_PREFIX + text.slice(WIP_DESCRIPTION_PREFIX.length);
+
+  let candidates = dimension.fgCodesByDescriptionPlant.get(`${fgKey}|${plant}`) ?? [];
+  if (candidates.length === 0) candidates = dimension.fgCodesByDescription.get(fgKey) ?? [];
+  if (candidates.length === 0) return [null, null];
+
+  // Prefer a code whose governed bucket agrees with the mother tube's, then take the
+  // lowest so repeated runs pick the same one.
+  const governed = candidates.filter((code) => dimension.materialBucket.get(code) === bucket);
+  const pool = governed.length ? governed : candidates;
+  const chosen = [...pool].sort((a, b) => (a.length - b.length) || (a < b ? -1 : a > b ? 1 : 0))[0];
+  return [chosen, fgKey];
 }
 
 /* ---- grouping helpers ------------------------------------------------------ */

@@ -37,8 +37,14 @@ export type WipResult = {
   transitByBucket: Map<string, number>;
   wipDetailByBucket: Map<string, Row[]>;
   transitDetailByBucket: Map<string, Row[]>;
-  /** Every WIP row, for section 9's source-coverage tally. */
-  wipRows: { bucket: string | null; wip_mt: number }[];
+  /** Every WIP row: section 9 tallies source coverage off it, section 13 offers it as
+   *  mother-tube stock an STR can be raised against. */
+  wipRows: {
+    row: Row;
+    bucket: string | null;
+    description_key: string | null;
+    wip_mt: number;
+  }[];
 };
 
 export function wipAndSummary(

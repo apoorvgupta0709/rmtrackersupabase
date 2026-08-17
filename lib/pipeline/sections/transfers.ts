@@ -34,6 +34,21 @@ export type TransfersResult = {
   plants: { source: Row[]; destination: Row[] };
   available: boolean;
   note: string | null;
+  /** The per-line frame, which the STR plan reads for what is inbound to 8406. */
+  lines: TransferLine[];
+  /** `code - name` where the dump names the plant, the bare code otherwise. */
+  plantLabel: (code: string | null) => string | null;
+};
+
+export type TransferLine = {
+  row: Row;
+  source_plant: string | null;
+  dest_plant: string | null;
+  material_key: string | null;
+  bucket: string | null;
+  qty_mt: number;
+  in_transit: boolean;
+  document: string | null;
 };
 
 export function transfers(
@@ -45,6 +60,7 @@ export function transfers(
     rows: [], details: {},
     plants: { source: [], destination: [] },
     available: false, note: "No transfer dump was supplied.",
+    lines: [], plantLabel: () => null,
   };
   if (transferRows.length === 0) return empty;
 
@@ -224,7 +240,7 @@ export function transfers(
     });
   }
 
-  return { rows, details, plants, available: true, note: null };
+  return { rows, details, plants, available: true, note: null, lines, plantLabel };
 }
 
 /* ---- helpers --------------------------------------------------------------- */

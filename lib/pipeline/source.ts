@@ -89,9 +89,45 @@ const PAGE = 1000;
 export async function readSalesLedger(
   { url, key }: { url: string; key: string },
 ): Promise<Row[]> {
-  const rows = await selectAll(url, key,
-    "tsl_sales?select=billing_document,billing_item,row"
-    + "&order=billing_document.asc,billing_item.asc");
+  // **Keyset paging, not offset.** `tsl_sales` keeps the whole line as `row` jsonb — 101 MB
+  // for 22,642 rows — and `offset=N` makes Postgres walk and discard N rows on every page,
+  // so the last pages scan almost the whole table. Under any concurrency that crosses the
+  // statement timeout and the read fails with `57014`, intermittently and therefore
+  // confusingly. Seeking past the last key read is flat instead of quadratic.
+  //
+  // The seek is `gte`, not `gt`, and duplicates are dropped: the key is
+  // `(billing_document, billing_item)`, so a document whose items straddle a page boundary
+  // would lose its tail to a `gt` on the document alone. Overlapping by one document and
+  // discarding what has already been seen is cheap and cannot drop a line.
+  const rows: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  let after: string | null = null;
+
+  for (;;) {
+    const seek = after === null ? ""
+      : `&billing_document=gte.${encodeURIComponent(after)}`;
+    const page = await selectAll(url, key,
+      "tsl_sales?select=billing_document,billing_item,row"
+      + `&order=billing_document.asc,billing_item.asc${seek}`, { single: true });
+    if (page.length === 0) break;
+
+    let added = 0;
+    for (const r of page) {
+      const id = `${r.billing_document}\u0000${r.billing_item}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      rows.push(r);
+      added += 1;
+    }
+    // Nothing new means the last document fills a whole page on its own, which would
+    // otherwise loop for ever. It has never happened, and stopping loudly beats looping.
+    if (added === 0) {
+      throw new Error("tsl_sales: a single billing document fills a page; "
+        + "keyset paging cannot advance past it");
+    }
+    if (page.length < PAGE) break;
+    after = String(page[page.length - 1].billing_document);
+  }
 
   const lines: Row[] = rows.map((r) => ({
     ...(r.row as Record<string, unknown>),
@@ -162,22 +198,55 @@ export function manifests(root: string): Record<string, Manifest> {
     `${root}/.claude/skills/refresh-tvsm-dashboard/config/dump_columns.json`, "utf8"));
 }
 
+/**
+ * One page, retried when the database cancels it.
+ *
+ * `tsl_sales` is 101 MB of `row` jsonb, and a page of it takes a second or two on its own —
+ * comfortably inside the statement timeout. Under concurrency it is not: several section
+ * checks reading the ledger at once push one of them over, and PostgREST answers `57014`.
+ * The query shape is not the problem; both offset and keyset pages return in under two
+ * seconds when the database is quiet.
+ *
+ * So this is contention, and a read that gives up on the first cancellation turns a busy
+ * moment into a failed check — which is exactly what it did, intermittently and therefore
+ * confusingly, before it was understood.
+ */
+async function withRetry(
+  href: string,
+  key: string,
+  path: string,
+  attempts = 4,
+): Promise<Record<string, unknown>[]> {
+  let wait = 500;
+  for (let attempt = 1; ; attempt += 1) {
+    const response = await fetch(href, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+    });
+    if (response.ok) return response.json();
+
+    const body = await response.text();
+    const cancelled = response.status >= 500 || body.includes("57014");
+    if (!cancelled || attempt >= attempts) {
+      throw new Error(`${path}: ${response.status} ${body}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, wait));
+    wait *= 2;
+  }
+}
+
 /** Every row of a PostgREST query, however many pages that takes. */
 async function selectAll(
   url: string,
   key: string,
   path: string,
+  { single = false }: { single?: boolean } = {},
 ): Promise<Record<string, unknown>[]> {
   const rows: Record<string, unknown>[] = [];
   for (let offset = 0; ; offset += PAGE) {
+    if (single && offset > 0) return rows;
     const separator = path.includes("?") ? "&" : "?";
-    const response = await fetch(`${url}/rest/v1/${path}${separator}limit=${PAGE}&offset=${offset}`, {
-      headers: { apikey: key, Authorization: `Bearer ${key}` },
-    });
-    if (!response.ok) {
-      throw new Error(`${path}: ${response.status} ${await response.text()}`);
-    }
-    const page = await response.json();
+    const page = await withRetry(
+      `${url}/rest/v1/${path}${separator}limit=${PAGE}&offset=${offset}`, key, path);
     rows.push(...page);
     // Stop only on a short page. An exactly-full page may or may not be the last one, and
     // guessing is what the cap punishes.
