@@ -6,7 +6,7 @@ lives in the Next.js app and `.github/workflows/refresh.yml` can be deleted.
 **Read `.claude/context/memory.md` first** for the project itself. This file only covers the
 port. The plan it executes is at `~/.claude/plans/how-is-the-upload-witty-moore.md`.
 
-_Last updated: 2026-08-16, after S15._
+_Last updated: 2026-08-17, after 17a._
 
 ---
 
@@ -47,7 +47,7 @@ exists to stop"); atomic cross-tab consistency via `current_build_id()`; and sec
 | 0 — migration drift | **done** (false alarm; see below) |
 | 1 — absorption into SQL | **not started** |
 | 2 — helpers + config | **done** |
-| 3 — sections | **12 of 17** (S1–S10, S12, S15) — the coupled spine is done |
+| 3 — sections | **13 of 17** (S1–S10, S12, S15, 17a) — the coupled spine is done |
 | 4–6 — QC gate, cutover, retire Python | not started |
 
 ### Ported and proven
@@ -69,6 +69,7 @@ exists to stop"); atomic cross-tab consistency via `current_build_id()`; and sec
 | `lib/pipeline/sections/missing.ts` | **S8** queues + SO cascade | 3 queue rows, 396 tracker rows |
 | `lib/pipeline/sections/transfers.ts` | **S12** inter-plant transfers | 255 rows, 255 drill-downs |
 | `lib/pipeline/sections/repository.ts` | **S15** code repository | 305 rows + 8 window figures |
+| `lib/pipeline/sections/trend.ts` | **17a** sales trend | 109 buckets, 571 SKUs, 692 drill-downs |
 | `lib/pipeline/sections/overdue.ts` | **S10** overdue analysis | payload section + 38 drill-downs |
 
 ### Changes made to the Python
@@ -122,6 +123,7 @@ node tools/check_section_salessummary.mjs $SC/oracle.json --as-of 2026-08-14
 node tools/check_section_missing.mjs      $SC/oracle.json --as-of 2026-08-14
 node tools/check_section_transfers.mjs    $SC/oracle.json --as-of 2026-08-14
 node tools/check_section_repository.mjs   $SC/oracle.json --as-of 2026-08-14
+node tools/check_section_trend.mjs        $SC/oracle.json --as-of 2026-08-14
 
 # Diff two whole payloads (used to prove a pipeline change moved nothing else).
 node tools/compare_pipeline_implementations.mjs a.json b.json --only ll_tracker --top 40
@@ -139,7 +141,7 @@ dumps have moved since, so diffing against it reports the calendar as a defect.
 
 ## The traps — read this before porting anything
 
-Thirteen silent faults in ten sections. **None threw an exception. All would have shipped as
+Fourteen silent faults in eleven sections. **None threw an exception. All would have shipped as
 wrong numbers that reconciled.** Assume the next one is there too.
 
 1. **Python rounds half to even; JavaScript rounds half away from zero** — in *both*
@@ -182,14 +184,18 @@ wrong numbers that reconciled.** Assume the next one is there too.
    `helper_customer` and `uom` are grouped on. Rendering a blank as `""` would merge every
    blank group into whatever else grouped empty, and the totals would still add up.
 
-11. **pandas has two summations and they disagree.** `Series.sum()` uses numpy's pairwise
-   reduction; `groupby().sum()` is Cython carrying a **Kahan** compensation term. One real
-   nine-row group gives `2.86649999999999982592` one way and `2.86650000000000027001` the
-   other — straddling the midpoint of a column published to three decimals. Use `kahanSum`
-   for group aggregates and `pairwiseSum` for whole-Series totals (`lib/pipeline/numeric.ts`).
-   `kahanSum` deliberately omits the final correction, as `group_sum` does: adding it back
-   is *more accurate* and stops matching. Summing better is the wrong instinct — the goal is
-   the same answer, not a good one.
+11. **pandas sums three different ways and the spelling does not tell you which.**
+   - `df.groupby(k)[c].sum()` — Cython, carrying a **Kahan** compensation term → `kahanSum`
+   - `series.sum()`, *including* `group["c"].sum()` on one group inside a `for ... in
+     df.groupby(k)` loop — numpy **pairwise** → `pairwiseSum`
+   - `sum(d.values())` — Python's own builtin, a plain left fold
+
+   The middle one is the trap: the same `.sum()` means Kahan when pandas aggregates and
+   pairwise when you hold a group and ask it to add up. One real nine-row group gives
+   `2.86649999999999982592` and `2.86650000000000027001` — straddling the midpoint of a
+   column published to three decimals. `kahanSum` deliberately omits the final correction,
+   as `group_sum` does: adding it back is *more accurate* and stops matching. Summing better
+   is the wrong instinct — the goal is the same answer, not a good one.
 12. **A total can be published rounded and sorted unrounded.** Two rows both printed `0.366`
    — one a single row at exactly 0.366, the other four rows summing to 0.365585 — and
    rounding before the sort put them the wrong way round. Round on the way out; order on
@@ -201,6 +207,11 @@ wrong numbers that reconciled.** Assume the next one is there too.
    *only* the code repository — the sales summary was unaffected because the OEM key files
    that customer correctly — so it is invisible everywhere except one section. Copy the
    comments with the constant: they are the reason it has four entries.
+
+14. **`month_map` unwraps a one-part key.** `key = key[0] if len(key) == 1 else key`, so a
+   single-key lookup is by the bare value and not by a one-element tuple. Keeping the tuple
+   made every bucket lookup miss while the rows still rendered — correct buckets, zero
+   tonnage against each.
 
 Also standing: **`groupby` sorts its keys** and `dropna=False` puts the null group last, so
 insertion order silently reorders every section (`build_sections.seq` is a sort position).
@@ -247,7 +258,7 @@ Line numbers are current as of 2026-08-15 (`refresh_dashboard.py` is 6,788 lines
 | 14 | SKU pricing | 4542 | S1, S3 | **`pricing.ts` already ports the formula** |
 | 15 | Code repository | 5332 | S1, S2 | **done** |
 | 16 | Order book (+ sign-off at 5171) | 4849 | S1 | |
-| 17a | Trend: segments, buckets, customer SKUs | 5490 | S2, S3, S8 | independent — **do this one** |
+| 17a | Trend: segments, buckets, customer SKUs | 5490 | S2, S3, S8 | **done** |
 | 17b | Trend: Megh sales history | ~5570 | **S11** | must follow the Megh tab |
 
 **`overdue_analysis` was the only section standing free of the material dimension.** Every
@@ -269,9 +280,8 @@ this file said before:
   cannot be done until the Megh tab is. Roughly 5570–5630.
 - The **quarterly price-difference working** starts around 5742 and is separate again.
 
-Remaining, in suggested order: **17a**, then **S16** order book + sign-off (note 16b also
-writes 39 entries into section 8's queue, so porting it lets that check's scope tighten),
-then the three holding the hard algorithms — **S11 Megh** (796 lines, the BOP
+Remaining, in suggested order: **S16** order book + sign-off (note 16b also writes 39
+entries into section 8's queue, so porting it lets that check's scope tighten), then the three holding the hard algorithms — **S11 Megh** (796 lines, the BOP
 mutual-exclusion assignment), **S13 STR** (the allocation waterfall) and **S14 pricing**
 (where `pricing.ts` already gives the formula a head start, leaving `contract_row_for_size`'s
 four-stage narrowing as the real work). **17b** falls out of S11.
