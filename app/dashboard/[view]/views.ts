@@ -27,6 +27,17 @@ export type TableSpec = {
   note?: string;
   /** Rows from `build_sections`. */
   section?: string;
+  /**
+   * Rows from a master table, read live rather than out of the build.
+   *
+   * Only the all-mappings tab uses this, and only because the question it asks is
+   * different from every other tab's. Everywhere else the point of reading the build is
+   * that a page is one consistent answer as of one refresh; here the point is the
+   * opposite — what is governed *now*, including a decision recorded a minute ago that no
+   * refresh has folded in yet. `dump_bucketing` and `dump_oem_key` each carry a "signed in
+   * reads the master" policy, which is what makes this readable at all.
+   */
+  master?: "bucketting" | "oem_key";
   /** Rows that travel in a scalar beside the section rows: `[scalar key, field]`. */
   scalar?: [string, string];
   /**
@@ -211,6 +222,25 @@ const unitTotal = (unit: Unit): Column =>
  * made on — which is the whole point: the queue is the same queue every morning until
  * somebody's answer is kept somewhere the next refresh reads.
  */
+/**
+ * An assignable cell on the all-mappings tab.
+ *
+ * `assignTo` above keys every decision on `material_code` and offers a list by scope,
+ * which is right for the queues. This tab has a master whose subject is the *customer*,
+ * and one whose own key is the plan SKU, so both are stated rather than assumed.
+ */
+const assignIn = (
+  scope: "bucket" | "megh_sku" | "oem",
+  label: string,
+  codeField: string,
+  options: string,
+): Column => ({
+  field: `__assign_${scope}`,
+  label,
+  wide: true,
+  assign: { scope, codeField, options },
+});
+
 const assignTo = (scope: "bucket" | "megh_sku", label: string): Column => ({
   // No field on the row holds this; the decision is looked up by material code. The name
   // still has to be unique among the columns, because it keys the header's filter.
@@ -736,6 +766,75 @@ export const VIEWS: Record<string, ViewSpec> = {
           bool("excluded", "Excluded"),
           days("age_days", "Age days"),
           mt("order_mt", "Order MT"),
+        ],
+      },
+    ],
+  },
+
+  mappingsView: {
+    label: "All mappings",
+    note:
+      "Every mapping the dashboard uses, stated rather than inferred — and answerable "
+      + "where it stands. The queue beside this one shows what reached no mapping; this "
+      + "shows what every mapping currently is, which is the only way to catch one that is "
+      + "wrong rather than absent. Bucketting and the OEM key are read live, so a decision "
+      + "recorded a minute ago is already here; the plan's length key is read from the "
+      + "build, because that is where the plan is published. As on the queue, an answer is "
+      + "kept against the code and applies at the next refresh — the figures on the other "
+      + "tabs do not move until then, and the cell says so.",
+    scalars: ["governed_buckets"],
+    tables: () => [
+      {
+        key: "bucketting",
+        title: "Bucketting · material code to governed bucket",
+        note:
+          "What Bucketting governs by hand. The pipeline resolves far more codes than this "
+          + "by matching physical attributes against these rows, so a code absent here is "
+          + "not necessarily unmapped — it is unmapped *directly*, and the bucket it "
+          + "resolves to is only as right as the row it was learned from.",
+        master: "bucketting" as const,
+        columns: [
+          txt("material_code", "Material code"),
+          txt("bucket", "Governed bucket", true),
+          txt("ctl_bucket", "CTL bucket", true),
+          txt("ll_or_ctl", "LL or CTL"),
+          assignIn("bucket", "Reassign bucket", "material_code", "buckets"),
+        ],
+      },
+      {
+        key: "oem_key",
+        title: "OEM key · customer to OEM",
+        note:
+          "One row per customer the OEM key names. A customer absent from it reaches no OEM "
+          + "at all, which is what the customer queue reports — and until now could only be "
+          + "fixed in the workbook. It can be answered here.",
+        master: "oem_key" as const,
+        columns: [
+          txt("customer", "Customer", true),
+          txt("oem", "OEM"),
+          txt("cam", "CAM"),
+          // Keyed on the customer, not a material code: this master's subject is the
+          // customer, and a decision filed against anything else answers no question.
+          assignIn("oem", "Reassign OEM", "customer", "none"),
+        ],
+      },
+      {
+        key: "length_key",
+        title: "vsm stock · material code to plan SKU",
+        note:
+          "The plan's own length key, one row per SKU with the codes each plant extends for "
+          + "it. A code here is how a sale or a stock line reaches the Megh tab without a "
+          + "governed bucket to join on, which is the only route a size bound for RE or "
+          + "HMSIL has.",
+        section: "megh_length_bucketing",
+        columns: [
+          txt("vsm_key", "Plan SKU (length key)", true),
+          txt("bucket", "Governed bucket", true),
+          txt("material_codes", "Material codes", true),
+          txt("plants", "Plants"),
+          txt("end_oem", "Ends at"),
+          txt("cut_type", "Cut type"),
+          assignIn("megh_sku", "Reassign plan SKU", "vsm_key", "megh_skus"),
         ],
       },
     ],

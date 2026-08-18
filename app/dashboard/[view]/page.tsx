@@ -178,10 +178,37 @@ export default async function ViewPage({
     Object.entries(fetched).map(([section, held]) => [section, held.rows]),
   );
 
+  // The masters, read live rather than out of the build — see `master` on `TableSpec`.
+  // Each carries a "signed in reads the master" policy of its own, so this goes through the
+  // reader's client like everything else and a viewer without the grant sees nothing.
+  const MASTERS = {
+    bucketting: {
+      table: "dump_bucketing",
+      select: "material_code,bucket,ctl_bucket,ll_or_ctl",
+      order: "material_code",
+    },
+    oem_key: { table: "dump_oem_key", select: "customer,oem,cam", order: "customer" },
+  } as const;
+
+  const wantedMasters = [...new Set(tables.map((t) => t.master).filter(Boolean))] as
+    (keyof typeof MASTERS)[];
+  const masterRows: Record<string, Rows> = Object.fromEntries(
+    await Promise.all(wantedMasters.map(async (name) => {
+      const spec = MASTERS[name];
+      // Through `unknown`: the generated client types a `select` string literal, and a
+      // union of two of them is not one it can parse.
+      const { data } = await supabase.from(spec.table).select(spec.select as string)
+        .order(spec.order, { ascending: true });
+      return [name, ((data ?? []) as unknown) as Rows];
+    })),
+  );
+
   function rowsFor(table: TableSpec): { rows: Rows; capped: boolean } {
     let rows: Rows = [];
     let capped = false;
-    if (table.section) {
+    if (table.master) {
+      rows = masterRows[table.master] ?? [];
+    } else if (table.section) {
       rows = fetched[table.section].rows;
       capped = fetched[table.section].capped;
     } else if (table.scalar) {
