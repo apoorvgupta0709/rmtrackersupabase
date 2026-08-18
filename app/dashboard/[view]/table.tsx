@@ -73,8 +73,8 @@ export type DetailSpec = {
  * leave internally inconsistent.
  */
 export type AssignSpec = {
-  /** Which space the choice is in — a governed bucket, a Megh plan key, or an OEM. */
-  scope: "bucket" | "megh_sku" | "oem";
+  /** Which space the choice is in — a governed bucket, or a Megh plan key. */
+  scope: "bucket" | "megh_sku";
   /** The field holding the material code the decision is recorded against. */
   codeField: string;
   /** Which list of choices to offer, by name. The page supplies the lists. */

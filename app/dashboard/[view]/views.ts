@@ -230,7 +230,7 @@ const unitTotal = (unit: Unit): Column =>
  * and one whose own key is the plan SKU, so both are stated rather than assumed.
  */
 const assignIn = (
-  scope: "bucket" | "megh_sku" | "oem",
+  scope: "bucket" | "megh_sku",
   label: string,
   codeField: string,
   options: string,
@@ -807,15 +807,20 @@ export const VIEWS: Record<string, ViewSpec> = {
         note:
           "One row per customer the OEM key names. A customer absent from it reaches no OEM "
           + "at all, which is what the customer queue reports — and until now could only be "
-          + "fixed in the workbook. It can be answered here.",
+          + "fixed in the workbook — and still can only be fixed there. This table states "
+          + "the mapping; correcting it needs the pipeline to read an OEM assignment "
+          + "first, which it does not yet, so there is no box here that would lie about "
+          + "having saved something.",
         master: "oem_key" as const,
         columns: [
           txt("customer", "Customer", true),
           txt("oem", "OEM"),
           txt("cam", "CAM"),
-          // Keyed on the customer, not a material code: this master's subject is the
-          // customer, and a decision filed against anything else answers no question.
-          assignIn("oem", "Reassign OEM", "customer", "none"),
+          // No answer box, deliberately. `oem_map` is built from this master and nothing
+          // overrides it, so a cell here would save, read back, and change nothing — the
+          // mapping would look answered while every figure keyed off the OEM stayed as it
+          // was. That is what `megh_sku` did for a fortnight. The column becomes writable
+          // when the pipeline reads an `oem` assignment, and not before.
         ],
       },
       {

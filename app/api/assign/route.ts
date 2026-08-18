@@ -16,8 +16,7 @@ import { supabaseServer } from "@/lib/supabase/server";
  * cell would leave every figure derived from it stale with nothing to say so.
  */
 
-// The database holds the same list in a check constraint; both have to agree.
-const SCOPES = new Set(["bucket", "megh_sku", "oem"]);
+const SCOPES = new Set(["bucket", "megh_sku"]);
 
 export async function POST(request: Request) {
   let body: { scope?: string; material_code?: string; assigned_to?: string | null };
