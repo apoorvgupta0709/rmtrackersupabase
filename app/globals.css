@@ -18,36 +18,48 @@
  */
 
 :root {
-  --paper: #ffffff;
-  /* The quiet grey that separates from the page, now that the page and the card are the
-     same white: row hover, the sticky totals row, every input, the ops chip. Nine rules
-     depend on it being distinguishable from --surface. */
-  --paper-deep: #f4f6f8;
-  --surface: #ffffff;
-  --ink: #16181c;
-  --ink-soft: #4a4f57;
-  --ink-faint: #878b91;
-  --rule: #e4e7eb;
-  --rule-strong: #c4c9d0;
+  /* Dark. The page is black and the ink is white, and everything below is derived from
+     that rather than inverted from the light palette — an inversion keeps the light
+     palette's contrast ratios, which were chosen against white and are wrong against
+     black. */
+  --paper: #0b0c0e;
+  /* The quiet step *up* from the page, now that the page is the darkest thing: row hover,
+     the sticky totals row, every input, the ops chip. Nine rules depend on it being
+     distinguishable from --surface. On white this was a step down; on black it has to be
+     a step up or the two collapse. */
+  --paper-deep: #16181c;
+  --surface: #111316;
+  --ink: #f4f6f8;
+  --ink-soft: #b3b8c0;
+  --ink-faint: #7d838c;
+  --rule: #24272c;
+  --rule-strong: #3a3f46;
 
-  --accent: #1a56db;
-  --accent-deep: #1443ad;
-  --accent-soft: #e8f0fe;
+  --accent: #6ea8ff;
+  --accent-deep: #9cc4ff;
+  --accent-soft: #16233a;
 
-  /* Severity. One vocabulary, shared by the build stamp and the figures in the tables,
-     so the word on the header and the ink on a cell can never mean different things. */
-  --ok: #16704a;
-  --attention: #9a5b06;
-  --alert: #a5251c;
-  --alert-soft: #fdf0ef;
-  --attention-soft: #fdf6ec;
+  /* Severity. One vocabulary, shared by the build stamp and the figures in the tables, so
+     the word on the header and the ink on a cell can never mean different things.
+     Lightened for a dark ground: the light palette's #16704a and #a5251c are legible on
+     white and nearly invisible on black, and a verdict nobody can read is not a verdict.
+     Red is severe — low stock, high overdue. Green is healthy — cover at or past target. */
+  --ok: #4ade80;
+  --attention: #fbbf24;
+  --alert: #f87171;
+  --alert-soft: #2a1414;
+  --attention-soft: #2a2210;
 
   --display: var(--font-display), "Helvetica Neue", sans-serif;
   --mono: var(--font-mono), ui-monospace, monospace;
 
   --tight: 0.02em;
-  --shadow-lift: 0 1px 0 rgba(22, 24, 28, 0.04), 0 8px 24px -18px rgba(22, 24, 28, 0.5);
+  /* The lift was a shadow on white. On black a shadow is invisible, so the card separates
+     by a hairline of its own instead. */
+  --shadow-lift: 0 0 0 1px rgba(255, 255, 255, 0.04), 0 8px 24px -18px rgba(0, 0, 0, 0.9);
 }
+
+html { color-scheme: dark; }
 
 * { box-sizing: border-box; }
 
@@ -558,7 +570,9 @@ button.drill:focus-visible {
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(22, 24, 28, 0.45);
+  /* Near-black at 62%: the scrim was a dark wash over a white page and barely
+     separates the modal from a page that is already dark. */
+  background: rgba(0, 0, 0, 0.62);
 }
 .modal-card {
   width: min(1180px, 96vw);
