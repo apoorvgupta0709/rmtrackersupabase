@@ -57,14 +57,26 @@ const [bucketting, zmat, oemRows, ledger, scheduleRows, stockRows, rfdRows, assi
       { headers: { apikey: key, Authorization: `Bearer ${key}` } }).then((r) => r.json()),
   ]);
 
-const dimension = materialDimension(bucketting, zmat, {
-  bucket: Object.fromEntries(assignmentRows
-    .filter((a) => a.scope === "bucket").map((a) => [a.material_code, a.assigned_to])),
-});
-const oemMap = oemMapOf(oemRows);
-const sales = salesMapping(ledger, oemRows, dimension, asOf.slice(0, 7));
+const byScope = (scope) => Object.fromEntries(assignmentRows
+  .filter((a) => a.scope === scope && a.assigned_to).map((a) => [a.material_code, a.assigned_to]));
+
+const dimension = materialDimension(bucketting, zmat, { bucket: byScope("bucket") });
+// The OEM queue answers into `oem_map`, and the pipeline applies it there rather than at
+// the customer join — so the check has to hand the port the same set the pipeline read,
+// or the two would agree only while nobody had answered that queue.
+const oemAssigned = {
+  oem: Object.fromEntries(assignmentRows.filter((a) => a.scope === "oem" && a.assigned_to)
+    .map((a) => [a.material_code, a.assigned_to])),
+};
+
+const oemMap = oemMapOf(oemRows, oemAssigned);
+const sales = salesMapping(ledger, oemRows, dimension, asOf.slice(0, 7, oemAssigned));
 const groups = scheduleFacts(scheduleRows, dimension, sales, oemMap);
-const ours = stockPools(stockRows, rfdRows, zmat, groups, dimension, oemMap, asOf);
+// The RFD queue answers in its own space, and the pipeline applies it here rather than at
+// the material join — so the check has to hand the port the same set the pipeline read, or
+// the two would agree only while nobody had answered that queue.
+const ours = stockPools(stockRows, rfdRows, zmat, groups, dimension, oemMap, asOf,
+  { ctl_bucket: byScope("ctl_bucket") });
 
 const oracle = JSON.parse(readFileSync(oraclePath, "utf8"));
 

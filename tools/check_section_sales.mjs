@@ -72,7 +72,15 @@ if (dimOracle) {
   }
 }
 
-const ours = salesMapping(ledger, oemRows, dimension, oracle.published_month);
+// The OEM queue answers into `oem_map`, and the pipeline applies it there rather than at
+// the customer join — so the check has to hand the port the same set the pipeline read,
+// or the two would agree only while nobody had answered that queue.
+const oemAssigned = {
+  oem: Object.fromEntries(assignmentRows.filter((a) => a.scope === "oem" && a.assigned_to)
+    .map((a) => [a.material_code, a.assigned_to])),
+};
+
+const ours = salesMapping(ledger, oemRows, dimension, oracle.published_month, oemAssigned);
 
 /* ---- compare --------------------------------------------------------------- */
 

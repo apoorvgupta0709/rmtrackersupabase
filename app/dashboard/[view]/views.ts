@@ -16,7 +16,7 @@
  *    says why below.
  */
 
-import type { AverageOver, Column } from "./table";
+import type { AssignScope, AverageOver, Column, SeveritySpec } from "./table";
 import type { CopySpec } from "./copies";
 
 export type Unit = "mt" | "nos";
@@ -38,6 +38,20 @@ export type TableSpec = {
    * reads the master" policy, which is what makes this readable at all.
    */
   master?: "bucketting" | "oem_key";
+  /**
+   * Which fields decide whether a row still needs an answer, for the "Only unanswered"
+   * toggle. A row counts as answered when *any* of them carries something.
+   *
+   * Any, not all, and that is the whole of the rule: a bucketting row is answered if the
+   * master already governs it **or** somebody has since assigned it, and either one means
+   * it is not work. Requiring both would leave every governed row in the queue for ever.
+   *
+   * The fields are read as the column shows them, not as the row holds them, so `—` and
+   * `unassigned` both count as empty without this list having to know what a null looks
+   * like in each kind. That is also why an `__assign_*` field works here at all: the
+   * decision is not on the row, only in the rendered cell.
+   */
+  unmapped?: string[];
   /** Rows that travel in a scalar beside the section rows: `[scalar key, field]`. */
   scalar?: [string, string];
   /**
@@ -173,6 +187,89 @@ const drill = (column: Column, key: string, title: string, when?: string): Colum
   detail: { key, title, ...(when ? { when } : {}) },
 });
 
+/**
+ * A column whose figures are inked by the verdict they carry.
+ *
+ * Kept to the three things that mean act now — coverage, stock ageing, overdue — and
+ * withheld from everything else on purpose. Thirty-five columns on this dashboard open a
+ * breakup; inking all of them would spend colour saying "this one is clickable", which
+ * the dotted rule under a drill-down already says for nothing. A colour here is a
+ * verdict, so a reader scanning 447 rows of cut-length stock can find the aged lots
+ * without reading a single figure.
+ */
+const sev = (column: Column, severity: SeveritySpec): Column => ({ ...column, severity });
+
+/**
+ * The build's own coverage verdict, mapped to a band.
+ *
+ * Both coverage tables are inked from this rather than from `coverage_days`, and that is
+ * not a shortcut — it is the only correct reading. **The two tabs judge the same field
+ * against different targets**: the long-length tracker against 45 days, the STR plan
+ * against 15. A threshold on the number would therefore be right on one tab and wrong on
+ * the other, whereas the pipeline has already applied the right target to each. It also
+ * means the ink and the `Risk` word beside it can never drift apart.
+ *
+ * `Critical`/`Low`/`Watch`/`Adequate`/`No demand` come from the long-length tracker,
+ * `Short`/`Watch`/`Covered` from the STR plan. A size with no demand is not covered and
+ * not short — there is nothing to be short of — so it takes no ink at all.
+ */
+/**
+ * The published verdict, as ink.
+ *
+ * `Watch` is green, not amber, at the owner's instruction: it is 30 to 45 days of cover on
+ * the long-length tracker and 15 to 30 on the STR plan, and a month of stock is not a
+ * warning. Note what that costs — the tracker's own target is still 45, so green here means
+ * "a month or more", not "at target". Move `coverage_days`' bands in the pipeline if green
+ * should mean the latter.
+ */
+const RISK_WORDS: Record<string, "alert" | "attention" | "ok" | null> = {
+  Critical: "alert",
+  Short: "alert",
+  Low: "attention",
+  Watch: "ok",
+  Adequate: "ok",
+  Covered: "ok",
+  "No demand": null,
+};
+
+/**
+ * Where a lot's ageing turns from attention to alert.
+ *
+ * **60 days is governed** — `stock_ageing.high_age_days` in `config/pipeline.json`, and
+ * the boundary the `High age MT` column is itself computed at. **180 is not.** It is a
+ * reading of the build: on the 17 August data 266 of 447 cut-length rows and 135 of 255
+ * long-length rows sit past 60 days, so a flat red at the governed boundary would ink
+ * the majority of both tables and stop meaning anything. At 180 it is 70 rows and 32.
+ * Change this one constant if the owner wants the line drawn elsewhere; do not move the
+ * 60, which belongs to the pipeline and not to this file.
+ */
+const AGE_ALERT_DAYS = 180;
+const AGE_ATTENTION_DAYS = 60;
+
+const AGEING: SeveritySpec = {
+  direction: "high",
+  alert: AGE_ALERT_DAYS,
+  attention: AGE_ATTENTION_DAYS,
+};
+
+/**
+ * The aged tonnage, banded by the age of the lot it sits in rather than by its own size —
+ * so the figure and the `Oldest days` beside it always say the same thing, and a tonnage
+ * never has to be judged against a threshold in MT that nothing governs.
+ *
+ * The `when` guard is the same one the drill-down on this column already carries, and for
+ * the same reason: a lot whose oldest batch is 700 days old but which has nothing past
+ * the boundary would otherwise print a red `0.000`.
+ */
+const AGED_TONNAGE: SeveritySpec = { ...AGEING, from: "oldest_age_days", when: "high_age_mt" };
+
+/**
+ * A receivable is overdue at 47 days (`receivables.due_days_from_invoice`), so every row
+ * on that tab is already past due and the attention band starts at the first rupee. 90 is
+ * the alert, and it is the boundary the build already publishes a column for.
+ */
+const OVERDUE_ALERT_DAYS = 90;
+
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -221,16 +318,24 @@ const unitTotal = (unit: Unit): Column =>
  * It records against the row's material code, so the decision outlives the build it was
  * made on — which is the whole point: the queue is the same queue every morning until
  * somebody's answer is kept somewhere the next refresh reads.
+ *
+ * The three scopes are three different spaces, and the cell must not offer one where
+ * another belongs: `bucket` is a governed bucket from `Bucketting`, `megh_sku` is a key on
+ * the Megh plan, `ctl_bucket` is a bucket with a cut length appended. The build publishes
+ * a list for the first two and none for the third, so an RFD cell suggests nothing — which
+ * is honest, and is why the "not in the master yet" flag only appears where there is a
+ * master to check against.
  */
 /**
- * An assignable cell on the all-mappings tab.
+ * An assignable cell on a master table.
  *
  * `assignTo` above keys every decision on `material_code` and offers a list by scope,
- * which is right for the queues. This tab has a master whose subject is the *customer*,
- * and one whose own key is the plan SKU, so both are stated rather than assumed.
+ * which is right for the queues. A master's subject is not always a material: the OEM key
+ * is keyed on the *customer*, the plan's length key on the SKU itself. So both the field
+ * the decision is recorded against and the list it offers are stated rather than assumed.
  */
 const assignIn = (
-  scope: "bucket" | "megh_sku",
+  scope: AssignScope,
   label: string,
   codeField: string,
   options: string,
@@ -241,17 +346,141 @@ const assignIn = (
   assign: { scope, codeField, options },
 });
 
-const assignTo = (scope: "bucket" | "megh_sku", label: string): Column => ({
-  // No field on the row holds this; the decision is looked up by material code. The name
+const assignTo = (
+  scope: AssignScope,
+  label: string,
+  codeField = "material_code",
+): Column => ({
+  // No field on the row holds this; the decision is looked up by the row's code. The name
   // still has to be unique among the columns, because it keys the header's filter.
   field: `__assign_${scope}`,
   label,
   wide: true,
   assign: {
     scope,
-    codeField: "material_code",
-    options: scope === "bucket" ? "buckets" : "megh_skus",
+    codeField,
+    options: scope === "bucket" ? "buckets" : scope === "megh_sku" ? "megh_skus" : "none",
   },
+});
+
+/**
+ * A column worked out from the row rather than read off it.
+ *
+ * Used only by the mapping queues, and only for the three facts every queue owes the
+ * reader — see `queue` below.
+ */
+const derived = (field: string, label: string, from: (row: Row) => string): Column => ({
+  field,
+  label,
+  wide: true,
+  derive: from,
+});
+
+/* ---- The mapping queues --------------------------------------------------- */
+
+/**
+ * The tabs a queue's tonnage should be showing on.
+ *
+ * Declared once and used both here and as each view's own `label`, so the name a queue
+ * sends the reader to is by construction the name on the nav. Naming them by hand is how
+ * `refresh_dashboard.py` came to write "Megh Steel tab" for a view labelled "Megh Steel
+ * sales" — a small drift, and exactly the kind that sends somebody to a tab that is not
+ * there.
+ */
+const TAB = {
+  customer: "Customer tracker",
+  megh: "Megh Steel sales",
+  ll: "Long-length tracker",
+  sales: "Sales summary",
+  stock: "Stock analysis",
+  str: "STR to 8406",
+} as const;
+
+/** The masters a mapping can be missing from, in the words the owner's files use. */
+const MASTER = {
+  bucketting: "Bucketting master",
+  customers: "OEM_key_1_rev customer codes",
+  meghPlan: "Megh plan SKU list",
+  ctl: "CTL Bucket, in the material master",
+  bucketAndPlan: "Bucketting master, and the Megh plan",
+  schedule: "The customer schedule — bucket governed, nothing scheduled on it",
+} as const;
+
+/**
+ * One mapping queue, in the shape every mapping queue shares.
+ *
+ * The seven tables grew one at a time and each said a different subset of the same three
+ * things in different words: `missing_mappings` had `Source` and `Reason`,
+ * `orders_unmapped` had `Origin`, `Cause`, `Missing from` and `Still shown on`,
+ * `stock_unmapped` said none of it. So a reader could not tell from a row where it came
+ * from, which master failed it, or which tab is short because of it — which is all three
+ * of the facts that decide whether a row is worth answering.
+ *
+ * This states them in one order on all seven: **where it came from → what it is → what is
+ * missing → what that breaks → how much → what you do about it.** Each queue's own extra
+ * columns keep their place after the tonnage, so nothing is lost and nothing interrupts
+ * the spine.
+ *
+ * The three derived columns are worked out here rather than published as pipeline fields
+ * on purpose. Every fact they need is already on the rows, and the pipeline is mid-port to
+ * TypeScript with each ported section held to the Python row for row — three new fields
+ * would have to be written twice, identically, to keep that harness green, and would not
+ * reach the screen until a refresh ran.
+ */
+type QueueSpec = {
+  key: string;
+  section: string;
+  title: string;
+  note?: string;
+  /** Which dump or sheet the rows arrived on: a field on the row, or one fixed name. */
+  source: string | ((row: Row) => string);
+  /** Which master did not recognise the row. */
+  missingIn: string | ((row: Row) => string);
+  /** Which tabs are short because of it. */
+  affects: string | ((row: Row) => string);
+  /** The row's own key, description and party. Absent ones read `—` down the column. */
+  code: string;
+  description: string;
+  customer?: string;
+  plant?: string;
+  /** The queue's existing explanation, where it has one worth keeping. */
+  why?: string;
+  /** The queue's own measure, whatever it is called on the row. */
+  qty: string;
+  /** What this queue has and the others do not. Kept, but after the spine. */
+  extras?: Column[];
+  /** What an answer here is in the space of, and the field it is recorded against. */
+  assign?: { scope: AssignScope; label: string };
+};
+
+const asText = (v: string | ((row: Row) => string)) =>
+  typeof v === "function" ? v : () => v;
+
+const queue = (q: QueueSpec): TableSpec => ({
+  key: q.key,
+  section: q.section,
+  title: q.title,
+  ...(q.note ? { note: q.note } : {}),
+  columns: [
+    derived("__source", "Data source", asText(q.source)),
+    txt(q.code, "Code"),
+    txt(q.description, "Description", true),
+    // A queue with no party or no plant still carries the column, so the seven tables line
+    // up when read one after another.
+    txt(q.customer ?? "__no_customer", "Customer", true),
+    txt(q.plant ?? "__no_plant", "Plant"),
+    derived("__missing_in", "Mapping missing in", asText(q.missingIn)),
+    txt(q.why ?? "__no_why", "Why", true),
+    derived("__affects", "Affects tabs", asText(q.affects)),
+    mt(q.qty, "Qty MT"),
+    ...(q.extras ?? []),
+    ...(q.assign ? [assignTo(q.assign.scope, q.assign.label, q.code)] : []),
+  ],
+  // Every row on a queue is unmapped by construction — that is what put it there. So the
+  // only thing "unanswered" can usefully mean here is *not answered by you yet*, which is
+  // the assignment cell and nothing else. It is the difference between a queue that still
+  // reads 300 rows after a morning's work and one that reads 280.
+  ...(q.assign ? { unmapped: [`__assign_${q.assign.scope}`] } : {}),
 });
 
 /* ---- The customer tracker ------------------------------------------------ */
@@ -336,7 +565,7 @@ const join = (v: unknown) => (Array.isArray(v) && v.length ? v.join(", ") : "—
 
 export const VIEWS: Record<string, ViewSpec> = {
   customerView: {
-    label: "Customer tracker",
+    label: TAB.customer,
     note:
       "Pick a customer to see every SKU it has schedule or dispatch against, its CRFH "
       + "book where it keeps one, and everything it has bought over the trend window. The "
@@ -474,7 +703,7 @@ export const VIEWS: Record<string, ViewSpec> = {
   },
 
   meghView: {
-    label: "Megh Steel sales",
+    label: TAB.megh,
     note:
       "The vendor service model: Tata Steel supplies Megh Steel, which supplies TVSM, "
       + "Royal Enfield, HMSIL and Rane. A key carrying the Megh- prefix is an RE or HMSIL "
@@ -648,7 +877,7 @@ export const VIEWS: Record<string, ViewSpec> = {
   },
 
   llView: {
-    label: "Long-length tracker",
+    label: TAB.ll,
     note:
       "Bucket-level coverage for long length, with the order book behind it. Coverage days "
       + "and the gap columns are computed upstream against the month's schedule.",
@@ -668,7 +897,7 @@ export const VIEWS: Record<string, ViewSpec> = {
           + "to Total sales beside it.",
         columns: [
           txt("bucket", "Bucket", true),
-          txt("risk", "Risk"),
+          sev(txt("risk", "Risk"), { words: RISK_WORDS }),
           drill(
             mt("total_schedule_mt", "Schedule MT"),
             "LLSCHEDULE|{bucket}",
@@ -691,13 +920,17 @@ export const VIEWS: Record<string, ViewSpec> = {
           // they are already inside it — plant stock, WIP, transit and the TVSM tracker
           // add up to exactly this figure — so they were the same tonnage counted twice
           // on screen. The breakup names all four sources.
+          // Inked off `risk` like the cover beside it, so the tonnage a reader clicks and
+          // the verdict on the row can never say different things. Banding the number
+          // itself would: 40 MT is comfortable against one bucket's demand and a month
+          // short against another's.
           drill(
-            mt("available_ll_stock_mt", "LL stock MT"),
+            sev(mt("available_ll_stock_mt", "LL stock MT"), { from: "risk", words: RISK_WORDS }),
             "{stock_detail_key}",
             "{bucket} · consolidated LL stock",
           ),
           drill(
-            days("coverage_days", "Cover days"),
+            sev(days("coverage_days", "Cover days"), { from: "risk", words: RISK_WORDS }),
             "LLCOVERAGE|{bucket}",
             "{bucket} · coverage calculation",
           ),
@@ -771,28 +1004,219 @@ export const VIEWS: Record<string, ViewSpec> = {
     ],
   },
 
-  mappingsView: {
-    label: "All mappings",
+  mappingView: {
+    label: "Missing mappings",
     note:
-      "Every mapping the dashboard uses, stated rather than inferred — and answerable "
-      + "where it stands. The queue beside this one shows what reached no mapping; this "
-      + "shows what every mapping currently is, which is the only way to catch one that is "
-      + "wrong rather than absent. Bucketting and the OEM key are read live, so a decision "
-      + "recorded a minute ago is already here; the plan's length key is read from the "
-      + "build, because that is where the plan is published. As on the queue, an answer is "
-      + "kept against the code and applies at the next refresh — the figures on the other "
-      + "tabs do not move until then, and the cell says so.",
+      "The queue and the masters, on one tab, because they are one job. The queues come "
+      + "first: every row in them is tonnage the pipeline could not govern, so it is "
+      + "tonnage missing from a tracker somewhere. Every queue reads the same way — where "
+      + "the row came from, what it is, which master did not recognise it, which tabs are "
+      + "short because of it, how much, and the box you answer in. Type the key it belongs "
+      + "to; the list drops down as you type but you are not held to it, because the usual "
+      + "reason a row is here is that the master has never carried the key it needs. "
+      + "Under them are the three masters themselves, each editable in the same way — that "
+      + "is where a mapping that is *wrong* rather than absent gets corrected, which no "
+      + "queue can show you. Every box on this tab writes to the database as you leave it. "
+      + "The decision is kept against the code, not against this build — the next refresh "
+      + "reads it and the tonnage lands where it should. Until that refresh runs the "
+      + "figures on the other tabs are unchanged, and the cell says so rather than "
+      + "implying otherwise. Use **Only unanswered** to hide what you have already done.",
     scalars: ["governed_buckets"],
     tables: () => [
+      queue({
+        key: "missing_mappings",
+        section: "missing_mappings",
+        title: "Materials, customers and scheduled sizes",
+        note:
+          "Sizes a customer schedules that no bucket governs appear here in the form the "
+          + "customer sent them. A row reading lookup error is a bug, not a gap.",
+        // The one queue that pools four sources, so all three derived columns turn on the
+        // sub-type rather than on the table.
+        source: (row) => String(row.source ?? ""),
+        missingIn: (row) =>
+          row.mapping_type === "Customer" ? MASTER.customers
+            : row.mapping_type === "Order sign-off" ? MASTER.bucketAndPlan
+              : MASTER.bucketting,
+        affects: (row) =>
+          row.mapping_type === "Customer" ? [TAB.sales, TAB.customer].join(", ")
+            : row.mapping_type === "Schedule" ? [TAB.customer, TAB.ll, TAB.str].join(", ")
+              : row.mapping_type === "Order sign-off" ? [TAB.ll, TAB.megh].join(", ")
+                : [TAB.customer, TAB.ll, TAB.sales].join(", "),
+        code: "material_code",
+        description: "description",
+        customer: "customer",
+        why: "reason",
+        qty: "affected_mt",
+        extras: [txt("mapping_type", "Type"), txt("customer_code", "Customer code")],
+        assign: { scope: "bucket", label: "Assign bucket" },
+      }),
+      queue({
+        key: "megh_unmapped",
+        section: "megh_unmapped",
+        title: "Megh purchases reaching no plan SKU",
+        note:
+          "Tonnage Megh Steel has already bought against a size the plan does not carry. "
+          + "The derived key is the key the pipeline computed and failed to match, so it "
+          + "is the answer to check before it is the answer to type.",
+        source: "sales.xlsx",
+        // A Megh-only size having no governed TVS bucket is the expected state, not the
+        // gap: what is missing is a line on the plan.
+        missingIn: MASTER.meghPlan,
+        affects: TAB.megh,
+        code: "material_code",
+        description: "description",
+        customer: "customer",
+        qty: "sales_mt",
+        extras: [txt("derived_key", "Derived key", true)],
+        // Keyed on the plan's own SKU, not on a governed bucket.
+        assign: { scope: "megh_sku", label: "Assign plan SKU" },
+      }),
+      queue({
+        key: "stock_unmapped",
+        section: "stock_unmapped",
+        title: "Stock reaching no governed bucket",
+        source: "stock.xlsx",
+        missingIn: MASTER.bucketting,
+        affects: [TAB.stock, TAB.ll, TAB.customer].join(", "),
+        code: "material_code",
+        description: "description",
+        customer: "holder",
+        plant: "plant",
+        qty: "stock_mt",
+        extras: [txt("length_type", "Length"), cnt("batches", "Batches")],
+        assign: { scope: "bucket", label: "Assign bucket" },
+      }),
+      queue({
+        key: "wip_unmapped",
+        section: "wip_unmapped",
+        title: "WIP reaching no governed bucket",
+        note: "Unresolved WIP is excluded from long-length stock, so this is cover the tracker cannot see.",
+        source: "wip.xlsx",
+        missingIn: MASTER.bucketting,
+        affects: [TAB.stock, TAB.ll].join(", "),
+        code: "material_code",
+        description: "description",
+        plant: "plant",
+        why: "reason",
+        qty: "wip_mt",
+        extras: [txt("code_bucket", "Code bucket", true), cnt("batches", "Batches")],
+        assign: { scope: "bucket", label: "Assign bucket" },
+      }),
+      queue({
+        key: "rfd_unmapped",
+        section: "rfd_unmapped",
+        title: "RFD 4731 lines reaching no CTL mapping",
+        note:
+          "A row whose code cell reads `—` carries no CTL Code, so there is nothing to "
+          + "record a decision against and the box says so. Those are fixed by giving the "
+          + "line a code in rfd_4731.xlsx, not from here.",
+        source: "rfd_4731.xlsx",
+        // RFD resolves through the material master's own CTL Bucket column and never
+        // through `material_bucket`, so a bucket assigned on another queue cannot reach
+        // it — which is why this queue assigns in its own space.
+        missingIn: MASTER.ctl,
+        affects: [TAB.stock, TAB.str].join(", "),
+        code: "listed_code",
+        description: "size",
+        why: "reason",
+        qty: "stock_mt",
+        extras: [
+          txt("matched_materials", "Matched materials", true),
+          { field: "length_m", label: "Length m", kind: "rate" },
+          nos("stock_nos", "Stock nos"),
+        ],
+        assign: { scope: "ctl_bucket", label: "Assign CTL bucket" },
+      }),
+      queue({
+        key: "orders_unmapped",
+        section: "orders_unmapped",
+        title: "Order lines missing from a view",
+        note:
+          "Lines excluded on purpose are listed too, so the ones showing nowhere are the "
+          + "number worth chasing — read `Affects tabs` against `Still shown on`.",
+        source: (row) => String(row.origin ?? ""),
+        // Unlike every other queue, a line can be here for a reason that is not a missing
+        // mapping at all: a governed bucket that simply carries no schedule. Saying
+        // "Bucketting master" for those would send somebody to add a code that is already
+        // in it.
+        missingIn: (row) => {
+          const cause = String(row.cause ?? "");
+          // 946 of the 984 lines on the 14 August build are marked `c` in the sheet's
+          // remarks column: not live demand, listed only so the lines showing nowhere can
+          // be told from the lines withheld on purpose. No master is short because of one,
+          // and leaving the cell blank would read as "nobody knows" rather than "nothing".
+          if (cause.includes("Remark c")) return "Nothing — excluded on purpose";
+          const parts = [
+            cause.includes("No governed bucket") ? MASTER.bucketting : "",
+            cause.includes("Bucket not scheduled") ? MASTER.schedule : "",
+            cause.includes("Length not governed") || cause.includes("SKU not in plan")
+              ? MASTER.meghPlan : "",
+          ].filter(Boolean);
+          // A cause this does not recognise shows itself rather than nothing, so a new one
+          // added upstream reads as unclassified instead of reading as no problem.
+          return parts.join("; ") || cause;
+        },
+        // Already computed per line by the pipeline, which names the Megh view by an older
+        // label than the nav carries.
+        affects: (row) =>
+          String(row.missing_from ?? "").replaceAll("Megh Steel tab", TAB.megh),
+        code: "material_code",
+        description: "description",
+        customer: "customer",
+        plant: "plant",
+        why: "cause",
+        qty: "order_mt",
+        extras: [
+          txt("shown_on", "Still shown on", true),
+          txt("kind", "Kind"),
+          txt("order_no", "Order no"),
+          txt("bucket", "Bucket", true),
+          txt("sku", "SKU", true),
+          days("age_days", "Age days"),
+        ],
+        assign: { scope: "bucket", label: "Assign bucket" },
+      }),
+      queue({
+        key: "signoff_unmapped",
+        section: "signoff_unmapped",
+        title: "Order sign-off reaching no bucket or SKU",
+        source: "signoff.xlsx",
+        missingIn: MASTER.bucketAndPlan,
+        affects: [TAB.ll, TAB.megh].join(", "),
+        code: "material_code",
+        description: "__no_description",
+        // The sign-off sheets are one per plant, and the sheet name is the plant.
+        plant: "plant",
+        qty: "qty_mt",
+        extras: [
+          txt("bucket", "Bucket", true),
+          txt("sku", "SKU", true),
+          mt("signed_mt", "Signed MT"),
+          mt("unsigned_mt", "Not signed MT"),
+        ],
+        assign: { scope: "bucket", label: "Assign bucket" },
+      }),
+
+      /* ---- and the masters themselves ------------------------------------- */
+
+      // Below the queues rather than above them, because the queues are the work and
+      // these are the reference. They are here at all because a queue can only show what
+      // reached *no* mapping — a code mapped to the wrong bucket is invisible to every
+      // table above this line, and this is the only place it can be found and corrected.
+      //
+      // Bucketting and the OEM key are read live rather than out of the build, so a
+      // decision recorded a minute ago is already on screen; the plan's length key comes
+      // from the build, because that is where the plan is published.
       {
         key: "bucketting",
-        title: "Bucketting · material code to governed bucket",
+        title: "Master · Bucketting: material code to governed bucket",
         note:
           "What Bucketting governs by hand. The pipeline resolves far more codes than this "
           + "by matching physical attributes against these rows, so a code absent here is "
           + "not necessarily unmapped — it is unmapped *directly*, and the bucket it "
           + "resolves to is only as right as the row it was learned from.",
         master: "bucketting" as const,
+        unmapped: ["bucket", "__assign_bucket"],
         columns: [
           txt("material_code", "Material code"),
           txt("bucket", "Governed bucket", true),
@@ -803,35 +1227,38 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "oem_key",
-        title: "OEM key · customer to OEM",
+        title: "Master · OEM key: customer to OEM",
         note:
           "One row per customer the OEM key names. A customer absent from it reaches no OEM "
-          + "at all, which is what the customer queue reports — and until now could only be "
-          + "fixed in the workbook — and still can only be fixed there. This table states "
-          + "the mapping; correcting it needs the pipeline to read an OEM assignment "
-          + "first, which it does not yet, so there is no box here that would lie about "
-          + "having saved something.",
+          + "at all, which is what the customer queue above reports. An answer here is "
+          + "wider in reach than any other on this tab: the OEM map is read by the sales "
+          + "frame, the schedule, stock, receivables, the code repository and the trend, so "
+          + "one correction moves figures on six tabs at the next refresh.",
         master: "oem_key" as const,
+        unmapped: ["oem", "__assign_oem"],
         columns: [
           txt("customer", "Customer", true),
           txt("oem", "OEM"),
           txt("cam", "CAM"),
-          // No answer box, deliberately. `oem_map` is built from this master and nothing
-          // overrides it, so a cell here would save, read back, and change nothing — the
-          // mapping would look answered while every figure keyed off the OEM stayed as it
-          // was. That is what `megh_sku` did for a fortnight. The column becomes writable
-          // when the pipeline reads an `oem` assignment, and not before.
+          // Writable since 19 August, and not before: the box exists because
+          // `refresh_dashboard.py` now applies an `oem` assignment over `oem_map` where
+          // that map is built. It was drawn once without that and withdrawn the same
+          // night — a cell that saves, reads back and moves nothing is worse than no cell.
+          assignIn("oem", "Reassign OEM", "customer", "oems"),
         ],
       },
       {
         key: "length_key",
-        title: "vsm stock · material code to plan SKU",
+        title: "Master · vsm stock: material code to plan SKU",
         note:
           "The plan's own length key, one row per SKU with the codes each plant extends for "
           + "it. A code here is how a sale or a stock line reaches the Megh tab without a "
           + "governed bucket to join on, which is the only route a size bound for RE or "
           + "HMSIL has.",
         section: "megh_length_bucketing",
+        // A SKU on the plan that no plant extends a code for is the gap this master has:
+        // the line exists and nothing can ever join to it.
+        unmapped: ["material_codes", "__assign_megh_sku"],
         columns: [
           txt("vsm_key", "Plan SKU (length key)", true),
           txt("bucket", "Governed bucket", true),
@@ -845,140 +1272,8 @@ export const VIEWS: Record<string, ViewSpec> = {
     ],
   },
 
-  mappingView: {
-    label: "Missing mappings",
-    note:
-      "The queue, and the one tab you write to. Every row here is tonnage the pipeline "
-      + "could not govern, so it is tonnage missing from a tracker somewhere. Assign the "
-      + "bucket a material code belongs to and the decision is kept against the code, not "
-      + "against this build — the next refresh reads it and the tonnage lands where it "
-      + "should. Until that refresh runs the figures on the other tabs are unchanged, and "
-      + "the cell says so rather than implying otherwise.",
-    scalars: ["governed_buckets"],
-    tables: () => [
-      {
-        key: "missing_mappings",
-        section: "missing_mappings",
-        title: "Materials, customers and scheduled sizes",
-        note:
-          "Sizes a customer schedules that no bucket governs appear here in the form the "
-          + "customer sent them. A row reading lookup error is a bug, not a gap.",
-        columns: [
-          txt("mapping_type", "Type"),
-          txt("source", "Source", true),
-          txt("customer_code", "Customer code"),
-          txt("customer", "Customer", true),
-          txt("material_code", "Material code"),
-          txt("description", "Description", true),
-          txt("reason", "Reason", true),
-          mt("affected_mt", "Affected MT"),
-          assignTo("bucket", "Assign bucket"),
-        ],
-      },
-      {
-        key: "megh_unmapped",
-        section: "megh_unmapped",
-        title: "Megh purchases reaching no plan SKU",
-        columns: [
-          txt("material_code", "Material code"),
-          txt("description", "Description", true),
-          txt("customer", "Customer", true),
-          txt("derived_key", "Derived key", true),
-          mt("sales_mt", "Sales MT"),
-          // These are keyed on the plan's own SKU, not on a governed bucket: a Megh- size
-          // has no TVS bucket by design.
-          assignTo("megh_sku", "Assign plan SKU"),
-        ],
-      },
-      {
-        key: "stock_unmapped",
-        section: "stock_unmapped",
-        title: "Stock reaching no governed bucket",
-        columns: [
-          txt("material_code", "Material code"),
-          txt("description", "Description", true),
-          txt("plant", "Plant"),
-          txt("holder", "Held for", true),
-          txt("length_type", "Length"),
-          mt("stock_mt", "Stock MT"),
-          cnt("batches", "Batches"),
-          assignTo("bucket", "Assign bucket"),
-        ],
-      },
-      {
-        key: "wip_unmapped",
-        section: "wip_unmapped",
-        title: "WIP reaching no governed bucket",
-        note: "Unresolved WIP is excluded from long-length stock, so this is cover the tracker cannot see.",
-        columns: [
-          txt("material_code", "Material code"),
-          txt("description", "Description", true),
-          txt("plant", "Plant"),
-          txt("code_bucket", "Code bucket", true),
-          txt("reason", "Reason", true),
-          mt("wip_mt", "WIP MT"),
-          cnt("batches", "Batches"),
-          assignTo("bucket", "Assign bucket"),
-        ],
-      },
-      {
-        key: "rfd_unmapped",
-        section: "rfd_unmapped",
-        title: "RFD 4731 lines reaching no CTL mapping",
-        columns: [
-          txt("size", "Size"),
-          txt("listed_code", "Listed code"),
-          txt("matched_materials", "Matched materials", true),
-          { field: "length_m", label: "Length m", kind: "rate" },
-          nos("stock_nos", "Stock nos"),
-          mt("stock_mt", "Stock MT"),
-          txt("reason", "Reason", true),
-        ],
-      },
-      {
-        key: "orders_unmapped",
-        section: "orders_unmapped",
-        title: "Order lines missing from a view",
-        note:
-          "Each line names which view it is missing from and which still shows it. Lines "
-          + "excluded on purpose are listed too, so the ones showing nowhere are the "
-          + "number worth chasing.",
-        columns: [
-          txt("missing_from", "Missing from"),
-          txt("shown_on", "Still shown on"),
-          txt("cause", "Cause", true),
-          txt("origin", "Origin"),
-          txt("plant", "Plant"),
-          txt("kind", "Kind"),
-          txt("order_no", "Order no"),
-          txt("customer", "Customer", true),
-          txt("material_code", "Material code"),
-          txt("description", "Description", true),
-          txt("bucket", "Bucket", true),
-          txt("sku", "SKU", true),
-          days("age_days", "Age days"),
-          mt("order_mt", "Order MT"),
-        ],
-      },
-      {
-        key: "signoff_unmapped",
-        section: "signoff_unmapped",
-        title: "Order sign-off reaching no bucket or SKU",
-        columns: [
-          txt("plant", "Sheet"),
-          txt("material_code", "Material code"),
-          txt("bucket", "Bucket", true),
-          txt("sku", "SKU", true),
-          mt("signed_mt", "Signed MT"),
-          mt("unsigned_mt", "Not signed MT"),
-          mt("qty_mt", "Qty MT"),
-        ],
-      },
-    ],
-  },
-
   salesView: {
-    label: "Sales summary",
+    label: TAB.sales,
     note:
       "What TSL billed this month, classified by OEM. Megh Steel is a conversion agent, so "
       + "each of its codes is routed to the OEM it converts for and there is no separate "
@@ -1297,7 +1592,7 @@ export const VIEWS: Record<string, ViewSpec> = {
   },
 
   stockView: {
-    label: "Stock analysis",
+    label: TAB.stock,
     note:
       "Physical plant stock as material line items, not plant totals, carrying the customer "
       + "the stock is held for — which is what makes an aged lot actionable: it names who it "
@@ -1316,7 +1611,7 @@ export const VIEWS: Record<string, ViewSpec> = {
           txt("material_code", "Material code"),
           txt("description", "Description", true),
           txt("holder", "Held for", true),
-          days("oldest_age_days", "Oldest days"),
+          sev(days("oldest_age_days", "Oldest days"), AGEING),
           drill(
             mt("stock_mt", "Stock MT"),
             "{detail_key}",
@@ -1325,7 +1620,7 @@ export const VIEWS: Record<string, ViewSpec> = {
           // A lot with nothing aged has the key but no aged lines behind it, so the
           // guard is on the tonnage rather than on the key.
           drill(
-            mt("high_age_mt", "High age MT"),
+            sev(mt("high_age_mt", "High age MT"), AGED_TONNAGE),
             "{high_age_detail_key}",
             "High age · {material_code} · plant {plant}",
             "high_age_mt",
@@ -1348,14 +1643,14 @@ export const VIEWS: Record<string, ViewSpec> = {
           txt("material_code", "Material code"),
           txt("description", "Description", true),
           txt("holder", "Held for", true),
-          days("oldest_age_days", "Oldest days"),
+          sev(days("oldest_age_days", "Oldest days"), AGEING),
           drill(
             mt("stock_mt", "Stock MT"),
             "{detail_key}",
             "Long length · {material_code} · plant {plant}",
           ),
           drill(
-            mt("high_age_mt", "High age MT"),
+            sev(mt("high_age_mt", "High age MT"), AGED_TONNAGE),
             "{high_age_detail_key}",
             "High age · {material_code} · plant {plant}",
             "high_age_mt",
@@ -1390,7 +1685,7 @@ export const VIEWS: Record<string, ViewSpec> = {
   },
 
   strView: {
-    label: "STR to 8406",
+    label: TAB.str,
     note:
       "Fifteen days of forward cover at plant 8406 for the Hosur ancillary cluster. The "
       + "grain is Bucket alone — not CTL bucket and not per customer: 8406 cuts to length on "
@@ -1412,7 +1707,7 @@ export const VIEWS: Record<string, ViewSpec> = {
           + "per bucket and carries no total.",
         columns: [
           txt("bucket", "Bucket", true),
-          txt("risk", "Risk"),
+          sev(txt("risk", "Risk"), { words: RISK_WORDS }),
           list("customers", "Customers"),
           list("cut_lengths", "Cut lengths mm"),
           mt("schedule_mt", "Schedule MT"),
@@ -1423,14 +1718,19 @@ export const VIEWS: Record<string, ViewSpec> = {
           mt("owned_8406_mt", "Owned at 8406 MT"),
           mt("in_transit_mt", "In transit MT"),
           drill(
-            mt("stock_8406_mt", "Stock at 8406 MT"),
+            sev(mt("stock_8406_mt", "Stock at 8406 MT"), { from: "risk", words: RISK_WORDS }),
             "{stock_detail_key}",
             "{bucket} · stock at 8406 including in transit",
           ),
-          days("coverage_days", "Cover days"),
+          // Banded off `risk`, not off the number: this plan's target is 15 days where
+          // the long-length tracker's is 45, so a threshold on `coverage_days` would be
+          // right on one tab and wrong on the other. A 20-day cover is Covered here.
+          sev(days("coverage_days", "Cover days"), { from: "risk", words: RISK_WORDS }),
           mt("str_required_mt", "STR required MT"),
           mt("str_allocated_mt", "STR allocated MT"),
-          mt("str_shortfall_mt", "Shortfall MT"),
+          // A shortfall above zero is exactly what `Short` means, so it reads the verdict
+          // rather than restating the test.
+          sev(mt("str_shortfall_mt", "Shortfall MT"), { from: "risk", words: RISK_WORDS }),
           drill(
             mt("source_stock_mt", "Source stock MT"),
             "{source_detail_key}",
@@ -1561,10 +1861,31 @@ export const VIEWS: Record<string, ViewSpec> = {
         columns: [
           txt("ancillary", "Ancillary", true),
           txt("customer_code", "Customer code"),
-          drill(inr("overdue_amount", "Overdue INR"), "{detail_key}", "Overdue · {ancillary}"),
+          // Banded by how old the money is, not by how much it is: a large receivable a
+          // week past due is a call, and a small one two years past due is a write-off.
+          drill(
+            sev(inr("overdue_amount", "Overdue INR"), {
+              from: "oldest_days",
+              direction: "high",
+              alert: OVERDUE_ALERT_DAYS,
+              attention: 1,
+            }),
+            "{detail_key}",
+            "Overdue · {ancillary}",
+          ),
           cnt("documents", "Documents"),
-          days("oldest_days", "Oldest days"),
-          inr("over_90_days_amount", "Over 90 days INR"),
+          sev(days("oldest_days", "Oldest days"), {
+            direction: "high",
+            alert: OVERDUE_ALERT_DAYS,
+            attention: 1,
+          }),
+          // Every rupee in this column is past 90 days by construction, so any non-zero
+          // figure is the alert and the band needs no second boundary.
+          sev(inr("over_90_days_amount", "Over 90 days INR"), {
+            when: "over_90_days_amount",
+            direction: "high",
+            alert: 1,
+          }),
           // An ancillary with no open credit note has the key and nothing behind it.
           drill(
             inr("offsets_amount", "Offsets INR"),

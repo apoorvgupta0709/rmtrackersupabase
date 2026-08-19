@@ -2645,10 +2645,115 @@ def test_the_assignments_the_build_used_are_committed_beside_it():
     assert "primary key (scope, material_code)" in assignments
 
 
+def test_every_scope_the_browser_can_write_is_one_the_pipeline_reads():
+    """A queue that saves and changes nothing is worse than a queue with no box on it.
+
+    `megh_sku` was exactly that for a fortnight: the cell wrote it, the cell read it back,
+    and the Megh tab never moved, because the Megh plan keys off its own mapping and not
+    off `material_bucket`. The queue looked answered while the tonnage stayed missing.
+
+    So the rule is a closed loop: for each of the three spaces, the browser may write it,
+    the database accepts it, and the pipeline applies it. Adding a fourth scope without
+    somewhere to apply it fails here rather than on the tab three weeks later.
+    """
+    script = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
+
+    # `bucket` — the material master's own resolution, overridden at the one join.
+    assert 'owner_assignments = (assignments or {}).get("bucket", {})' in script
+
+    # `megh_sku` — applied after the two routes to a plan key have been tried, so the
+    # owner's answer wins over both rather than only filling a hole they left.
+    fallback = script.index('frame["material_key"].map(code_to_vsm_key)')
+    sku_override = script.index('frame["material_key"].map(sku_assignments)')
+    family = script.index('frame["vsm_family"] = frame["vsm_key"].map(key_family)')
+    assert 'sku_assignments = (assignments or {}).get("megh_sku", {})' in script
+    assert fallback < sku_override < family, (
+        "the assignment overrides the lookup, and the family is read off the result"
+    )
+
+    # `ctl_bucket` — RFD alone, because RFD alone resolves through the master's own CTL
+    # column and so cannot be reached by a `bucket` assignment.
+    resolved = script.index('rfd["ctl_bucket"] = rfd["material_key"].map(direct["CTL Bucket"])')
+    ctl_override = script.index("listed.map(ctl_assignments)")
+    assert 'ctl_assignments = (assignments or {}).get("ctl_bucket", {})' in script
+    assert resolved < ctl_override, "the owner's answer is applied after the master's"
+
+
+def test_the_assignable_spaces_agree_everywhere():
+    """One list of scopes, held in five places, and a typo in any of them loses a decision.
+
+    The cell posts a scope, the route admits it, the database's check constraint stores it
+    and the pipeline reads it back by the same string. A value saved under a scope nothing
+    reads is not an error anywhere — it saves, it shows, and it does nothing.
+
+    The fifth place is the pipeline, and it is the one this test used to take on trust.
+    `oem` was added to the other four on 17 August and withdrawn the same night for
+    exactly that: the constraint stored it, the route admitted it, the cell reported it
+    saved, and `oem_map` never looked. `megh_sku` sat that way for a fortnight. So the
+    last assertion here reads the pipeline itself, and a scope that nothing consumes
+    fails rather than shipping as a box that lies about having saved something.
+    """
+    scopes = {"bucket", "megh_sku", "ctl_bucket", "oem"}
+
+    migrations = "".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((REPO_ROOT / "supabase" / "migrations").glob("*.sql"))
+    )
+    # The latest statement about the constraint is the one in force.
+    constraint = migrations.rindex("check (scope in (")
+    stated = migrations[constraint:migrations.index("))", constraint)]
+    assert {s.strip(" '") for s in stated.split("(")[-1].split(",")} == scopes
+
+    route = (REPO_ROOT / "app" / "api" / "assign" / "route.ts").read_text(encoding="utf-8")
+    admitted = route[route.index("const SCOPES"):route.index("\n", route.index("const SCOPES"))]
+    assert {s for s in scopes if f'"{s}"' in admitted} == scopes
+
+    views = (REPO_ROOT / "app" / "dashboard" / "[view]" / "views.ts").read_text(encoding="utf-8")
+    offered = set(re.findall(r'scope: "([a-z_]+)"', views))
+    assert offered <= scopes, f"a queue offers a space nothing accepts: {offered - scopes}"
+
+    # And the fifth place: the pipeline reads every one of them by that same string.
+    pipeline = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
+    read = {s for s in scopes if f'.get("{s}", {{}})' in pipeline}
+    assert read == scopes, (
+        f"assignable but never read by the pipeline: {sorted(scopes - read)}. "
+        "A decision filed under one of these saves, reads back, and moves nothing."
+    )
+
+
+def test_the_assign_cell_takes_an_answer_the_master_does_not_carry_yet():
+    """A dropdown of governed buckets had this queue backwards.
+
+    A row is on the Missing mappings tab *because* nothing governs it, so the bucket that
+    belongs on it is routinely one `Bucketting` has never held — and a `<select>` of what
+    already exists cannot express that. It is a text field now: the governed list is still
+    suggested, a value outside it is saved, and the cell flags that the master needs the
+    same addition rather than refusing the answer.
+    """
+    cell = (REPO_ROOT / "app" / "dashboard" / "[view]" / "assign.tsx").read_text(encoding="utf-8")
+    # Past the header comment, which says what this used to be and why it is not that.
+    code = cell.split("*/", 1)[1]
+    assert "<select" not in code, "the choice is not limited to what already exists"
+    assert "<datalist" in cell, "the governed list is still offered, as a suggestion"
+    # Saved, then flagged — never blocked. If this ever guards the fetch instead, an owner
+    # would be unable to record the one answer the queue exists to collect.
+    assert "not in the master yet" in cell
+    warn = cell.index("not in the master yet")
+    assert cell.index("await fetch(\"/api/assign\"") < warn
+
+    # A save per keystroke would post thirty times for one bucket, and the last few would
+    # race. The two things that end an edit are what save it.
+    assert "onBlur=" in cell and 'event.key === "Enter"' in cell
+
+    # And the two guarantees the control has always carried, unchanged by any of it.
+    assert "setValue(previous)" in cell
+    assert "applies at the next refresh" in cell
+
+
 def test_only_the_admin_may_assign_and_the_database_is_what_says_so():
     """A control that is merely not drawn is not access control.
 
-    The select is rendered for an admin alone, but anyone can post to the route. So the
+    The field is rendered for an admin alone, but anyone can post to the route. So the
     write goes through the caller's own client and the policy decides, and the refusal is
     reported rather than swallowed — a cell that silently does nothing is worse than one
     that says it was refused.

@@ -16,7 +16,15 @@ import { supabaseServer } from "@/lib/supabase/server";
  * cell would leave every figure derived from it stale with nothing to say so.
  */
 
-const SCOPES = new Set(["bucket", "megh_sku"]);
+// Four spaces, and the database holds the same list in a check constraint. Both have to
+// agree: this one is what returns a readable 400, that one is what stops a decision being
+// filed where nothing reads it.
+//
+// A scope belongs here only once the pipeline reads it. `oem` was admitted on 17 August
+// before it did, and had to be withdrawn: the write succeeded, the cell said saved, and
+// not one figure moved. Adding the fifth means finding the place the pipeline builds that
+// map first, not this line.
+const SCOPES = new Set(["bucket", "megh_sku", "ctl_bucket", "oem"]);
 
 export async function POST(request: Request) {
   let body: { scope?: string; material_code?: string; assigned_to?: string | null };

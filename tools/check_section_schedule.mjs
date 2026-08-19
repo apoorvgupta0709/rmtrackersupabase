@@ -62,8 +62,16 @@ const dimension = materialDimension(bucketting, zmat, {
   bucket: Object.fromEntries(assignmentRows
     .filter((a) => a.scope === "bucket").map((a) => [a.material_code, a.assigned_to])),
 });
-const sales = salesMapping(ledger, oemRows, dimension, asOf.slice(0, 7));
-const ours = scheduleFacts(scheduleRows, dimension, sales, oemMapOf(oemRows));
+// The OEM queue answers into `oem_map`, and the pipeline applies it there rather than at
+// the customer join — so the check has to hand the port the same set the pipeline read,
+// or the two would agree only while nobody had answered that queue.
+const oemAssigned = {
+  oem: Object.fromEntries(assignmentRows.filter((a) => a.scope === "oem" && a.assigned_to)
+    .map((a) => [a.material_code, a.assigned_to])),
+};
+
+const sales = salesMapping(ledger, oemRows, dimension, asOf.slice(0, 7, oemAssigned));
+const ours = scheduleFacts(scheduleRows, dimension, sales, oemMapOf(oemRows, oemAssigned));
 
 const oracle = JSON.parse(readFileSync(oraclePath, "utf8"));
 const theirs = oracle.group ?? [];

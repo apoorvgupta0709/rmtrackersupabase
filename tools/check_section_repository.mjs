@@ -46,13 +46,21 @@ const dimension = materialDimension(bucketting, zmat, {
   bucket: Object.fromEntries(assignmentRows
     .filter((a) => a.scope === "bucket").map((a) => [a.material_code, a.assigned_to])),
 });
-const sales = salesMapping(ledger, oemRows, dimension, asOf.slice(0, 7));
+// The OEM queue answers into `oem_map`, and the pipeline applies it there rather than at
+// the customer join — so the check has to hand the port the same set the pipeline read,
+// or the two would agree only while nobody had answered that queue.
+const oemAssigned = {
+  oem: Object.fromEntries(assignmentRows.filter((a) => a.scope === "oem" && a.assigned_to)
+    .map((a) => [a.material_code, a.assigned_to])),
+};
+
+const sales = salesMapping(ledger, oemRows, dimension, asOf.slice(0, 7, oemAssigned));
 const oracle = JSON.parse(readFileSync(oraclePath, "utf8"));
 
 // The window names which source the pipeline read, so the check follows it rather than
 // guessing: no history slot is uploaded today, so it falls back to the published month.
 const sourceFile = oracle.code_repository?.window?.source ?? "sales.xlsx";
-const ours = codeRepository(sales.published, dimension, oemMapOf(oemRows), sourceFile);
+const ours = codeRepository(sales.published, dimension, oemMapOf(oemRows, oemAssigned), sourceFile);
 
 const near = (a, b) => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 const same = (a, b) => {

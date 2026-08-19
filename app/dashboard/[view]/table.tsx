@@ -63,6 +63,51 @@ export type DetailSpec = {
   when?: string;
 };
 
+export type Severity = "alert" | "attention" | "ok";
+
+/**
+ * How a column says its figures carry a verdict rather than merely a number.
+ *
+ * Only three things on this dashboard mean act now — a size short of cover, a lot aged
+ * past the governed boundary, a receivable past due — and only the columns carrying
+ * those take a colour. Everything else stays graphite, so an inked figure is always a
+ * verdict and never a decoration. `globals.css` has the other half of that argument.
+ *
+ * It is data rather than a function for the reason `detail` and `copies` are: columns
+ * cross the server-to-client boundary as props, and a function cannot.
+ *
+ * Two forms, and the choice between them matters:
+ *
+ *  - **`words`** reads the build's own verdict off a field. Prefer it wherever the
+ *    pipeline already decided, because then the ink and the word beside it cannot drift
+ *    apart — and because the same field can mean different things on different tabs.
+ *    `coverage_days` is the case in point: the long-length tracker judges it against a
+ *    45-day target and the STR plan against 15, so re-thresholding the *number* would
+ *    quietly mis-colour one of the two. Reading `risk` gets both right for free.
+ *  - **`direction`/`alert`/`attention`** thresholds the figure itself, for the columns
+ *    the pipeline publishes no verdict for.
+ */
+export type SeveritySpec = {
+  /** Read the band off this field instead of the column's own value. */
+  from?: string;
+  /**
+   * Only ink the figure when this field is truthy.
+   *
+   * The counterpart to `DetailSpec.when`, and needed for the same reason: `high_age_mt`
+   * takes its band from the age beside it, so a lot with a 700-day oldest batch and no
+   * aged tonnage would otherwise print a red `0.000`.
+   */
+  when?: string;
+  /** Which direction is bad. */
+  direction?: "low" | "high";
+  /** At or beyond this (below it, when `direction` is `low`) the figure is an alert. */
+  alert?: number;
+  /** Likewise, for attention. Checked only after `alert` fails. */
+  attention?: number;
+  /** The build's own verdict, mapped to a band. `null` means the word takes no ink. */
+  words?: Record<string, Severity | null>;
+};
+
 /**
  * A column the reader writes rather than reads.
  *
@@ -72,9 +117,23 @@ export type DetailSpec = {
  * the build on screen, which is a self-contained answer that a single reassignment would
  * leave internally inconsistent.
  */
+/**
+ * Which space an answer is in.
+ *
+ * `bucket` is a governed bucket from `Bucketting`; `megh_sku` a key on the Megh plan;
+ * `ctl_bucket` a bucket with a cut length appended, which is what the RFD 4731 queue is
+ * short of; `oem` the customer's OEM, whose subject is a customer name rather than a
+ * material code. They are stored under the same key in `bucket_assignments` and told
+ * apart by this, so a value saved in one space can never be read as another.
+ *
+ * A scope belongs in this union only once the pipeline reads it back by the same string.
+ * `test_the_assignable_spaces_agree_everywhere` checks all five places at once.
+ */
+export type AssignScope = "bucket" | "megh_sku" | "ctl_bucket" | "oem";
+
 export type AssignSpec = {
-  /** Which space the choice is in — a governed bucket, or a Megh plan key. */
-  scope: "bucket" | "megh_sku";
+  /** Which space the choice is in. */
+  scope: AssignScope;
   /** The field holding the material code the decision is recorded against. */
   codeField: string;
   /** Which list of choices to offer, by name. The page supplies the lists. */
@@ -105,8 +164,23 @@ export type Column = {
   wide?: boolean;
   /** This column's figures open the lines behind them. */
   detail?: DetailSpec;
+  /**
+   * This column is worked out from the row rather than read off it.
+   *
+   * For facts the build already carries in pieces and the reader needs in one word — the
+   * mapping queues state which master failed and which tabs are short because of it, both
+   * of which follow from `mapping_type`, `cause` and the queue the row is on. Deriving
+   * here rather than publishing three more fields keeps the pipeline, and the TypeScript
+   * port being held to it row for row, untouched.
+   *
+   * A derived column still needs a unique `field`, because that is what keys its header
+   * filter — it just never reaches the row.
+   */
+  derive?: (row: Record<string, unknown>) => string;
   /** This column is a decision the reader makes, not a figure the build carries. */
   assign?: AssignSpec;
+  /** This column's figures carry a verdict, and are inked by it. */
+  severity?: SeveritySpec;
   /** This column is editable, and editing it recomputes the row. */
   edit?: EditSpec;
   /** The quarter a price column prices, so its build-up can be recomputed too. */
@@ -181,6 +255,44 @@ export function get(row: Record<string, unknown>, field: string): unknown {
     return (inner as Record<string, unknown>)[rest.join(".")];
   }
   return undefined;
+}
+
+/**
+ * Which band a figure falls in, or null for no ink.
+ *
+ * Silent on everything it cannot judge — an absent field, a null figure, a verdict the
+ * map does not list. That is deliberate: a colour is a claim about a number, and the
+ * one thing worse than an uncoloured figure here is a confidently coloured wrong one.
+ * `tools/check_severity_fields.mjs` is what stops that silence hiding a typo, by failing
+ * when a `from`/`when` field or a `words` verdict never appears in the published build.
+ */
+export function severityOf(
+  c: Column,
+  row: Record<string, unknown>,
+): Severity | null {
+  const s = c.severity;
+  if (!s) return null;
+  if (s.when !== undefined && !get(row, s.when)) return null;
+
+  const value = get(row, s.from ?? c.field);
+
+  if (s.words) {
+    if (value === null || value === undefined) return null;
+    return s.words[String(value)] ?? null;
+  }
+
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  if (s.direction === "low") {
+    if (s.alert !== undefined && value < s.alert) return "alert";
+    if (s.attention !== undefined && value < s.attention) return "attention";
+    return "ok";
+  }
+  if (s.direction === "high") {
+    if (s.alert !== undefined && value >= s.alert) return "alert";
+    if (s.attention !== undefined && value >= s.attention) return "attention";
+    return "ok";
+  }
+  return null;
 }
 
 function num(value: unknown): number {
@@ -415,6 +527,7 @@ export default function DataTable({
   assignments,
   assignOptions,
   canAssign,
+  unmapped,
   pricing,
 }: {
   title: string;
@@ -435,6 +548,8 @@ export default function DataTable({
   assignOptions?: Record<string, string[]>;
   /** Whether this reader may record a decision. The database enforces it either way. */
   canAssign?: boolean;
+  /** Fields that decide whether a row still needs an answer — see `unmapped` on TableSpec. */
+  unmapped?: string[];
   /** Corrections to the contract price, and what they are computed against. */
   pricing?: PricingContext;
 }) {
@@ -508,6 +623,8 @@ export default function DataTable({
 
   const [search, setSearch] = useState("");
   const [picked, setPicked] = useState<Record<number, string[]>>({});
+  /** Hide the rows somebody has already answered. Only offered where `unmapped` is set. */
+  const [unansweredOnly, setUnansweredOnly] = useState(false);
   const [sort, setSort] = useState<Sort | null>(null);
   const [open, setOpen] = useState<{ index: number; cell: HTMLTableCellElement } | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -540,6 +657,9 @@ export default function DataTable({
             return assignments?.[`${c.assign.scope}|${get(row, c.assign.codeField)}`]
               ?? "unassigned";
           }
+          // Derived here as well as in the cell, so a filter offers what the column shows
+          // and the copied queue goes out with the same words on it.
+          if (c.derive) return format(c.derive(row) || null, "text");
           return format(get(row, c.field), c.kind);
         }),
       ),
@@ -555,23 +675,50 @@ export default function DataTable({
   const needle = search.trim().toLowerCase();
 
   /**
-   * A row passes when the search box accepts it and every column filter except the one
-   * being edited accepts it. Skipping the edited column is what makes the filters
-   * compose: the values a header offers are drawn from the rows the *other* headers
-   * still allow, so narrowing one column narrows the choices in the next without a
-   * column ever hiding its own unticked values from itself.
+   * The columns that decide whether a row is still unanswered, as indices into `display`.
+   *
+   * Read off the rendered text rather than the row, which is what lets one list mix a
+   * field the row carries (`bucket`) with one only the cell knows (`__assign_bucket`):
+   * both are just text by the time they get here, and both read `—` or `unassigned` when
+   * there is nothing in them.
+   */
+  const unmappedAt = useMemo(
+    () => (unmapped ?? [])
+      .map((field) => columns.findIndex((c) => c.field === field))
+      .filter((i) => i >= 0),
+    [unmapped, columns],
+  );
+
+  /** What an empty answer looks like once rendered. */
+  const blank = (text: string) => text === "" || text === "—" || text === "unassigned";
+
+  /**
+   * A row passes when the search box accepts it, the unanswered toggle accepts it, and
+   * every column filter except the one being edited accepts it. Skipping the edited
+   * column is what makes the filters compose: the values a header offers are drawn from
+   * the rows the *other* headers still allow, so narrowing one column narrows the choices
+   * in the next without a column ever hiding its own unticked values from itself.
+   *
+   * The toggle sits inside this gate deliberately, rather than narrowing `rows` before
+   * it. Everything downstream — the row count, the totals under the table, the copy
+   * buttons, the values each header offers — reads what this returns, so putting it here
+   * is what keeps all five saying the same thing about the same rows.
    */
   const passes = useCallback(
     (i: number, skip: number) => {
       const cells = display[i];
       if (needle && !cells.some((text) => text.toLowerCase().includes(needle))) return false;
+      // Answered by *any* of them, not all: a code the master already governs is not
+      // work, and neither is one somebody has since assigned.
+      if (unansweredOnly && unmappedAt.length
+        && !unmappedAt.every((index) => blank(cells[index]))) return false;
       for (const [index, allowed] of chosen) {
         if (index === skip) continue;
         if (!allowed.has(cells[index])) return false;
       }
       return true;
     },
-    [display, needle, chosen],
+    [display, needle, chosen, unansweredOnly, unmappedAt],
   );
 
   const visible = useMemo(() => {
@@ -599,11 +746,12 @@ export default function DataTable({
     return [...seen].sort(collate);
   }, [open, rows.length, display, passes]);
 
-  const filtered = needle !== "" || chosen.size > 0;
+  const filtered = needle !== "" || chosen.size > 0 || unansweredOnly;
 
   const clearAll = () => {
     setSearch("");
     setPicked({});
+    setUnansweredOnly(false);
     setOpen(null);
   };
 
@@ -735,6 +883,20 @@ export default function DataTable({
             placeholder="Filter rows"
             aria-label={`Filter ${title}`}
           />
+          {unmappedAt.length > 0 && (
+            <button
+              type="button"
+              className={unansweredOnly ? "chip on" : "chip"}
+              aria-pressed={unansweredOnly}
+              title={
+                "Show only the rows nobody has answered yet — no value in the master and "
+                + "no assignment recorded. The count and the totals follow it."
+              }
+              onClick={() => setUnansweredOnly((on) => !on)}
+            >
+              Only unanswered
+            </button>
+          )}
           <button
             type="button"
             className="chip"
@@ -854,16 +1016,25 @@ export default function DataTable({
                       const guarded =
                         c.detail?.when !== undefined && !get(rows[i], c.detail.when);
                       const key = c.detail && !guarded ? fill(c.detail.key, rows[i]) : null;
+                      // The severity class goes on the cell rather than on the figure
+                      // inside it, so a plain number and a `.drill` button are inked by
+                      // the same rule — the button declares `color: inherit`.
+                      const sev = severityOf(c, rows[i]);
+                      const classes = [isNumeric(c) ? "num" : "", sev ? `sev-${sev}` : ""]
+                        .filter(Boolean).join(" ");
                       return (
                         <td
                           key={c.field}
-                          className={isNumeric(c) ? "num" : undefined}
+                          className={classes || undefined}
                           style={
                             c.wide
                               ? { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" }
                               : undefined
                           }
-                          title={c.wide ? String(get(rows[i], c.field) ?? "") : undefined}
+                          // The rendered text, not the raw field: a derived column has no
+                          // field to read, and its full value is exactly what a truncated
+                          // cell needs a tooltip for.
+                          title={c.wide ? display[i][index] : undefined}
                         >
                           {c.assign ? (
                             <AssignCell

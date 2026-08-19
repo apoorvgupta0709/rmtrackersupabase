@@ -69,11 +69,23 @@ export type SalesMapping = {
 export type SoValue = [string | null, string | null, string | null];
 
 /** `oem["Customer "] -> oem["OEM"]`; a repeated customer keeps the last one given. */
-export function oemMapOf(oemRows: Row[]): Map<string, unknown> {
+export function oemMapOf(
+  oemRows: Row[],
+  assignments: { oem?: Record<string, string> } = {},
+): Map<string, unknown> {
   const map = new Map<string, unknown>();
   for (const row of oemRows) {
     const key = normText(row["Customer "]);
     if (key !== null) map.set(key, row["OEM"]);
+  }
+  // Applied last, so they win. This map is the single place a customer name becomes an
+  // OEM — sales, schedule, stock, receivables, the code repository and the trend all read
+  // it — so it is the only point at which an answer given on the Missing mappings tab can
+  // reach a figure. Both sides go through `normText`: the queue records the name as the
+  // dump spells it, every consumer looks it up normalised.
+  for (const [customer, oem] of Object.entries(assignments.oem ?? {})) {
+    const key = normText(customer);
+    if (key !== null && oem) map.set(key, oem);
   }
   return map;
 }
@@ -131,8 +143,9 @@ export function salesMapping(
   oemRows: Row[],
   dimension: MaterialDimension,
   publishedMonth: string,
+  assignments: { oem?: Record<string, string> } = {},
 ): SalesMapping {
-  const oemMap = oemMapOf(oemRows);
+  const oemMap = oemMapOf(oemRows, assignments);
   const all = deriveSales(ledger, dimension, oemMap);
   const published = all.filter((line) => line.billing_month === publishedMonth);
 

@@ -39,6 +39,20 @@
   --accent-deep: #9cc4ff;
   --accent-soft: #16233a;
 
+  /* The held state of a toggle that is not a severity and not an ordinary link — at the
+     moment just the MT/pieces switch on the customer tracker, which reaches for it by
+     name in `page.tsx`. It is a fourth colour on a page whose whole argument is that
+     there are two, so it earns its place narrowly: blue already means "you can press
+     this", and the unit switch needs to say "and this one is currently held", which blue
+     cannot say twice. Warm rather than another blue, so it can never be misread as
+     severity — those three are red, amber and green.
+
+     Defined here because nothing defined it. The name was already being used against a
+     variable that did not exist, which CSS does not report: the declaration is simply
+     dropped and the selected unit rendered in the same graphite as the unselected one,
+     so the switch showed no selection at all. */
+  --furnace: #ff8a3d;
+
   /* Severity. One vocabulary, shared by the build stamp and the figures in the tables, so
      the word on the header and the ink on a cell can never mean different things.
      Lightened for a dark ground: the light palette's #16704a and #a5251c are legible on
@@ -309,6 +323,15 @@ button.chip {
 }
 button.chip:hover:not(:disabled) { background: var(--accent); color: var(--paper); border-color: var(--accent); }
 
+/* A chip that is a toggle rather than an action, while it is on. Held state has to read
+   at a glance: a table showing 280 of 3,006 rows with nothing to say why is a table that
+   looks like the whole truth. */
+button.chip.on {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  border-color: var(--accent);
+}
+
 button.linkish {
   padding: 0;
   border: 0;
@@ -432,16 +455,21 @@ select.picker {
    cell that implied the second would be lying about every figure on the other tabs. */
 
 .assign { display: inline-flex; flex-direction: column; gap: 3px; align-items: flex-start; }
-.assign select {
+.assign input {
   width: auto;
   min-width: 230px;
   max-width: 340px;
   padding: 4px 6px;
+  font-family: var(--mono);
   font-size: 12.5px;
 }
-.assign select:disabled { opacity: 0.6; cursor: progress; }
+.assign input:disabled { opacity: 0.6; cursor: progress; }
 .assign .hint { font-size: 10px; letter-spacing: 0.06em; }
 .assign-error { font-size: 11px; color: var(--alert); max-width: 320px; white-space: normal; }
+/* A value the master does not carry is saved, not refused — the queue exists because the
+   master is short, so the reader typing what is missing is the point. This says the master
+   still needs the same addition, and is deliberately not the error colour. */
+.assign-warn { font-size: 11px; color: var(--attention); max-width: 320px; white-space: normal; }
 .assigned { font-family: var(--mono); font-size: 12.5px; }
 
 /* ---- Remarking an overdue invoice ---------------------------------------- */

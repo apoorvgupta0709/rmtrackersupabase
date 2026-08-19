@@ -60,8 +60,16 @@ const dimension = materialDimension(bucketting, zmat, {
   bucket: Object.fromEntries(assignmentRows
     .filter((a) => a.scope === "bucket").map((a) => [a.material_code, a.assigned_to])),
 });
-const sales = salesMapping(ledger, oemRows, dimension, asOf.slice(0, 7));
-const lines = scheduleLines(scheduleRows, dimension, sales, oemMapOf(oemRows));
+// The OEM queue answers into `oem_map`, and the pipeline applies it there rather than at
+// the customer join — so the check has to hand the port the same set the pipeline read,
+// or the two would agree only while nobody had answered that queue.
+const oemAssigned = {
+  oem: Object.fromEntries(assignmentRows.filter((a) => a.scope === "oem" && a.assigned_to)
+    .map((a) => [a.material_code, a.assigned_to])),
+};
+
+const sales = salesMapping(ledger, oemRows, dimension, asOf.slice(0, 7, oemAssigned));
+const lines = scheduleLines(scheduleRows, dimension, sales, oemMapOf(oemRows, oemAssigned));
 
 const overrides = new Map(operationRows.map((o) => [
   overrideKey(o.customer, o.bucket, o.material_code, Number(o.length_mm)),

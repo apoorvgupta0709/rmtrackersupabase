@@ -952,11 +952,18 @@ that the package still sits where Claude Code looks — the repo root is
   copy button were ported on 10 Aug; the drill-downs, the customer selector and the
   bucket-assignment write on 11 Aug. Grants are therefore still changed by SQL, which is
   what `mes` and `groupbuy` are waiting on.
-- **The Megh and WIP assignment queues save but are not yet consumed.** The pipeline
-  applies the `bucket` scope; `megh_sku` is stored and read back into the cell, and
-  nothing acts on it yet — the Megh plan keys off its own mapping, not off
-  `material_bucket`. Wire it where `megh_sku_mapping` is built, or the queue will look
-  answered while the Megh tab stays unchanged.
+- **Every assignable scope is now consumed, and a test says so.** Closed 17 Aug. `bucket`
+  overrides `material_bucket`; `megh_sku` overrides `vsm_key` on all three frames, just
+  after the two lookups that try to reach a plan key; `ctl_bucket` is new, for the RFD
+  queue, which resolves through the material master's own `CTL Bucket` column and so could
+  never be reached by a bucket assignment. `test_every_scope_the_browser_can_write_is_one_the_pipeline_reads`
+  fails if a fourth scope is added with nowhere to apply it — which is what let `megh_sku`
+  sit written-but-unread for a fortnight.
+- **One RFD row in four cannot be answered from the dashboard**, and that is not a bug to
+  fix here. A CTL assignment is keyed on the listed `CTL Code`, and 15 of the 60 positive
+  rows on the 28 July file have none — the row names nothing to hold a decision against.
+  The cell reads `no code` and the table's note says the fix is to give the line a code in
+  `rfd_4731.xlsx`.
 - **PCR code repository window**: still the current month only. The trend tab's
   quarterly extracts are not wired into the repository — worth doing so a code last
   billed in April appears in a price change request.
@@ -1028,6 +1035,35 @@ that the package still sits where Claude Code looks — the repo root is
   are only missing from the *upload*. Check with
   `git -c core.excludesFile=.vercelignore check-ignore -v --no-index lib/supabase/server.ts`
   — it must match nothing.
+
+- **All mapping is manual and answerable in one place.** The owner's instruction, 18 Aug:
+  do not infer a mapping on their behalf — put it in Missing mappings and let them
+  answer it. The masters therefore sit on that same tab rather than a separate one, each
+  editable, with an **Only unanswered** toggle to hide what has been done. There is one
+  tab you write to and it is that one.
+  *Not yet settled:* the owner also said "all auto mapping should stop", which the
+  pipeline cannot do as it stands — 79.1% of live mappings are inferred by matching
+  physical attributes (`attr_key`), and turning that off would drop bucket resolution
+  under the 0.90 hard floor and stop the build publishing at all. Raised once and not
+  yet answered; do not act on it unilaterally.
+- **A scope is assignable only once the pipeline reads it back by the same string.**
+  Five places have to agree: the cell, `/api/assign`'s `SCOPES`, the check constraint,
+  `views.ts`, and `refresh_dashboard.py`. Miss the last and the write succeeds, the cell
+  says *saved · applies at the next refresh*, the row leaves the queue, and no figure
+  ever moves. `megh_sku` sat that way a fortnight; `oem` for eight hours on 17 Aug and
+  was withdrawn by migration rather than shipped. `oem` returned 19 Aug once
+  `oem_map` applied it. Both `test_the_assignable_spaces_agree_everywhere` and
+  `tools/check_mapping_tab.mjs` now fail on a scope nothing consumes.
+- **An OEM assignment is the widest single answer on the dashboard.** `oem_map` is the
+  one place a customer name becomes an OEM, and the sales frame, the schedule, stock,
+  receivables, the code repository and the trend segments all read it — one correction
+  moves six tabs at the next refresh. Both sides key through `norm_text`.
+- **Migrations: the additive half first, the withdrawal last.** Not "always after the
+  deploy" — the rule that actually holds. Inserting the `mappingsView` row before its
+  code shipped made production advertise a tab that 404ed (17 Aug); moving
+  `megh_length_bucketing`'s grant to `mappingView` *before* the deploy is safe, because
+  an unused grant does nothing. Stamp the repo file with whatever version
+  `apply_migration` assigned — check `list_migrations` and rename.
 
 ## Owner's working preferences
 

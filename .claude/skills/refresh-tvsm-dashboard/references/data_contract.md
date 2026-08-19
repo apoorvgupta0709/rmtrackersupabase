@@ -1997,6 +1997,32 @@ So every row names both sides:
   rows are the real loss and lead the table; their cell is marked.
 - **Cause** — the short label that names the fix.
 
+Since 17 August this distinction is made on **all seven** mapping queues rather than on
+this one, because it was never particular to the order book — a reader could not tell,
+from a row on any other queue, where it came from or what was short because of it. Every
+queue now opens on the same nine columns in the same order:
+
+| # | Column | Says |
+| --- | --- | --- |
+| 1 | Data source | The dump or sheet the row arrived on |
+| 2–5 | Code, Description, Customer, Plant | What the row is. `—` where the queue has no such field |
+| 6 | Mapping missing in | Which master did not recognise it — `Bucketting master`, `OEM_key_1_rev customer codes`, `Megh plan SKU list`, `CTL Bucket, in the material master`, or `Nothing — excluded on purpose` |
+| 7 | Why | The queue's own explanation, where it has one |
+| 8 | Affects tabs | The views short because of this row |
+| 9 | Qty MT | The queue's own measure, under one label |
+
+Each queue's own columns follow, then the assign box. **`Missing from` and `Cause` are
+gone as separate columns**: they are columns 8 and 7 now, and saying the same thing twice
+in different words is how the seven tables drifted apart in the first place.
+
+Columns 1, 6 and 8 are computed in the browser, in `views.ts`, not published as pipeline
+fields — every fact they need is already on the rows, and the pipeline is mid-port with
+each ported section held to the Python row for row.
+
+**The `c`-marked lines are named, not left blank.** 946 of the 984 order rows on the 14
+August build are excluded demand; column 6 reads `Nothing — excluded on purpose` for them,
+because an empty cell on a queue reads as *nobody knows* rather than as *nothing is wrong*.
+
 | Missing from | Shown on | Lines | MT |
 |---|---|---:|---:|
 | Long-length tracker | Megh Steel tab | 35 | 780.474 |

@@ -1515,6 +1515,25 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     oem["customer_name_key"] = oem["Customer "].map(norm_text)
     oem_map = dict(zip(oem["customer_name_key"], oem["OEM"]))
 
+    # The owner's own OEM assignments, applied last so they win — the same arrangement as
+    # the bucket assignments above, and load-bearing for the same reason. This dict is the
+    # single place a customer name becomes an OEM: `derive_sales` reads it for every sales
+    # line, the schedule reads it twice, stock, receivables, the code repository and the
+    # trend all read it. So this is the one point at which an answer given on the Missing
+    # mappings tab can reach the figures at all — without it the queue would accept a
+    # customer's OEM, show it saved, and change nothing anywhere.
+    #
+    # Keyed through `norm_text` on both sides. The queue records the customer name exactly
+    # as the dump spells it, and every consumer looks the name up normalised; assigning on
+    # the raw spelling would file a decision under a key nothing ever asks for.
+    owner_oem = (assignments or {}).get("oem", {})
+    for customer, oem_name in owner_oem.items():
+        key = norm_text(customer)
+        if key and oem_name:
+            oem_map[key] = oem_name
+    if owner_oem:
+        print(f"  assignments: {len(owner_oem)} customers assigned an OEM by the owner")
+
     def derive_sales(frame):
         """Every column the rest of the pipeline expects on a sales frame.
 
@@ -1874,6 +1893,26 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             for bucket, length in zip(rfd["bucket"], rfd["length_m"])
         ],
     )
+    # The owner's own CTL assignments, applied last so they win.
+    #
+    # RFD is the one queue that does not resolve through `material_bucket`: it reads the
+    # material master's own `CTL Bucket` column, two lines up. So a bucket assigned on any
+    # other tab cannot reach these rows however correct it is, and until this existed the
+    # RFD queue was the one queue with no way to answer it.
+    #
+    # Keyed on the listed `CTL Code`, because that is the code the queue publishes and so
+    # the code the browser recorded the decision against. **A row whose `CTL Code` is blank
+    # therefore cannot be answered from the dashboard** — 15 of the 60 positive rows on the
+    # 28 July file. That is not a gap this can close: such a row names no code to hold a
+    # decision, and the fix is to give it one in `rfd_4731.xlsx`. The queue says so rather
+    # than offering a box that saves against nothing.
+    ctl_assignments = (assignments or {}).get("ctl_bucket", {})
+    if ctl_assignments:
+        listed = rfd["CTL Code"].map(
+            lambda value: None if pd.isna(value) else norm_code(str(value).strip())
+        )
+        rfd["ctl_bucket"] = listed.map(ctl_assignments).fillna(rfd["ctl_bucket"])
+        print(f"  assignments: {len(ctl_assignments)} CTL codes assigned by the owner")
     rfd["stock_nos"] = pd.to_numeric(rfd["RFD Qty."], errors="coerce").fillna(0)
     rfd["stock_mt"] = pd.to_numeric(rfd["WEIGHT"], errors="coerce").fillna(0)
 
@@ -3287,6 +3326,20 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             if code and code.isdigit():
                 code_to_vsm_key.setdefault(code, r["vsm_key"])
 
+    # The owner's own SKU assignments, from the Megh queue on the Missing mappings tab.
+    #
+    # The counterpart to the bucket override in section 1, and the same shape for the same
+    # reason: this is the single place a material code becomes a plan SKU, so overriding it
+    # here is what makes an answer given on that queue actually move tonnage onto the Megh
+    # tab. An override rather than a fallback, because a code the plan resolves *wrongly*
+    # is exactly the case somebody is correcting.
+    #
+    # Applied to all three frames rather than to the Megh sales rows alone: an assignment
+    # that moved the sales onto a SKU and left the stock behind would show the row sold
+    # against cover that reads zero.
+    sku_assignments = (assignments or {}).get("megh_sku", {})
+    if sku_assignments:
+        print(f"  assignments: {len(sku_assignments)} material codes assigned to plan SKUs")
     for frame in (stock, sales, wip):
         frame["vsm_key"] = [
             bucket_vsm_key(b, l) for b, l in zip(frame["bucket"], frame["length_m"])
@@ -3295,8 +3348,13 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
         frame["vsm_key"] = frame["vsm_key"].fillna(
             frame["material_key"].map(code_to_vsm_key)
         )
+        if sku_assignments:
+            frame["vsm_key"] = (
+                frame["material_key"].map(sku_assignments).fillna(frame["vsm_key"])
+            )
         # Taken off the key rather than the bucket, so a row that reached its SKU by the
-        # material-code route carries the family of the SKU it actually met.
+        # material-code route carries the family of the SKU it actually met. Read after the
+        # override, so an assigned row carries the family of the SKU it was assigned to.
         frame["vsm_family"] = frame["vsm_key"].map(key_family)
 
     megh_codes = {"943209", "943210", "943211"}
@@ -4447,6 +4505,9 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                 "qty": float(d["qty"]),
                 "unit": "MT",
             }
+            # `mergesort` for the reason the overdue and stock-analysis sorts already are:
+            # the default is not stable, and batches of one bucket routinely hold identical
+            # tonnage, so which of two printed first was decided by the sort's internals.
             for _, d in (
                 scope.groupby(
                     ["BATCH", "material_key", "Material Description", "CUSTOMER NAME"],
@@ -4457,7 +4518,7 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                     age_now=("ageing_days", "max"),
                     age_me=("ageing_days_month_end", "max"),
                 )
-                .sort_values("qty", ascending=False)
+                .sort_values("qty", ascending=False, kind="mergesort")
                 .iterrows()
             )
         ]
@@ -4484,7 +4545,7 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                         dropna=False, as_index=False,
                     )
                     .agg(qty=("qty_mt", "sum"))
-                    .sort_values("qty", ascending=False)
+                    .sort_values("qty", ascending=False, kind="mergesort")
                     .iterrows()
                 )
             ]
@@ -4511,7 +4572,7 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                     dropna=False, as_index=False,
                 )
                 .agg(qty=("stock_mt", "sum"))
-                .sort_values("qty", ascending=False)
+                .sort_values("qty", ascending=False, kind="mergesort")
                 .iterrows()
             )
         ]

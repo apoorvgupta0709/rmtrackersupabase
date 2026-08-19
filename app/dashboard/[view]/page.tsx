@@ -325,6 +325,15 @@ export default async function ViewPage({
         (sectionRows.megh_tracker ?? []).map((row) => String(row.sku ?? "")).filter(Boolean),
       ),
     ].sort(),
+    // The OEMs the key already names, drawn from the master itself rather than declared:
+    // a new one added upstream is offered the next time the page loads. There are about a
+    // dozen, so this is a real list and not a formality — and a value outside it is still
+    // saved, flagged "not in the master yet", which is how a genuinely new OEM gets in.
+    oems: [
+      ...new Set(
+        (masterRows.oem_key ?? []).map((row) => String(row.oem ?? "").trim()).filter(Boolean),
+      ),
+    ].sort(),
   };
 
   // The options each selector offers, drawn from the section rather than declared, so a
@@ -366,8 +375,8 @@ export default async function ViewPage({
               style={{
                 padding: "5px 10px",
                 border: "1px solid",
-                borderColor: unit === option ? "var(--accent)" : "var(--rule-strong)",
-                color: unit === option ? "var(--accent)" : "var(--ink-soft)",
+                borderColor: unit === option ? "var(--furnace)" : "var(--rule-strong)",
+                color: unit === option ? "var(--furnace)" : "var(--ink-soft)",
                 textDecoration: "none",
               }}
             >
@@ -453,6 +462,7 @@ export default async function ViewPage({
           assignments={assignments}
           assignOptions={assignOptions}
           canAssign={canAssign}
+          unmapped={table.unmapped}
           pricing={pricing}
         />
       ))}
