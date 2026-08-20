@@ -185,6 +185,17 @@ export type Column = {
   edit?: EditSpec;
   /** The quarter a price column prices, so its build-up can be recomputed too. */
   priceQuarter?: string;
+  /**
+   * How this column was derived, for the ⓘ on its header.
+   *
+   * Authored where a real calculation sits behind the figure — the joins, the divisions,
+   * the thresholds — so the owner can retrace it by hand against the dumps. Columns that
+   * state no `explain` still get an ⓘ, built from what the code knows about them: where
+   * the rows came from, how the value is formatted, what the severity ink means. That
+   * default is deliberately structural rather than silent, because "read as written from
+   * section X" is itself the answer to "how was this derived" for most columns.
+   */
+  explain?: string;
 };
 
 /** What the pricing tab needs to recompute a price the reader has corrected. */
@@ -330,6 +341,154 @@ export function format(value: unknown, kind: Kind = "text"): string {
 
 const collate = (a: string, b: string) =>
   a.localeCompare(b, "en", { numeric: true, sensitivity: "base" });
+
+/* ---- The per-column derivation note --------------------------------------- */
+
+/** What each format kind does to the number, said once, in words. */
+const KIND_NOTE: Record<string, string> = {
+  mt: "Shown in metric tonnes to 3 decimals. The dumps carry kilograms; the pipeline divides by 1,000.",
+  nos: "A count of pieces, shown whole.",
+  int: "A count, shown whole.",
+  inr: "Rupees, shown whole with Indian grouping.",
+  money: "Rupees, shown whole with Indian grouping.",
+  days: "Days, shown whole where the figure is whole and to 1 decimal otherwise.",
+  pct: "A percentage, shown to 2 decimals.",
+  rate: "A rate, shown to 2 decimals.",
+  bool: "Yes where the pipeline marked the row; a dash otherwise.",
+  list: "A list joined with commas; a dash where it is empty.",
+};
+
+/**
+ * The full note behind a header's ⓘ: the authored derivation where one is written, the
+ * structural facts always. Assembled here rather than at authoring time so the parts the
+ * code already knows — the severity thresholds, the storage of a decision, the formatting
+ * — can never drift from what the code actually does.
+ */
+function explainColumn(column: Column, source?: string): string {
+  const parts: string[] = [];
+
+  if (column.explain) parts.push(column.explain);
+
+  if (column.assign) {
+    parts.push(
+      `A decision you record, not a figure the build carries. It is saved against `
+      + `this row's “${column.assign.codeField}” in bucket_assignments under the `
+      + `“${column.assign.scope}” scope, and the pipeline reads it back at the next `
+      + `rebuild — Apply mappings on this tab, or the daily refresh.`,
+    );
+  } else if (!column.explain && column.derive) {
+    parts.push(
+      "Worked out from other fields on the row when the page renders; the build does "
+      + "not carry this column.",
+    );
+  } else if (!column.explain) {
+    parts.push(
+      source
+        ? `Read as published: field “${column.field}” of the “${source}” rows in this build.`
+        : `Read as published: field “${column.field}” on this table's rows.`,
+    );
+  }
+
+  const kindNote = KIND_NOTE[column.kind ?? ""];
+  if (kindNote) parts.push(kindNote);
+
+  const s = column.severity;
+  if (s?.words) {
+    const inked = Object.entries(s.words).filter(([, band]) => band !== null);
+    const names: Record<string, string> = { alert: "red", attention: "amber", ok: "green" };
+    parts.push(
+      `The colour follows the build's own “${s.from ?? column.field}” verdict: `
+      + inked.map(([word, band]) => `“${word}” inks ${names[band as string] ?? band}`).join(", ")
+      + `; any other word takes no ink.`,
+    );
+  } else if (s) {
+    const basis = s.from ? `the row's “${s.from}” figure` : "this figure";
+    const word = s.direction === "high" ? "at or above" : "at or below";
+    const bands = [
+      s.alert !== undefined && `red ${word} ${s.alert}`,
+      s.attention !== undefined && `amber ${word} ${s.attention}`,
+    ].filter(Boolean).join(", ");
+    parts.push(
+      `The colour is a verdict, banded on ${basis}: ${bands}, green otherwise.`
+      + (s.when ? ` Only judged where the row's “${s.when}” is non-zero.` : ""),
+    );
+  }
+
+  if (column.total) {
+    parts.push("The totals row re-adds this column over the rows the filters left visible.");
+  }
+  if (column.detail) {
+    parts.push("Clicking a figure opens the exact rows that were added to make it.");
+  }
+
+  return parts.join("\n\n");
+}
+
+/**
+ * The note itself, anchored to the header the same way the filter panel is and for the
+ * same reason: the table scrolls inside an `overflow` box that would clip anything
+ * positioned inside the cell.
+ */
+function ExplainPopup({
+  cell,
+  title,
+  text,
+  onClose,
+}: {
+  cell: HTMLTableCellElement;
+  title: string;
+  text: string;
+  onClose: () => void;
+}) {
+  const [anchor, setAnchor] = useState<DOMRect>(() => cell.getBoundingClientRect());
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const away = (event: MouseEvent) => {
+      if (!box.current?.contains(event.target as Node)) onClose();
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    const track = () => {
+      if (!cell.isConnected) {
+        onClose();
+        return;
+      }
+      setAnchor(cell.getBoundingClientRect());
+    };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", key);
+    window.addEventListener("scroll", track, true);
+    window.addEventListener("resize", track);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", key);
+      window.removeEventListener("scroll", track, true);
+      window.removeEventListener("resize", track);
+    };
+  }, [cell, onClose]);
+
+  const margin = 8;
+  const width = Math.min(340, window.innerWidth - 2 * margin);
+  const left = Math.max(margin, Math.min(anchor.left, window.innerWidth - width - margin));
+  const below = anchor.bottom + 4;
+
+  return createPortal(
+    <div
+      ref={box}
+      className="explain-pop"
+      role="note"
+      style={{ position: "fixed", top: below, left, width, zIndex: 60 }}
+    >
+      <div className="explain-pop-title">{title} — how this column is derived</div>
+      {text.split("\n\n").map((para, i) => (
+        <p key={i}>{para}</p>
+      ))}
+    </div>,
+    document.body,
+  );
+}
 
 /**
  * A detail template against one row: `LLSCHEDULE|{bucket}` -> `LLSCHEDULE|25.4-0-2.5-…`.
@@ -528,6 +687,7 @@ export default function DataTable({
   assignOptions,
   canAssign,
   unmapped,
+  source,
   pricing,
 }: {
   title: string;
@@ -550,6 +710,8 @@ export default function DataTable({
   canAssign?: boolean;
   /** Fields that decide whether a row still needs an answer — see `unmapped` on TableSpec. */
   unmapped?: string[];
+  /** Where the rows came from — the section or master name, for the header ⓘ notes. */
+  source?: string;
   /** Corrections to the contract price, and what they are computed against. */
   pricing?: PricingContext;
 }) {
@@ -627,6 +789,9 @@ export default function DataTable({
   const [unansweredOnly, setUnansweredOnly] = useState(false);
   const [sort, setSort] = useState<Sort | null>(null);
   const [open, setOpen] = useState<{ index: number; cell: HTMLTableCellElement } | null>(null);
+  /** Which header's derivation note is open. One at a time, like the filter panel. */
+  const [explaining, setExplaining] =
+    useState<{ index: number; cell: HTMLTableCellElement } | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   /**
    * What the last copy attempt did, and which button did it.
@@ -982,6 +1147,21 @@ export default function DataTable({
                           </button>
                           <button
                             type="button"
+                            className="th-info"
+                            title={`How ${c.label} is derived`}
+                            aria-label={`How ${c.label} is derived`}
+                            onClick={(e) => {
+                              const cell = e.currentTarget.closest("th");
+                              if (!cell) return;
+                              setExplaining((state) =>
+                                state?.index === index ? null : { index, cell },
+                              );
+                            }}
+                          >
+                            ⓘ
+                          </button>
+                          <button
+                            type="button"
                             className="th-filter"
                             title={`Filter ${c.label}`}
                             aria-label={`Filter ${c.label}`}
@@ -1130,6 +1310,15 @@ export default function DataTable({
           chosen={chosen.get(open.index)}
           onChange={(next) => setColumn(open.index, next)}
           onClose={() => setOpen(null)}
+        />
+      )}
+
+      {explaining && (
+        <ExplainPopup
+          cell={explaining.cell}
+          title={columns[explaining.index].label}
+          text={explainColumn(columns[explaining.index], source)}
+          onClose={() => setExplaining(null)}
         />
       )}
 

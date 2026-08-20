@@ -1,5 +1,20 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@/lib/supabase/server";
+import { currentUser, supabaseServer, currentBuildId } from "@/lib/supabase/server";
+
+/**
+ * Which build is current, for anyone watching a refresh land.
+ *
+ * The Apply-mappings button rebuilds and then wants to know when the new build has
+ * published; the upload page has the same question. Both poll this rather than the
+ * whole dashboard. The id goes through the caller's own client, so a signed-out poll
+ * gets nothing rather than a build id.
+ */
+export async function GET() {
+  const supabase = await supabaseServer();
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
+  return NextResponse.json({ build_id: await currentBuildId(supabase) });
+}
 
 /**
  * Ask GitHub to run the refresh.
@@ -10,10 +25,30 @@ import { currentUser } from "@/lib/supabase/server";
  * Vercel bundle. So this fires a repository_dispatch and returns; the Action reads the
  * uploads, runs the pipeline and writes a build, and the page watches for it to appear.
  */
-export async function POST() {
+export async function POST(request: Request) {
   const user = await currentUser();
   if (!user || (user.role !== "admin" && user.role !== "uploader")) {
     return NextResponse.json({ error: "Not permitted to refresh." }, { status: 403 });
+  }
+
+  // An optional as-of, for a rebuild that republishes the dumps already in. The daily
+  // flow sends none and the run stamps today, because the dumps were just uploaded; the
+  // Apply-mappings button sends the *current build's* as-of, because it is republishing
+  // that build's dumps with new mappings and must not re-date them.
+  let asOf: string | undefined;
+  try {
+    const body = await request.json();
+    if (body && typeof body.as_of === "string") {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(body.as_of)) {
+        return NextResponse.json(
+          { error: `as_of must be YYYY-MM-DD, not ${JSON.stringify(body.as_of)}.` },
+          { status: 400 },
+        );
+      }
+      asOf = body.as_of;
+    }
+  } catch {
+    // No body at all is the daily flow.
   }
 
   const token = process.env.GITHUB_DISPATCH_TOKEN;
@@ -70,7 +105,7 @@ export async function POST() {
     },
     body: JSON.stringify({
       event_type: "refresh-dashboard",
-      client_payload: { requested_by: user.email },
+      client_payload: { requested_by: user.email, ...(asOf ? { as_of: asOf } : {}) },
     }),
   });
 

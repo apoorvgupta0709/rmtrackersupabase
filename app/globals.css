@@ -349,7 +349,8 @@ button.linkish:hover:not(:disabled) { background: none; color: var(--accent-deep
 th.num .th-inner { flex-direction: row-reverse; }
 
 button.th-label,
-button.th-filter {
+button.th-filter,
+button.th-info {
   padding: 0;
   border: 0;
   background: none;
@@ -360,9 +361,11 @@ button.th-filter {
   cursor: pointer;
 }
 button.th-label:hover:not(:disabled),
-button.th-filter:hover:not(:disabled) { background: none; color: var(--accent); }
+button.th-filter:hover:not(:disabled),
+button.th-info:hover:not(:disabled) { background: none; color: var(--accent); }
 button.th-label:active:not(:disabled),
-button.th-filter:active:not(:disabled) { transform: none; }
+button.th-filter:active:not(:disabled),
+button.th-info:active:not(:disabled) { transform: none; }
 
 .th-sort { margin-left: 4px; font-size: 8px; color: var(--accent); }
 
@@ -370,6 +373,16 @@ button.th-filter {
   font-size: 13px;
   line-height: 1;
   padding: 0 3px;
+  color: var(--rule-strong);
+}
+
+/* The derivation note's ⓘ. Quieter than the funnel — it answers a question rather than
+   changing the table — but present on every header, because "how was this derived" is
+   a question every column owes an answer to. */
+button.th-info {
+  font-size: 11px;
+  line-height: 1;
+  padding: 0 1px;
   color: var(--rule-strong);
 }
 
@@ -401,6 +414,32 @@ thead th[data-filtered="1"] .th-filter { color: var(--accent); }
   outline: none;
 }
 .filter-pop input[type="search"]:focus { border-color: var(--accent); background: var(--surface); }
+
+/* The derivation note. Prose, not controls, so it reads like a footnote: normal case,
+   normal spacing, measure capped by the popup's own width. */
+.explain-pop {
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  box-shadow: var(--shadow-lift);
+  font-family: var(--display);
+  font-size: 12.5px;
+  line-height: 1.55;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ink-soft);
+  max-height: min(340px, 60vh);
+  overflow-y: auto;
+}
+.explain-pop p { margin: 0 0 8px; }
+.explain-pop p:last-child { margin-bottom: 0; }
+.explain-pop-title {
+  font-size: 10px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 8px;
+}
 
 .filter-pop-actions { display: flex; gap: 6px; }
 .filter-pop-actions button {

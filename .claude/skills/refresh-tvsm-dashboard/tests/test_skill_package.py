@@ -2791,7 +2791,9 @@ def test_the_assign_cell_takes_an_answer_the_master_does_not_carry_yet():
 
     # And the two guarantees the control has always carried, unchanged by any of it.
     assert "setValue(previous)" in cell
-    assert "applies at the next refresh" in cell
+    # The wording moved when Apply mappings arrived — the property did not: a saved cell
+    # says the figures still need a rebuild, never implies they already moved.
+    assert "press Apply mappings to rebuild" in cell
 
 
 def test_only_the_admin_may_assign_and_the_database_is_what_says_so():
@@ -2818,8 +2820,38 @@ def test_only_the_admin_may_assign_and_the_database_is_what_says_so():
     cell = (REPO_ROOT / "app" / "dashboard" / "[view]" / "assign.tsx").read_text(encoding="utf-8")
     # The screen never shows a decision the database did not take.
     assert "setValue(previous)" in cell
-    # And never implies the figures have moved, because they have not until a refresh.
-    assert "applies at the next refresh" in cell
+    # And never implies the figures have moved, because they have not until a rebuild —
+    # which is what the Apply mappings button the cell points at actually runs.
+    assert "press Apply mappings to rebuild" in cell
+
+
+def test_an_applied_mapping_rebuilds_under_the_builds_own_date():
+    """Apply mappings republishes the same dumps under the date they arrived on.
+
+    The one failure the refresh exists to stop is an unchanged dump re-stamped with a
+    fresh date — ageing, days-overdue and the schedule month all read the as-of, so a
+    today-dated rebuild of yesterday's dumps ages every figure at once and looks exactly
+    like real movement. The daily refresh may default to today because its dumps really
+    did just arrive; a mapping applied the next morning must not. So the button sends
+    the current build's own as-of, the route validates and forwards it, and the workflow
+    reads it off the dispatch. Three files, one date, and losing any link re-stamps.
+    """
+    apply = (REPO_ROOT / "app" / "dashboard" / "[view]" / "apply.tsx").read_text(encoding="utf-8")
+    assert "as_of: asOf" in apply, "the button must send the build's as-of, not nothing"
+
+    route = (REPO_ROOT / "app" / "api" / "refresh" / "route.ts").read_text(encoding="utf-8")
+    assert r"^\d{4}-\d{2}-\d{2}$" in route, "the route validates the date before dispatching"
+    assert "as_of: asOf" in route, "the route forwards it in the client_payload"
+
+    workflow = (REPO_ROOT / ".github" / "workflows" / "refresh.yml").read_text(encoding="utf-8")
+    assert "github.event.client_payload.as_of" in workflow, (
+        "the workflow must read the dispatched as-of; without this the payload is "
+        "carried and ignored, and the rebuild silently stamps today"
+    )
+
+    # And the page hands the button the build's own date, not the browser's.
+    page = (REPO_ROOT / "app" / "dashboard" / "[view]" / "page.tsx").read_text(encoding="utf-8")
+    assert "ApplyMappings asOf={String(scalars.metadata.as_of)}" in page
 
 
 def test_a_remark_outlives_the_build_and_applies_at_once():

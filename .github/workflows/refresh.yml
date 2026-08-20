@@ -54,9 +54,17 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        # The as-of can arrive two ways: typed into a hand run (inputs), or carried by
+        # the dispatch (client_payload). The web app sends the latter when a rebuild is
+        # asked for to apply mappings: the *current build's* as-of, so the same dumps are
+        # republished under the date they arrived on. Without it a mapping applied the
+        # morning before the dumps land would re-stamp yesterday's numbers with today's
+        # date — the failure named at the top of this file. Blank still means today, for
+        # the daily flow where the dumps were just uploaded.
         run: |
+          AS_OF="${{ inputs.as_of || github.event.client_payload.as_of || '' }}"
           python .claude/skills/refresh-tvsm-dashboard/scripts/refresh_from_supabase.py \
-            ${{ inputs.as_of && format('--as-of {0}', inputs.as_of) || '' }} \
+            ${AS_OF:+--as-of "$AS_OF"} \
             ${{ inputs.dry_run && '--dry-run' || '' }} \
             --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             | tee refresh.log

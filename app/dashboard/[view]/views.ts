@@ -456,23 +456,46 @@ type QueueSpec = {
 const asText = (v: string | ((row: Row) => string)) =>
   typeof v === "function" ? v : () => v;
 
+/** A column with its derivation note, for the header's ⓘ. */
+const ex = (column: Column, explain: string): Column => ({ ...column, explain });
+
 const queue = (q: QueueSpec): TableSpec => ({
   key: q.key,
   section: q.section,
   title: q.title,
   ...(q.note ? { note: q.note } : {}),
   columns: [
-    derived("__source", "Data source", asText(q.source)),
-    txt(q.code, "Code"),
-    txt(q.description, "Description", true),
+    ex(derived("__source", "Data source", asText(q.source)),
+      typeof q.source === "string"
+        ? `Fixed for this queue: every row here arrives on ${q.source}.`
+        : "Read off the row, because this queue pools more than one source."),
+    ex(txt(q.code, "Code"),
+      "The material code as the dump wrote it, normalised the way every join in the "
+      + "pipeline normalises a code: trimmed, Excel's trailing .0 removed, leading zeros "
+      + "kept. This is the key your answer is recorded against."),
+    ex(txt(q.description, "Description", true),
+      "As written on the dump row. Where a code fails to join, the description is often "
+      + "the second route the pipeline tried — so this is what to read when deciding "
+      + "what the row actually is."),
     // A queue with no party or no plant still carries the column, so the seven tables line
     // up when read one after another.
-    txt(q.customer ?? "__no_customer", "Customer", true),
-    txt(q.plant ?? "__no_plant", "Plant"),
-    derived("__missing_in", "Mapping missing in", asText(q.missingIn)),
-    txt(q.why ?? "__no_why", "Why", true),
-    derived("__affects", "Affects tabs", asText(q.affects)),
-    mt(q.qty, "Qty MT"),
+    ex(txt(q.customer ?? "__no_customer", "Customer", true),
+      "As written on the dump row. A dash means this queue's source carries no party."),
+    ex(txt(q.plant ?? "__no_plant", "Plant"),
+      "As written on the dump row. A dash means this queue's source carries no plant."),
+    ex(derived("__missing_in", "Mapping missing in", asText(q.missingIn)),
+      "Which master would have to carry this row's key for the row to resolve — worked "
+      + "out from the row's type and cause when the page renders, so one word answers "
+      + "what would otherwise take knowing the pipeline's join order."),
+    ex(txt(q.why ?? "__no_why", "Why", true),
+      "The pipeline's own reason for listing the row, published with it."),
+    ex(derived("__affects", "Affects tabs", asText(q.affects)),
+      "Which tabs are short because of this row — the tabs whose figures this tonnage "
+      + "would land on if the mapping existed. Follows from which join failed."),
+    ex(mt(q.qty, "Qty MT"),
+      "The tonnage this gap is hiding: the affected dump rows' quantity summed and "
+      + "divided by 1,000 (the dumps carry kilograms). This is what is missing from the "
+      + "tabs named beside it."),
     ...(q.extras ?? []),
     ...(q.assign ? [assignTo(q.assign.scope, q.assign.label, q.code)] : []),
   ],
@@ -896,15 +919,26 @@ export const VIEWS: Record<string, ViewSpec> = {
           + "and does not carry Megh's dispatch onward to TVSM, so it is not meant to tie "
           + "to Total sales beside it.",
         columns: [
-          txt("bucket", "Bucket", true),
-          sev(txt("risk", "Risk"), { words: RISK_WORDS }),
+          ex(txt("bucket", "Bucket", true),
+            "The governed bucket, from Bucketting: OD-ID-thickness-grade-endcondition. "
+            + "One row per long-length bucket any TVS-scope customer schedules."),
+          ex(sev(txt("risk", "Risk"), { words: RISK_WORDS }),
+            "The pipeline's verdict on Cover days: below 15 is Critical, below 30 Low, "
+            + "below 45 Watch, 45 and past it Adequate; a bucket with no schedule reads "
+            + "No demand. Every coloured figure on this row takes its ink from this "
+            + "word, so the numbers and the verdict can never disagree."),
           drill(
-            mt("total_schedule_mt", "Schedule MT"),
+            ex(mt("total_schedule_mt", "Schedule MT"),
+              "This month's schedule for the bucket, summed over the TVS-scope customers "
+              + "scheduling it — TSL's own schedule sheet plus the TVSM tracker's "
+              + "requirement. The breakup behind the figure names each contributor."),
             "LLSCHEDULE|{bucket}",
             "{bucket} · total schedule breakup",
           ),
           drill(
-            mt("total_sales_mt", "Sales MT"),
+            ex(mt("total_sales_mt", "Sales MT"),
+              "Dispatched against that schedule this month: TSL billing plus the TVSM "
+              + "tracker's own sales figure. The breakup names both."),
             "LLSALES|{bucket}",
             "{bucket} · total sales breakup",
           ),
@@ -912,7 +946,10 @@ export const VIEWS: Record<string, ViewSpec> = {
           // less sales, per party. The two gap-to-cover columns beside it are a different
           // calculation and only the 45-day one has a breakup of its own.
           drill(
-            mt("remaining_schedule_mt", "Remaining MT"),
+            ex(mt("remaining_schedule_mt", "Remaining MT"),
+              "Schedule less sales, floored at zero per party — TVS gap plus VSM gap, "
+              + "which the breakup shows term by term. What is still to dispatch this "
+              + "month."),
             "LLGAP|{bucket}",
             "{bucket} · balance (schedule less sales)",
           ),
@@ -925,30 +962,51 @@ export const VIEWS: Record<string, ViewSpec> = {
           // itself would: 40 MT is comfortable against one bucket's demand and a month
           // short against another's.
           drill(
-            sev(mt("available_ll_stock_mt", "LL stock MT"), { from: "risk", words: RISK_WORDS }),
+            ex(sev(mt("available_ll_stock_mt", "LL stock MT"), { from: "risk", words: RISK_WORDS }),
+              "One pool: plant stock at long length, plus WIP, plus material in transit, "
+              + "plus the TVSM tracker's own stock — the breakup names all four sources. "
+              + "Stock resolves to the bucket through Bucketting; unresolved WIP is "
+              + "excluded and reported on Missing mappings instead."),
             "{stock_detail_key}",
             "{bucket} · consolidated LL stock",
           ),
           drill(
-            sev(days("coverage_days", "Cover days"), { from: "risk", words: RISK_WORDS }),
+            ex(sev(days("coverage_days", "Cover days"), { from: "risk", words: RISK_WORDS }),
+              "LL stock ÷ schedule × 30 — how many days the pool lasts at this month's "
+              + "demand rate. Blank where the schedule is zero, because dividing by no "
+              + "demand answers nothing. The breakup shows the two inputs and the "
+              + "result."),
             "LLCOVERAGE|{bucket}",
             "{bucket} · coverage calculation",
           ),
-          mt("gap_to_30_days_mt", "Gap 30d MT"),
-          drill(mt("gap_to_45_days_mt", "Gap 45d MT"), "LLGAP45|{bucket}", "{bucket} · gap to 45 days"),
+          ex(mt("gap_to_30_days_mt", "Gap 30d MT"),
+            "max(schedule − LL stock, 0): the tonnage short of a full month's cover. "
+            + "Zero means the pool already covers 30 days."),
           drill(
-            mt("order_logged_mt", "Ordered MT"),
+            ex(mt("gap_to_45_days_mt", "Gap 45d MT"),
+              "max(schedule × 1.5 − LL stock, 0): the tonnage short of the 45-day "
+              + "target the tracker holds buckets to. The breakup shows the working."),
+            "LLGAP45|{bucket}", "{bucket} · gap to 45 days"),
+          drill(
+            ex(mt("order_logged_mt", "Ordered MT"),
+              "Open order lines on this bucket from the order-book sheets, summed. The "
+              + "breakup lists them plant by plant."),
             "{order_detail_key}",
             "{bucket} · orders logged, plant by plant",
           ),
           drill(
-            mt("signoff_mt", "Signed MT"),
+            ex(mt("signoff_mt", "Signed MT"),
+              "Tonnage signed off against this bucket on the per-plant sign-off sheets. "
+              + "The breakup lists the lines."),
             "{signoff_detail_key}",
             "{bucket} · signed off",
             "signoff_mt",
           ),
           drill(
-            mt("last_month_sales_mt", "Last month MT"),
+            ex(mt("last_month_sales_mt", "Last month MT"),
+              "TSL's own billing for this bucket last month, off the sales ledger. It "
+              + "does not carry Megh's onward dispatch, so it is not meant to tie to "
+              + "Total sales. The breakup shows the months."),
             "{history_detail_key}",
             "{bucket} · billed month by month",
           ),
@@ -1071,7 +1129,12 @@ export const VIEWS: Record<string, ViewSpec> = {
         description: "description",
         customer: "customer",
         qty: "sales_mt",
-        extras: [txt("derived_key", "Derived key", true)],
+        extras: [ex(txt("derived_key", "Derived key", true),
+          "A suggestion, not a mapping: the row's governed bucket with its length in "
+          + "metres appended — the shape every plan SKU has. It is built for you to check "
+          + "against the plan and type if right; the pipeline itself never maps by it, "
+          + "because the two masters spell PE/FC and lengths differently often enough "
+          + "that trusting it misfiled 155 MT.")],
         // Keyed on the plan's own SKU, not on a governed bucket.
         assign: { scope: "megh_sku", label: "Assign plan SKU" },
       }),
@@ -1222,10 +1285,23 @@ export const VIEWS: Record<string, ViewSpec> = {
         master: "bucketting" as const,
         unmapped: ["bucket", "__assign_bucket"],
         columns: [
-          txt("material_code", "Material code"),
-          txt("bucket", "Governed bucket", true),
-          txt("ctl_bucket", "CTL bucket", true),
-          txt("ll_or_ctl", "LL or CTL"),
+          ex(txt("material_code", "Material code"),
+            "The Bucketting sheet's own Material Codes column, read live from the "
+            + "accumulated master — not from the build, so a row added this morning is "
+            + "already here."),
+          ex(txt("bucket", "Governed bucket", true),
+            "The bucket this sheet states for the code, shaped OD-ID-thickness-grade-"
+            + "endcondition. This is the statement the whole dashboard is governed by: "
+            + "TVSM ancillaries sales, stock, WIP and the schedule all classify through "
+            + "it, and the pipeline also learns from these rows to resolve codes with "
+            + "identical physical attributes that the sheet does not name."),
+          ex(txt("ctl_bucket", "CTL bucket", true),
+            "The sheet's CTL Bucket column: the bucket with the cut length appended. "
+            + "Read only by the RFD 4731 reconciliation, which resolves through this "
+            + "column and never through the governed bucket."),
+          ex(txt("ll_or_ctl", "LL or CTL"),
+            "As the sheet states it: whether the code is a long-length or a cut-to-"
+            + "length material."),
           assignIn("bucket", "Reassign bucket", "material_code", "buckets"),
         ],
       },
@@ -1241,9 +1317,18 @@ export const VIEWS: Record<string, ViewSpec> = {
         master: "oem_key" as const,
         unmapped: ["oem", "__assign_oem"],
         columns: [
-          txt("customer", "Customer", true),
-          txt("oem", "OEM"),
-          txt("cam", "CAM"),
+          ex(txt("customer", "Customer", true),
+            "The OEM key's own Customer column, read live from the accumulated master. "
+            + "Sales rows join to it by customer *name*, normalised on both sides — "
+            + "trimmed, uppercased — never by customer code."),
+          ex(txt("oem", "OEM"),
+            "The OEM this customer's sales are classified under. This single mapping "
+            + "feeds the sales frame, the schedule, stock, receivables, the code "
+            + "repository and the trend — and the LL tracker's TVS scope is every "
+            + "customer this column says TVS for. One exception overrides it: a material "
+            + "group ending BOT, COR or AHT is classified Boiler regardless."),
+          ex(txt("cam", "CAM"),
+            "As the sheet states it. Not read by any calculation; carried for reference."),
           // Writable since 19 August, and not before: the box exists because
           // `refresh_dashboard.py` now applies an `oem` assignment over `oem_map` where
           // that map is built. It was drawn once without that and withdrawn the same
@@ -1264,12 +1349,29 @@ export const VIEWS: Record<string, ViewSpec> = {
         // the line exists and nothing can ever join to it.
         unmapped: ["material_codes", "__assign_megh_sku"],
         columns: [
-          txt("vsm_key", "Plan SKU (length key)", true),
-          txt("bucket", "Governed bucket", true),
-          txt("material_codes", "Material codes", true),
-          txt("plants", "Plants"),
-          txt("end_oem", "Ends at"),
-          txt("cut_type", "Cut type"),
+          ex(txt("vsm_key", "Plan SKU (length key)", true),
+            "The plan's own length key column, taken as written — the pipeline derives "
+            + "one from the plan's key and Length only for a row that states none. A "
+            + "Megh- prefix marks a size supplied onward to RE or HMSIL rather than to "
+            + "TVSM."),
+          ex(txt("bucket", "Governed bucket", true),
+            "The plan's key column where the size is TVSM-bound; empty for a Megh- "
+            + "prefixed size, which has no governed bucket by design. Where both this "
+            + "plan and Bucketting name the same material code, the two must agree."),
+          ex(txt("material_codes", "Material codes", true),
+            "The codes the plan's plant columns (056, 0789, 0788) name for this SKU. "
+            + "This list *is* the mapping: a Megh purchase or stock line lands on this "
+            + "SKU only if its code is here or you assign it on this tab. Nothing is "
+            + "inferred."),
+          ex(txt("plants", "Plants"),
+            "Which of the plan's plant columns named a code for this SKU."),
+          ex(txt("end_oem", "Ends at"),
+            "Where the size finally goes. TVSM for a plain key; for a Megh- size, the "
+            + "OEM whose conversion-agent code (943210 HMSIL, 943211 RE) actually bought "
+            + "it — or both names where no code has bought it yet."),
+          ex(txt("cut_type", "Cut type"),
+            "The plan's FC/NFC column where it states one — FC is fin cut — and the "
+            + "bucket's end condition only where it does not."),
           assignIn("megh_sku", "Reassign plan SKU", "vsm_key", "megh_skus"),
         ],
       },
@@ -1710,33 +1812,58 @@ export const VIEWS: Record<string, ViewSpec> = {
           "Daily MT is the run rate the requirement is built from; coverage days is a rate "
           + "per bucket and carries no total.",
         columns: [
-          txt("bucket", "Bucket", true),
-          sev(txt("risk", "Risk"), { words: RISK_WORDS }),
+          ex(txt("bucket", "Bucket", true),
+            "The governed bucket, one row per bucket the plan's customers schedule at "
+            + "8406."),
+          ex(sev(txt("risk", "Risk"), { words: RISK_WORDS }),
+            "The plan's verdict: Short where an STR remains unallocated after the "
+            + "waterfall, Covered otherwise. The coloured figures on the row take their "
+            + "ink from this word."),
           list("customers", "Customers"),
           list("cut_lengths", "Cut lengths mm"),
-          mt("schedule_mt", "Schedule MT"),
-          mt("sales_mt", "Sales MT"),
-          mt("balance_mt", "Balance MT"),
-          { field: "daily_mt", label: "Daily MT", kind: "mt", total: true },
-          mt("requirement_mt", "Requirement MT"),
-          mt("owned_8406_mt", "Owned at 8406 MT"),
-          mt("in_transit_mt", "In transit MT"),
+          ex(mt("schedule_mt", "Schedule MT"),
+            "The plan customers' schedule on this bucket this month."),
+          ex(mt("sales_mt", "Sales MT"), "Dispatched against it so far this month."),
+          ex(mt("balance_mt", "Balance MT"), "Schedule less sales, floored at zero."),
+          ex({ field: "daily_mt", label: "Daily MT", kind: "mt", total: true },
+            "The run rate: schedule ÷ days in the month. The requirement is built from "
+            + "this."),
+          ex(mt("requirement_mt", "Requirement MT"),
+            "Daily MT × the target cover in days — what 8406 should be holding."),
+          ex(mt("owned_8406_mt", "Owned at 8406 MT"), "Stock standing at 8406, on the ground."),
+          ex(mt("in_transit_mt", "In transit MT"),
+            "Transfer lines despatched to 8406 with no goods receipt yet, from "
+            + "transfer.xlsx — an empty GR DATE is the in-transit flag."),
           drill(
-            sev(mt("stock_8406_mt", "Stock at 8406 MT"), { from: "risk", words: RISK_WORDS }),
+            ex(sev(mt("stock_8406_mt", "Stock at 8406 MT"), { from: "risk", words: RISK_WORDS }),
+              "Owned plus in transit — what 8406 has or is about to have. The breakup "
+              + "lists both."),
             "{stock_detail_key}",
             "{bucket} · stock at 8406 including in transit",
           ),
           // Banded off `risk`, not off the number: this plan's target is 15 days where
           // the long-length tracker's is 45, so a threshold on `coverage_days` would be
           // right on one tab and wrong on the other. A 20-day cover is Covered here.
-          sev(days("coverage_days", "Cover days"), { from: "risk", words: RISK_WORDS }),
-          mt("str_required_mt", "STR required MT"),
-          mt("str_allocated_mt", "STR allocated MT"),
+          ex(sev(days("coverage_days", "Cover days"), { from: "risk", words: RISK_WORDS }),
+            "Stock at 8406 ÷ daily MT — days of demand the plant is holding. Judged "
+            + "against this plan's own target (see the facts above the tables), not the "
+            + "LL tracker's 45."),
+          ex(mt("str_required_mt", "STR required MT"),
+            "max(requirement − stock at 8406, 0): what has to move to reach target "
+            + "cover."),
+          ex(mt("str_allocated_mt", "STR allocated MT"),
+            "What the source plants can actually supply: the requirement drained across "
+            + "their stock largest-first, each lot claimed once — the lines below show "
+            + "the allocation."),
           // A shortfall above zero is exactly what `Short` means, so it reads the verdict
           // rather than restating the test.
-          sev(mt("str_shortfall_mt", "Shortfall MT"), { from: "risk", words: RISK_WORDS }),
+          ex(sev(mt("str_shortfall_mt", "Shortfall MT"), { from: "risk", words: RISK_WORDS }),
+            "Required less allocated: the tonnage no source plant can cover. Above zero "
+            + "is exactly what Short means."),
           drill(
-            mt("source_stock_mt", "Source stock MT"),
+            ex(mt("source_stock_mt", "Source stock MT"),
+              "Long-length stock of this bucket standing at the source plants, before "
+              + "allocation. The breakup lists it plant by plant."),
             "{source_detail_key}",
             "{bucket} · stock at the source plants",
           ),

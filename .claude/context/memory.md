@@ -1070,6 +1070,19 @@ that the package still sits where Claude Code looks — the repo root is
   one place a customer name becomes an OEM, and the sales frame, the schedule, stock,
   receivables, the code repository and the trend segments all read it — one correction
   moves six tabs at the next refresh. Both sides key through `norm_text`.
+- **"Immediately effective" for a mapping means rebuild, and the rebuild keeps the
+  build's own as-of.** The Apply-mappings button on the Missing mappings tab (20 Aug)
+  dispatches the refresh with `client_payload.as_of` = the current build's date, so the
+  same dumps republish under the date they arrived on; only the daily flow, whose dumps
+  really did just arrive, stamps today. Locked by
+  `test_an_applied_mapping_rebuilds_under_the_builds_own_date`. Completion is detected
+  by polling `GET /api/refresh` for a changed build id, never estimated.
+- **Every column header carries an ⓘ derivation note.** Authored text where a real
+  calculation sits behind the figure (mapping tab in full, LL tracker, STR plan);
+  everywhere else a structural default built from what the code knows — source
+  section/master, formatting, severity thresholds, totals behaviour — assembled in
+  `explainColumn` in `table.tsx` so it cannot drift from what the code does. Add
+  `explain` to a Column (the `ex()` helper in views.ts) to author one.
 - **Migrations: the additive half first, the withdrawal last.** Not "always after the
   deploy" — the rule that actually holds. Inserting the `mappingsView` row before its
   code shipped made production advertise a tab that 404ed (17 Aug); moving

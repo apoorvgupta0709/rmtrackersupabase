@@ -142,8 +142,13 @@ export default function AssignCell({
       </datalist>
       {state === "saving" && <span className="hint">saving…</span>}
       {state === "saved" && !error && (
-        <span className="hint" title="The pipeline reads assignments at the start of a run">
-          saved · applies at the next refresh
+        <span
+          className="hint"
+          title="The decision is in the database now. The figures on the tabs come from
+ the published build, so press Apply mappings at the top of this tab to rebuild it —
+ or it lands with the daily refresh."
+        >
+          saved · press Apply mappings to rebuild
         </span>
       )}
       {ungoverned && !error && (

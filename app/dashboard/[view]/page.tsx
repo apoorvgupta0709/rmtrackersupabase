@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { currentBuildId, currentUser, supabaseServer } from "@/lib/supabase/server";
 import DataTable, { type PricingContext } from "./table";
+import ApplyMappings from "./apply";
 import Picker from "./pick";
 import { VIEWS, type TableSpec, type Unit } from "./views";
 
@@ -433,6 +434,13 @@ export default async function ViewPage({
         </div>
       )}
 
+      {/* Only where the answers are given, and only to who may give them. The as-of is
+          the build's own, so the rebuild republishes these dumps under the date they
+          arrived on rather than re-stamping them with today. */}
+      {view === "mappingView" && canAssign && scalars.metadata?.as_of ? (
+        <ApplyMappings asOf={String(scalars.metadata.as_of)} buildId={buildId} />
+      ) : null}
+
       {!anyRows && awaiting.length === 0 && (
         <div className="notice" style={{ marginTop: 20, maxWidth: 720 }}>
           Nothing on this tab. Either no build is published yet, or this tab is not granted
@@ -463,6 +471,7 @@ export default async function ViewPage({
           assignOptions={assignOptions}
           canAssign={canAssign}
           unmapped={table.unmapped}
+          source={table.master ?? table.section ?? (table.scalar ? table.scalar.join(".") : undefined)}
           pricing={pricing}
         />
       ))}
