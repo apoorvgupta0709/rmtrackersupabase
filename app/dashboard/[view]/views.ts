@@ -1055,9 +1055,13 @@ export const VIEWS: Record<string, ViewSpec> = {
         section: "megh_unmapped",
         title: "Megh purchases reaching no plan SKU",
         note:
-          "Tonnage Megh Steel has already bought against a size the plan does not carry. "
-          + "The derived key is the key the pipeline computed and failed to match, so it "
-          + "is the answer to check before it is the answer to type.",
+          "Tonnage Megh Steel has already bought against a code neither the plan's own "
+          + "plant columns nor an assignment here ties to a SKU. Those two statements are "
+          + "the whole of the mapping — nothing is inferred, so a row leaves this queue "
+          + "only when you answer it or the plan gains the code. The derived key is a "
+          + "suggestion built from the governed bucket and the length: right often "
+          + "enough to be worth showing, wrong in exactly the ways that kept it from "
+          + "being the join, so check it before you type it.",
         source: "sales.xlsx",
         // A Megh-only size having no governed TVS bucket is the expected state, not the
         // gap: what is missing is a line on the plan.

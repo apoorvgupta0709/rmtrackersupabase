@@ -294,6 +294,50 @@ def test_the_megh_sku_key_is_the_bucket_with_its_length_appended():
     assert refresh.bucket_vsm_key("22.23-0-2-ERW 1-PE", None) is None
 
 
+def test_a_megh_sku_is_reached_only_by_a_statement():
+    """A material code lands on a plan SKU because somebody said so, never by derivation.
+
+    The owner's rule (19 Aug 2026): mapping is manual, so the data is deterministic. The
+    two statements are the plan's own plant columns (`code_to_vsm_key`) and the owner's
+    answer on the Megh queue (`sku_assignments`) — and nothing else. Until then the join
+    *derived* a key from the governed bucket and the length, which had Bucketting, the
+    TVSM ancillaries master, deciding what landed on the Megh tab: on the 14 Aug build,
+    12 codes the plan itself names sat in the unmapped queue with 155.6 MT of 209.9
+    because the two masters spell PE/FC or 6.001/6 differently, while 37.5 MT landed on
+    SKUs no master had ever tied the code to.
+
+    The derived key survives in exactly one place — the queue's suggestion column, where
+    a person checks it instead of a join trusting it. So this test walks every block
+    that writes a `vsm_key` onto a frame and asserts none of them calls
+    `bucket_vsm_key`; the plan's own key construction (its stated `length key`, with
+    bucket-plus-length only for a plan row stating none) and the queue's suggestion are
+    the only callers left.
+    """
+    source = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
+
+    # Every frame-mapping block: from the assignment loop to the Megh customer filter.
+    frames = source[source.index("for frame in (stock, sales, wip):")
+                    :source.index('megh_codes = {"943209"')]
+    assert "bucket_vsm_key" not in frames, (
+        "a stock/sales/WIP frame derives its Megh SKU key again — the mapping is the "
+        "plan's code columns and the owner's assignments, nothing inferred"
+    )
+    assert 'map(code_to_vsm_key)' in frames and "sku_assignments" in frames
+
+    # The order-book join and the ledger history, which key the same tonnage elsewhere.
+    orders = source[source.index("# Megh Steel's own orders, keyed to the VSM SKU")
+                    :source.index("megh_keyed = ")]
+    assert "bucket_vsm_key" not in orders
+    history = source[source.index("megh_history = trend_all")
+                     :source.index("megh_sales_months = ")]
+    assert "bucket_vsm_key" not in history
+
+    # And the suggestion is still offered: the queue is where the derived key now lives.
+    queue = source[source.index('unmapped["suggested_key"]')
+                   :source.index("megh_unmapped = [")]
+    assert "bucket_vsm_key" in queue
+
+
 def test_the_plans_length_key_is_corrected_only_where_it_could_not_join():
     """Both corrections leave the sheet as written and move only the derived key."""
     refresh = load_refresh_module()

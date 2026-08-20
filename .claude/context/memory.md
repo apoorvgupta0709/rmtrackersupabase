@@ -1041,11 +1041,23 @@ that the package still sits where Claude Code looks — the repo root is
   answer it. The masters therefore sit on that same tab rather than a separate one, each
   editable, with an **Only unanswered** toggle to hide what has been done. There is one
   tab you write to and it is that one.
-  *Not yet settled:* the owner also said "all auto mapping should stop", which the
-  pipeline cannot do as it stands — 79.1% of live mappings are inferred by matching
-  physical attributes (`attr_key`), and turning that off would drop bucket resolution
-  under the 0.90 hard floor and stop the build publishing at all. Raised once and not
-  yet answered; do not act on it unilaterally.
+  The owner's model, stated 19–20 Aug: **each master maps its own domain and nothing
+  crosses over** — OEM key maps sales customers to OEMs (for the LL tracker), the Megh
+  length key maps material codes to plan SKUs (for the Megh tab), Bucketting maps TVSM
+  ancillaries sales to buckets, and Bucketting's bucket must agree with the plan's
+  `key` where both name a code.
+  **Done for Megh (20 Aug):** `vsm_key` on stock, sales, WIP, the order book and the
+  ledger history is the plan's plant columns under `megh_sku` assignments — the
+  bucket+length derivation is gone as a join and survives only as the queue's
+  suggestion column. It had been misrouting both ways: 155.6 MT the plan names sat in
+  the queue over PE/FC and 6.001/6 spelling splits, while 37.5 MT landed on SKUs no
+  master tied the code to. Locked by
+  `test_a_megh_sku_is_reached_only_by_a_statement`.
+  *Still open — Bucketting's attribute inference* (`attr_key` spreading): 79.1% of
+  resolved *catalogue codes* are inferred, but only ~15 live codes actually ride on it;
+  going fully manual needs those answered first or TVS stock resolution (93.52% without
+  inference) breaks the 95% hard floor. The 6 codes where Bucketting and the plan
+  disagree on the bucket also still need the owner to say which master wins.
 - **A scope is assignable only once the pipeline reads it back by the same string.**
   Five places have to agree: the cell, `/api/assign`'s `SCOPES`, the check constraint,
   `views.ts`, and `refresh_dashboard.py`. Miss the last and the write succeeds, the cell

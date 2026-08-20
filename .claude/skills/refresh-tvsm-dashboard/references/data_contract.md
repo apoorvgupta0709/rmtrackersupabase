@@ -1276,14 +1276,24 @@ On the 31 July plan: **69 TVSM, 7 HMSIL, 3 RE and 14 undetermined.** The tab car
 *Supplied to* column and an end-OEM filter alongside the cut-type and BOP filters. The assignment worksheet's queue fell from 46 rows and 544.0 MT
 to 24 rows and 141.5 MT, and no row asks for a bucket any more.
 
-**The plan's per-plant codes are the second route to stock.** With no governed bucket the
-bucket join can never reach a Megh-only size, so `056`, `0789` and `0788` give a
-code-to-SKU map that fills `vsm_key` on stock, sales and WIP wherever the bucket join
-found nothing — bucket first, code only as a fallback, so a governed size keeps the key
-every other frame agrees on. On this file that is 22 codes carrying 183.923 MT of stock
-and 181.434 MT of sales, and it moves the tab's matched sales from 852.248 to 982.302 MT,
-stock at length from 603.507 to 804.320 MT, and unmapped Megh sales down from 621.748 to
-491.694 MT. No code appears on two plan rows, so the map has no contested entries.
+**The plan's per-plant codes are the mapping, not a fallback** *(19 Aug 2026)*. `056`,
+`0789` and `0788` give a code-to-SKU map, and `vsm_key` on stock, sales and WIP is that
+map under the owner's Megh-queue assignments — nothing else. No code appears on two plan
+rows, so the map has no contested entries, and a code neither source names reaches no
+SKU and stands in the unmapped queue until the owner answers it. This is the owner's
+rule, stated on 19 Aug: mapping is manual so the data is deterministic.
+
+Until then the map was only consulted where a key *derived* from the governed bucket
+plus the length found nothing — which had `Bucketting`, the TVSM ancillaries master,
+deciding what landed on the Megh tab. On the 14 Aug build that misrouting ran both ways:
+12 codes the plan itself names sat in the unmapped queue with 155.582 MT of 209.943 —
+`PE` against `FC`, `Megh-` prefixes `Bucketting` has no words for, 6.001 m against 6 m —
+while 37.508 MT landed on SKUs no master had ever tied the code to, indistinguishable on
+the tab from tonnage that belonged there. Removing the derivation moved matched Megh
+sales 284.735 → 399.317 MT and the queue 209.943 → 95.361 MT on that build, and dropped
+at-length stock 776.949 → 656.686 MT and other-length 1,392.871 → 397.505 MT — the cover
+columns now count only stock in codes the plan names, which is the rule doing on the
+stock side exactly what it does on the sales side.
 
 ### 5e.2a Bought-out parts
 
@@ -1410,12 +1420,14 @@ stated and a line with no recovery as one `zmat` supplied — the same trap that
 
 ### 5e.5 Unmapped Megh purchases
 
-Every Megh sales material whose derived key matches no VSM SKU is listed on the
-missing-mappings tab with the key derived from the material and a dropdown of all
-SKUs. Most are near misses that need judgement rather than a rule — grade `ERW 2 MAHS`
-against `ERW 2`, length 6.001 against 6.000, cut type `NFC` against `FC` — which is
-why the assignment is manual. Assignments are held in the page for copying back to the
-source mapping and are never written into the dump.
+Every Megh sales material that neither the plan's plant columns nor an owner assignment
+ties to a VSM SKU is listed on the missing-mappings tab. The derived key still appears
+beside each row — built from the governed bucket and the length — but as a *suggestion*
+only, no longer a join: it is right often enough to be worth showing and wrong in
+exactly the ways that made it unfit to map by — grade `ERW 2 MAHS` against `ERW 2`,
+length 6.001 against 6.000, cut type `NFC` against `FC` — which is why the assignment
+is manual. An answer is kept in `bucket_assignments` under the `megh_sku` scope and read
+at the next refresh.
 
 On the 24 July set 300.589 MT of 952.138 MT of Megh purchases match a SKU, leaving
 46 lines and 651.549 MT to assign.

@@ -3341,13 +3341,23 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     if sku_assignments:
         print(f"  assignments: {len(sku_assignments)} material codes assigned to plan SKUs")
     for frame in (stock, sales, wip):
-        frame["vsm_key"] = [
-            bucket_vsm_key(b, l) for b, l in zip(frame["bucket"], frame["length_m"])
-        ]
-        # Fall back to the plan's own material code where the bucket route found nothing.
-        frame["vsm_key"] = frame["vsm_key"].fillna(
-            frame["material_key"].map(code_to_vsm_key)
-        )
+        # **A material code reaches a plan SKU only because somebody said so** — the plan
+        # names the code in its own plant columns, or the owner answered the Megh queue.
+        # There is no derived fallback, by the owner's rule (19 Aug 2026): mapping is
+        # manual so the data is deterministic.
+        #
+        # Until then a key was *derived* from the governed bucket plus the length and the
+        # plan's own code list consulted only when that produced nothing — which had the
+        # Megh tab keyed off Bucketting, the TVSM ancillaries master, and the two masters'
+        # spellings deciding whether tonnage landed. On the 14 Aug build, 12 codes the
+        # plan itself names sat in the unmapped queue carrying 155.6 MT of 209.9 —
+        # PE against FC, `Megh-` prefixes Bucketting knows nothing of, 6.001 m against
+        # 6 m — while 37.5 MT landed on SKUs no master had ever tied the code to.
+        # A derived key that lands is indistinguishable from a stated one on the tab, so
+        # the wrong ones could only be found by reading the queue for what was *missing*.
+        # The derived key survives as the queue's suggestion column, where it is checked
+        # by a person instead of trusted by a join.
+        frame["vsm_key"] = frame["material_key"].map(code_to_vsm_key)
         if sku_assignments:
             frame["vsm_key"] = (
                 frame["material_key"].map(sku_assignments).fillna(frame["vsm_key"])
@@ -3889,7 +3899,15 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     )
 
     # Megh purchases that reach no VSM SKU need a material-to-SKU assignment.
-    unmapped = megh_sales_rows[~megh_sales_rows["vsm_key"].isin(megh_sku_keys)]
+    unmapped = megh_sales_rows[~megh_sales_rows["vsm_key"].isin(megh_sku_keys)].copy()
+    # The key the old derivation would have built, offered as a suggestion and nothing
+    # more. It is right often enough to be worth showing and wrong in exactly the ways
+    # that made it unfit to be the join — PE for FC, a length the plan rounds differently
+    # — so the queue shows it beside the row and a person decides.
+    unmapped["suggested_key"] = [
+        bucket_vsm_key(b, l)
+        for b, l in zip(unmapped["bucket"], unmapped["length_m"])
+    ]
     megh_unmapped = [
         {
             "material_code": r["material_key"],
@@ -3901,11 +3919,12 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                 None if pd.isna(r["CUSTOMER  NAME"]) else str(r["CUSTOMER  NAME"])
             ),
             "sales_mt": round(float(r["sales_mt"]), 3),
-            "derived_key": r["vsm_key"],
+            "derived_key": r["suggested_key"],
         }
         for _, r in (
             unmapped.groupby(
-                ["material_key", "Material   Description", "CUSTOMER  NAME", "vsm_key"],
+                ["material_key", "Material   Description", "CUSTOMER  NAME",
+                 "suggested_key"],
                 dropna=False, as_index=False,
             )
             .agg(sales_mt=("sales_mt", "sum"))
@@ -5150,15 +5169,15 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
         megh = mapped[
             mapped["customer"].astype(str).str.upper().str.contains("MEGH", na=False)
         ].copy()
-        # Prefer the SKU the plan itself holds against the code: it is the plan's own
-        # key, so it cannot disagree with the row the tab renders. Fall back to building
-        # one from the bucket and length for a code the plan does not name.
+        # The SKU the plan itself holds against the code, or the owner's assignment —
+        # the same two sources the stock, sales and WIP frames map by, and deliberately
+        # not one more. This join used to fall back to deriving a key from the bucket
+        # and length; an order landing on a SKU by a route the sales beside it cannot
+        # take would sit against the wrong OMS line and disagree with the tab.
         megh["vsm_key"] = [
-            megh_code_length_bucket.get(code, (None, None, None))[2]
-            or bucket_vsm_key(bucket, length)
-            for code, bucket, length in zip(
-                megh["material_code"], megh["bucket"], megh["length_m"]
-            )
+            sku_assignments.get(code)
+            or megh_code_length_bucket.get(code, (None, None, None))[2]
+            for code in megh["material_code"]
         ]
         megh_keyed = megh[megh["vsm_key"].notna()]
         megh_order_plan = megh_keyed.groupby("vsm_key")["order_mt"].sum().to_dict()
@@ -5630,16 +5649,16 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     # than the column above it is a breakup that contradicts it.
     megh_history = trend_all[trend_all["customer_key"].isin(megh_codes)].copy()
     if not megh_history.empty:
-        megh_history["vsm_key"] = [
-            bucket_vsm_key(b, l)
-            for b, l in zip(megh_history["bucket"], megh_history["length_m"])
-        ]
-        # Same two routes the tab itself uses, bucket first and the plan's own per-plant
-        # material codes as the fallback — without which no `Megh-` size could be reached
-        # at all, having no governed bucket to join on.
-        megh_history["vsm_key"] = megh_history["vsm_key"].fillna(
-            megh_history["material_key"].map(code_to_vsm_key)
-        )
+        # The same two routes the tab itself uses — the plan's own per-plant material
+        # codes, under the owner's assignments — applied to the whole ledger, not just
+        # the published month. A history keyed differently from the column it breaks up
+        # would total to a different figure than the one that was clicked.
+        megh_history["vsm_key"] = megh_history["material_key"].map(code_to_vsm_key)
+        if sku_assignments:
+            megh_history["vsm_key"] = (
+                megh_history["material_key"].map(sku_assignments)
+                .fillna(megh_history["vsm_key"])
+            )
     megh_sales_months = (
         month_map(megh_history.dropna(subset=["vsm_key"]),
                   ["vsm_key", "material_key", "description_key"])
