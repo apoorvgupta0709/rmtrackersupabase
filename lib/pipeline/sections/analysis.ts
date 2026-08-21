@@ -183,6 +183,15 @@ export function stockAnalysis(
       nos_is_weight: group.every((s) => s.nos_is_weight),
       batches: new Set(group.map((s) => s.row.BATCH).filter((b) => !isNa(b))).size,
       high_age_mt: sum(group.map((s) => (s.is_high_age ? s.stock_mt : 0))),
+      // The ageing distribution, banded on the same month-end ageing the high-age
+      // judgment uses so the bands and the verdict can never disagree. Same Kahan sums
+      // as every other tonnage here.
+      age_0_30_mt: sum(group.map((s) => (s.ageing_days_month_end <= 30 ? s.stock_mt : 0))),
+      age_31_60_mt: sum(group.map((s) =>
+        (s.ageing_days_month_end > 30 && s.ageing_days_month_end <= 60 ? s.stock_mt : 0))),
+      age_61_180_mt: sum(group.map((s) =>
+        (s.ageing_days_month_end > 60 && s.ageing_days_month_end <= 180 ? s.stock_mt : 0))),
+      age_over_180_mt: sum(group.map((s) => (s.ageing_days_month_end > 180 ? s.stock_mt : 0))),
       oldest_age: Math.max(...group.map((s) => s.ageing_days_month_end)),
       rfd_status: firstUnique(group.map((s) => s.rfd_status ?? null)),
     }));
@@ -231,6 +240,10 @@ export function stockAnalysis(
         stock_nos: agg.nos_is_weight ? null : agg.stock_nos,
         batches: agg.batches,
         high_age_mt: pyRound(agg.high_age_mt, 3),
+        age_0_30_mt: pyRound(agg.age_0_30_mt, 3),
+        age_31_60_mt: pyRound(agg.age_31_60_mt, 3),
+        age_61_180_mt: pyRound(agg.age_61_180_mt, 3),
+        age_over_180_mt: pyRound(agg.age_over_180_mt, 3),
         oldest_age_days: Math.trunc(agg.oldest_age),
         rfd_status: isNa(agg.rfd_status) ? null : pyStr(agg.rfd_status),
         // Allocated across a material's rows in proportion to what each holds: repeating

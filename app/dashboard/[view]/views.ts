@@ -1999,8 +1999,9 @@ export const VIEWS: Record<string, ViewSpec> = {
             + "which is what makes an aged lot actionable. TRANSIT STOCK marks pipeline "
             + "material with no owner yet."),
           ex(sev(days("oldest_age_days", "Oldest days"), AGEING),
-            "The oldest batch's Ageing days off the stock sheet, as of the build "
-            + "date."),
+            "The oldest batch's age *at month end*: the sheet's Ageing days + (month "
+            + "end − as-of). How bad the worst batch is — the band columns beside "
+            + "Stock MT say how much stands in each age range."),
           drill(
             ex(mt("stock_mt", "Stock MT"),
               "The line's stock across its batches, kg ÷ 1,000, cut-length rows only. "
@@ -2010,6 +2011,18 @@ export const VIEWS: Record<string, ViewSpec> = {
             "{detail_key}",
             "Cut length · {material_code} · plant {plant}",
           ),
+          ex(mt("age_0_30_mt", "0–30 d MT"),
+            "The line's tonnage in batches aged 30 days or less at month end. The four "
+            + "band columns add up to Stock MT, so the split is the whole figure and "
+            + "not a sample of it."),
+          ex(mt("age_31_60_mt", "31–60 d MT"),
+            "Tonnage aged 31 to 60 days at month end — the last band inside the "
+            + "governed 60-day boundary."),
+          ex(sev(mt("age_61_180_mt", "61–180 d MT"), { when: "age_61_180_mt", direction: "high", attention: 0 }),
+            "Tonnage past the governed 60-day boundary but not yet six months old. "
+            + "Amber whenever there is any."),
+          ex(sev(mt("age_over_180_mt", "180+ d MT"), { when: "age_over_180_mt", direction: "high", alert: 0 }),
+            "Tonnage past 180 days at month end. Red whenever there is any."),
           // A lot with nothing aged has the key but no aged lines behind it, so the
           // guard is on the tonnage rather than on the key.
           drill(
@@ -2052,8 +2065,9 @@ export const VIEWS: Record<string, ViewSpec> = {
             "The stock sheet's customer column — who each lot can be liquidated to. "
             + "TRANSIT STOCK marks pipeline material with no owner yet."),
           ex(sev(days("oldest_age_days", "Oldest days"), AGEING),
-            "The oldest batch's Ageing days off the stock sheet, as of the build "
-            + "date."),
+            "The oldest batch's age *at month end*: the sheet's Ageing days + (month "
+            + "end − as-of). How bad the worst batch is — the band columns beside "
+            + "Stock MT say how much stands in each age range."),
           drill(
             ex(mt("stock_mt", "Stock MT"),
               "The line's stock across its batches, kg ÷ 1,000, long-length rows "
@@ -2061,6 +2075,18 @@ export const VIEWS: Record<string, ViewSpec> = {
             "{detail_key}",
             "Long length · {material_code} · plant {plant}",
           ),
+          ex(mt("age_0_30_mt", "0–30 d MT"),
+            "The line's tonnage in batches aged 30 days or less at month end. The four "
+            + "band columns add up to Stock MT, so the split is the whole figure and "
+            + "not a sample of it."),
+          ex(mt("age_31_60_mt", "31–60 d MT"),
+            "Tonnage aged 31 to 60 days at month end — the last band inside the "
+            + "governed 60-day boundary."),
+          ex(sev(mt("age_61_180_mt", "61–180 d MT"), { when: "age_61_180_mt", direction: "high", attention: 0 }),
+            "Tonnage past the governed 60-day boundary but not yet six months old. "
+            + "Amber whenever there is any."),
+          ex(sev(mt("age_over_180_mt", "180+ d MT"), { when: "age_over_180_mt", direction: "high", alert: 0 }),
+            "Tonnage past 180 days at month end. Red whenever there is any."),
           drill(
             ex(sev(mt("high_age_mt", "High age MT"), AGED_TONNAGE),
               "Tonnage in batches that will be past 60 days at month end: ageing days "

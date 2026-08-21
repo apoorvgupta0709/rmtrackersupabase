@@ -910,6 +910,20 @@ Ageing_At_Month_End = Ageing days + (month end of as-of date − as-of date)
 High_Age            = Ageing_At_Month_End > 60
 ```
 
+Each row also carries the ageing *distribution*, not just its oldest point — the
+owner's ask of 21 Aug 2026, because a line whose oldest batch reads 400 days can be
+0.1 MT of remnant beside 30 MT of fresh stock or the other way round, and the oldest
+figure alone cannot say which:
+
+```text
+age_0_30_mt / age_31_60_mt / age_61_180_mt / age_over_180_mt
+  = stock_mt summed by Ageing_At_Month_End band
+```
+
+Banded on the same month-end ageing as `High_Age`, so the bands and the verdict can
+never disagree; the four columns sum to the row's `stock_mt`. Boundaries: 60 is the
+governed high-age line and 30 its half; 180 is where the tab draws red.
+
 Carrying the ageing forward matters on a mid-month refresh: at as-of 24 July 2026,
 300.445 MT exceeds 60 days, but 402.517 MT will exceed it by 31 July. Reporting the
 as-of figure would understate the month-end position the KPI is measured on.
@@ -956,8 +970,15 @@ also removes the credit netting that could leave an ageing bucket negative.
 Per ancillary report total overdue, document count, the oldest days overdue, and the
 amount ageing beyond 90 days, sorted by descending overdue. Each amount opens an
 invoice-level drill-down, oldest first, with invoice number, document, invoice date,
-due date, overdue age in days, amount, and a closing total row. The invoice number is
-`Billing Doc`; `Document Number` is the accounting document and is shown separately.
+due date, overdue age in days, and **all three of the file's amounts** — `Doc Amount`,
+`Cleared Amount` and `Open Amount` — with a closing total per column. Three, not one
+(owner, 21 Aug 2026): the open figure alone cannot show a partial payment, and an
+invoice of 10 lakh with 7 cleared reads identically to one never paid at all. The
+cleared amount keeps the file's own sign (negative), so doc + cleared = open holds
+down every row and across the totals. The overdue figure itself stays on
+`Open Amount` — what is actually owed — and the open column's total is the figure
+that was clicked. The invoice number is `Billing Doc`; `Document Number` is the
+accounting document and is shown separately.
 
 Report open payments and credit notes as one column beside the overdue, opening a
 document-level breakup. An offset is a document that *reduces* what is owed, told by

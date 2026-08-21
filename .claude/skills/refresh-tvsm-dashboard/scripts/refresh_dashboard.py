@@ -693,7 +693,12 @@ OVERDUE_DETAIL_COLUMNS = [
     {"label": "Invoice date", "field": "invoice_date"},
     {"label": "Due date", "field": "due_date"},
     {"label": "Overdue age (days)", "field": "age_days", "kind": "num"},
-    {"label": "Amount", "field": "qty", "kind": "qty"},
+    # All three amounts, so a partial payment reads as one: invoiced, cleared, and what
+    # is still owed. Each column totals its own field; the open total is the figure
+    # that was clicked.
+    {"label": "Invoice amount", "field": "doc_amount", "kind": "qty"},
+    {"label": "Cleared", "field": "cleared_amount", "kind": "qty"},
+    {"label": "Open amount", "field": "qty", "kind": "qty"},
 ]
 def megh_sales_detail_columns(months):
     """Sales to Megh: a material code per row, a month per column, a total at the end.
@@ -2746,8 +2751,20 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
 
     def build_stock_analysis(frame, key_prefix):
         rows = []
+        # The ageing distribution, not just its oldest point. A row's `oldest_age_days`
+        # says how bad the worst batch is and nothing about how much stands there — a
+        # line reading 400 days can be 0.1 MT of remnant beside 30 MT of fresh stock, or
+        # the other way round, and the owner asked for the split (21 Aug 2026). Banded
+        # on the same month-end ageing the high-age judgment uses, so the bands and the
+        # verdict can never disagree; the boundaries are the governed 60 with 30 as its
+        # half, and 180 where the tab draws its red line.
+        age_me = frame["ageing_days_month_end"]
         frame = frame.assign(
-            high_age_mt=frame["stock_mt"].where(frame["is_high_age"], 0.0)
+            high_age_mt=frame["stock_mt"].where(frame["is_high_age"], 0.0),
+            age_0_30_mt=frame["stock_mt"].where(age_me <= 30, 0.0),
+            age_31_60_mt=frame["stock_mt"].where((age_me > 30) & (age_me <= 60), 0.0),
+            age_61_180_mt=frame["stock_mt"].where((age_me > 60) & (age_me <= 180), 0.0),
+            age_over_180_mt=frame["stock_mt"].where(age_me > 180, 0.0),
         )
         grouped = frame.groupby(
             ["Plant", "material_key", "Material Description", "CUSTOMER NAME"],
@@ -2759,6 +2776,10 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             nos_is_weight=("nos_is_weight", "all"),
             batches=("BATCH", "nunique"),
             high_age_mt=("high_age_mt", "sum"),
+            age_0_30_mt=("age_0_30_mt", "sum"),
+            age_31_60_mt=("age_31_60_mt", "sum"),
+            age_61_180_mt=("age_61_180_mt", "sum"),
+            age_over_180_mt=("age_over_180_mt", "sum"),
             oldest_age=("ageing_days_month_end", "max"),
             rfd_status=("rfd_status", first_unique),
         )
@@ -2830,6 +2851,10 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                     ),
                     "batches": int(agg["batches"]),
                     "high_age_mt": round(float(agg["high_age_mt"]), 3),
+                    "age_0_30_mt": round(float(agg["age_0_30_mt"]), 3),
+                    "age_31_60_mt": round(float(agg["age_31_60_mt"]), 3),
+                    "age_61_180_mt": round(float(agg["age_61_180_mt"]), 3),
+                    "age_over_180_mt": round(float(agg["age_over_180_mt"]), 3),
                     "oldest_age_days": int(agg["oldest_age"]),
                     "rfd_status": (
                         None if pd.isna(agg["rfd_status"]) else str(agg["rfd_status"])
@@ -3098,6 +3123,14 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
             rec["customer_key"].map(CONVERSION_AGENT_OEM_BY_CODE),
         )
         rec["open_amount"] = pd.to_numeric(rec["Open Amount"], errors="coerce").fillna(0)
+        # All three amounts travel to the drill-down, because the open figure alone
+        # cannot show a partial payment: an invoice of 10 lakh with 7 cleared and one
+        # never paid at all both read as an open amount, and telling them apart is the
+        # difference between chasing a balance and chasing a whole invoice. The overdue
+        # figure itself stays on Open Amount — what is actually owed.
+        rec["doc_amount"] = pd.to_numeric(rec["Doc Amount"], errors="coerce").fillna(0)
+        rec["cleared_amount"] = pd.to_numeric(
+            rec["Cleared Amount"], errors="coerce").fillna(0)
         # A receivable falls due RECEIVABLE_DUE_DAYS after the invoice date. This
         # governed term replaces both the per-document Net Due Date and the file's
         # own Due Status flag, whose payment terms vary by document.
@@ -3155,6 +3188,10 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                     "age_days": (
                         int(d["days_overdue"]) if pd.notna(d["days_overdue"]) else None
                     ),
+                    "doc_amount": float(d["doc_amount"]),
+                    "cleared_amount": float(d["cleared_amount"]),
+                    # `qty` stays the open amount: the closing total row sums it, and
+                    # that total must equal the overdue figure that was clicked.
                     "qty": float(d["open_amount"]),
                     "unit": "INR",
                 }

@@ -90,6 +90,8 @@ type Prepared = {
   customerKey: string | null;
   oem: string | null;
   openAmount: number;
+  docAmount: number;
+  clearedAmount: number;
   invoiceDay: number | null;
   dueDay: number | null;
   daysOverdue: number | null;
@@ -143,6 +145,8 @@ export function overdueAnalysis(
       customerKey,
       oem: isNa(oem) ? null : pyStr(oem),
       openAmount: toNumber(row["Open Amount"]) ?? 0,
+      docAmount: toNumber(row["Doc Amount"]) ?? 0,
+      clearedAmount: toNumber(row["Cleared Amount"]) ?? 0,
       invoiceDay,
       dueDay,
       daysOverdue: dueDay === null ? null : asOfDay - dueDay,
@@ -193,6 +197,9 @@ export function overdueAnalysis(
         invoice_date: utcDayIso(d.invoiceDay),
         due_date: utcDayIso(d.dueDay),
         age_days: d.daysOverdue,
+        doc_amount: d.docAmount,
+        cleared_amount: d.clearedAmount,
+        // `qty` stays the open amount: the closing total must equal the figure clicked.
         qty: d.openAmount,
         unit: "INR",
       }));
