@@ -1394,17 +1394,21 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
         ]
     )
 
-    trained = zmat[["material_key", "attr_key"]].merge(
-        direct.reset_index()[["material_key", "Bucket"]],
-        on="material_key",
-        how="inner",
-    )
-    attr_candidates = trained.dropna(subset=["attr_key", "Bucket"]).groupby("attr_key")["Bucket"].agg(first_unique)
-    attr_candidates = attr_candidates.dropna()
-
-    zmat["inferred_bucket"] = zmat["attr_key"].map(attr_candidates)
-    zmat["direct_bucket"] = zmat["material_key"].map(direct["Bucket"])
-    zmat["resolved_bucket"] = zmat["direct_bucket"].fillna(zmat["inferred_bucket"])
+    # **A code resolves only because somebody stated it** — a Bucketting row, or the
+    # owner's assignment below. The attribute inference is gone, by the owner's rule
+    # (22 Aug 2026): mapping is manual so the data is deterministic, and a code the
+    # inference resolved wrongly was invisible — it landed on a tracker looking exactly
+    # like a stated one. What the inference used to catch now stands in the Missing
+    # mappings queues with its tonnage, which is the owner's stated preference: see the
+    # gap, answer it once, and the answer is a record rather than a coincidence of
+    # attributes.
+    #
+    # Until then, a code with no Bucketting row still resolved if any *other* code with
+    # identical physical attributes (`attr_key`: OD, ID, thickness, spec, end finish,
+    # surface finish) had one — 5,490 of the 6,939 resolved catalogue codes rode on
+    # that. The QC floors are recalibrated in the same change, because with manual
+    # mapping a sub-95% stock resolution is a queue to answer, not a read fault.
+    zmat["resolved_bucket"] = zmat["material_key"].map(direct["Bucket"])
 
     material_bucket = zmat.groupby("material_key")["resolved_bucket"].agg(first_unique).dropna()
 
@@ -2214,7 +2218,11 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
                 dropna=False, as_index=False,
             )
             .agg(wip_mt=("wip_mt", "sum"), batches=("Batch", "nunique"))
-            .sort_values("wip_mt", ascending=False)
+            # `mergesort` for the same reason as every other displayed sort: the default
+            # is not stable, and two codes tied on tonnage would order by the sort's
+            # internals rather than by the groupby's own key order. Latent until the
+            # inference came off — the first tie in this queue appeared that day.
+            .sort_values("wip_mt", ascending=False, kind="mergesort")
             .iterrows()
         )
     ]
@@ -6722,10 +6730,20 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
         warnings.append(f"SKU pricing is unavailable: {qc['sku_pricing']['note']}")
     if qc["rfd_4731_resolution"]["unresolved_nos"] > 0:
         warnings.append("Some positive RFD 4731 quantity has no CTL mapping and is excluded.")
-    if qc["sales_bucket_resolution"]["tvs_rate"] < 0.90:
-        failures.append("TVS sales bucket resolution is below the 90% hard floor.")
-    if qc["stock_bucket_resolution"]["tvs_resolved_rate"] < 0.95:
-        failures.append("TVS stock bucket resolution is below the 95% hard floor.")
+    # The hard floors, recalibrated for the manual-mapping regime (22 Aug 2026). They
+    # exist to catch a *read* fault — the PostgREST 1,000-row cap once fed Bucketting
+    # 998 of 1,750 rows and resolution collapsed toward zero; these floors are what
+    # stopped that publishing as a dashboard of blanks. With the attribute inference
+    # off, resolution also moves with how much of the queue the owner has answered, and
+    # a queue mid-answer is not a fault: on the day inference was switched off, stock
+    # stood at 92.9% against the old 0.95 floor purely from codes newly surfaced for
+    # answering. 0.80/0.85 still catches every truncation this pipeline has actually
+    # seen — those collapse resolution to a fraction, not to a few points below target —
+    # while the WARN thresholds above keep the day-to-day drift visible.
+    if qc["sales_bucket_resolution"]["tvs_rate"] < 0.80:
+        failures.append("TVS sales bucket resolution is below the 80% hard floor.")
+    if qc["stock_bucket_resolution"]["tvs_resolved_rate"] < 0.85:
+        failures.append("TVS stock bucket resolution is below the 85% hard floor.")
     if qc["schedule"]["active_rows"] == 0:
         failures.append("No active schedule rows were found.")
     if qc["schedule"]["oem_resolved_rate"] < 0.99:

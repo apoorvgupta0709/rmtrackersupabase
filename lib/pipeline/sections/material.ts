@@ -5,10 +5,13 @@
  * intermediate every other one joins through, which is why it comes first. `overdue_analysis`
  * was the only section in the pipeline that stands free of it.
  *
- * The shape of the answer, in one sentence: **Bucketting governs a material code directly,
- * and zmat spreads that governance to codes it never named** — a code with no row in
- * Bucketting still resolves if some other code with the same physical attributes has one.
- * `attr_key` is what carries it across, which is why that key exists at all.
+ * The shape of the answer, in one sentence: **a material code resolves only because
+ * somebody stated it** — a Bucketting row, or the owner's assignment. zmat still spreads
+ * a *stated* bucket from a code to its descriptions (that is how a description resolves
+ * at all), but it no longer invents one: the attribute inference that resolved a code
+ * off another code's identical physical attributes was removed 22 Aug 2026 by the
+ * owner's rule that mapping is manual. `attr_key` survives only as part of zmat's row
+ * identity for deduplication.
  *
  * Three decisions worth not losing:
  *
@@ -120,23 +123,18 @@ export function materialDimension(
     return true;
   });
 
-  /* ---- spread governance across codes that share attributes ---------------- */
+  /* ---- resolve: stated only, nothing spread ------------------------------- */
 
-  // Trained only on codes Bucketting names: what a governed code's attributes mean.
-  // `first_unique`, so an attribute set two buckets disagree about teaches nothing.
-  const trained = distinct
-    .filter((r) => r.material_key !== null && direct.has(r.material_key))
-    .map((r) => ({ attr_key: r.attr_key, bucket: direct.get(r.material_key!)!.Bucket }))
-    .filter((r) => r.attr_key !== null && r.bucket !== null);
-
-  const attrCandidates = groupFirstUnique(
-    trained, (r) => r.attr_key!, (r) => r.bucket!);
-
+  // A code resolves only because somebody stated it — a Bucketting row, or the owner's
+  // assignment applied below. The attribute inference (`attr_key` spreading a governed
+  // code's bucket to every code with identical physical attributes) is gone, by the
+  // owner's rule of 22 Aug 2026: mapping is manual so the data is deterministic. What
+  // the inference used to catch now stands in the Missing mappings queues with its
+  // tonnage. The QC floors were recalibrated in the same change.
   const resolved = distinct.map((r) => {
     const directBucket = r.material_key === null
       ? undefined : direct.get(r.material_key)?.Bucket ?? undefined;
-    const inferred = r.attr_key === null ? undefined : attrCandidates.get(r.attr_key);
-    return { ...r, resolved_bucket: directBucket ?? inferred ?? null };
+    return { ...r, resolved_bucket: directBucket ?? null };
   });
 
   const materialBucket = groupFirstUnique(

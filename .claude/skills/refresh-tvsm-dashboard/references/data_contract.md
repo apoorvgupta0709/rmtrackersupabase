@@ -260,11 +260,12 @@ six columns goes through `norm_bucket`.
 OD | ID | normalized thickness | normalized grade/specification | end condition
 ```
 
-Use the governed `Bucketting` table where available. For unmapped materials, infer the bucket using a unique product-equivalence match in `zmat` based on:
-
-```text
-OD + ID + normalized thickness + material specification + end finish + surface finish
-```
+Use the governed `Bucketting` table, under the owner's assignments from the Missing
+mappings tab — and nothing else. The product-equivalence inference (a unique `zmat`
+attribute match on OD + ID + thickness + specification + end finish + surface finish)
+was removed on 22 Aug 2026; an unmapped material now stands in the queue with its
+tonnage instead of resolving silently. The attribute key survives only as part of
+zmat's row identity for deduplication.
 
 Confirmed normalization rules:
 
@@ -359,12 +360,19 @@ matched to stock; report the tonnage rather than absorbing it.
 
 ### 4.2 Sales mapping and aggregation
 
-Material mapping priority:
+Material mapping priority *(inference removed 22 Aug 2026 — owner's rule: mapping is
+manual so the data is deterministic)*:
 
-1. normalized material description → unique `zmat` product → governed bucket;
-2. physical-attribute equivalence key → governed bucket;
-3. raw sales material number only when a unique match exists;
-4. otherwise exception queue.
+1. normalized material description → unique `zmat` product whose code is **stated**
+   (a `Bucketting` row or an owner assignment) → that governed bucket;
+2. raw sales material number, where stated;
+3. otherwise exception queue, carrying its tonnage.
+
+There is no attribute-equivalence step any more. A code with no stated bucket reaches
+no tracker and stands in the queue however closely its physical attributes match a
+governed code's — the inference resolved 5,490 of 6,939 catalogue codes and every one
+of them was indistinguishable on the tabs from a stated mapping, which is precisely
+what the owner asked to end.
 
 Aggregate sales by:
 

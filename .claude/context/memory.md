@@ -1053,11 +1053,15 @@ that the package still sits where Claude Code looks — the repo root is
   the queue over PE/FC and 6.001/6 spelling splits, while 37.5 MT landed on SKUs no
   master tied the code to. Locked by
   `test_a_megh_sku_is_reached_only_by_a_statement`.
-  *Still open — Bucketting's attribute inference* (`attr_key` spreading): 79.1% of
-  resolved *catalogue codes* are inferred, but only ~15 live codes actually ride on it;
-  going fully manual needs those answered first or TVS stock resolution (93.52% without
-  inference) breaks the 95% hard floor. The 6 codes where Bucketting and the plan
-  disagree on the bucket also still need the owner to say which master wins.
+  **Done for Bucketting too (22 Aug):** the `attr_key` attribute inference is removed
+  from S1 in both implementations — a code resolves only off a Bucketting row or an
+  owner assignment. ~1,474 MT that rode on inference now stands in the queues
+  (missing_mappings +947, stock +237, WIP +290 MT on the 21 Aug dumps). The hard
+  floors were recalibrated in the same change — sales 0.90→0.80, stock 0.95→0.85 —
+  because with manual mapping a sub-95% resolution is a queue mid-answer, not a read
+  fault; a truncated read still collapses resolution to a fraction and still fails.
+  The 6 codes where Bucketting and the plan disagree on the bucket still need the
+  owner to say which master wins.
 - **A scope is assignable only once the pipeline reads it back by the same string.**
   Five places have to agree: the cell, `/api/assign`'s `SCOPES`, the check constraint,
   `views.ts`, and `refresh_dashboard.py`. Miss the last and the write succeeds, the cell
