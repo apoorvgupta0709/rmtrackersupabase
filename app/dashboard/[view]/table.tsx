@@ -372,7 +372,11 @@ const KIND_NOTE: Record<string, string> = {
  * code already knows — the severity thresholds, the storage of a decision, the formatting
  * — can never drift from what the code actually does.
  */
-function explainColumn(column: Column, source?: string): string {
+function explainColumn(
+  column: Column,
+  source?: string,
+  lineage?: { source: string; key: string },
+): string {
   const parts: string[] = [];
 
   if (column.explain) parts.push(column.explain);
@@ -427,6 +431,15 @@ function explainColumn(column: Column, source?: string): string {
   }
   if (column.detail) {
     parts.push("Clicking a figure opens the exact rows that were added to make it.");
+  }
+
+  // The table's lineage, on every one of its columns: which files the rows were built
+  // from and which key carried a quantity onto this row. Declared once per table in
+  // `views.ts` rather than repeated four hundred times, and appended last so the
+  // column's own derivation reads first.
+  if (lineage) {
+    parts.push(`Source: ${lineage.source}`);
+    parts.push(`Mapped on: ${lineage.key}`);
   }
 
   return parts.join("\n\n");
@@ -698,6 +711,7 @@ export default function DataTable({
   source,
   pricing,
   foldAdd,
+  lineage,
 }: {
   title: string;
   note?: string;
@@ -725,6 +739,8 @@ export default function DataTable({
   pricing?: PricingContext;
   /** Offer the add-a-fold form above this table — the fold masters only. */
   foldAdd?: { scope: "thickness_fold" | "od_fold"; options: string };
+  /** The table's provenance, appended to every header's ⓘ — see `lineage` on TableSpec. */
+  lineage?: { source: string; key: string };
 }) {
   /**
    * The rows as corrected, not as published.
@@ -1336,7 +1352,7 @@ export default function DataTable({
         <ExplainPopup
           cell={explaining.cell}
           title={columns[explaining.index].label}
-          text={explainColumn(columns[explaining.index], source)}
+          text={explainColumn(columns[explaining.index], source, lineage)}
           onClose={() => setExplaining(null)}
         />
       )}

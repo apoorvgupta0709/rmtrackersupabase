@@ -34,7 +34,7 @@ if (!page.includes("columns.map(({ derive, ...plain }) => plain)")) {
 
 /** The TableSpec fields the page passes into DataTable, name for name. */
 const CLIENT_PROPS = [
-  "title", "note", "columns", "averageOver", "copies", "unmapped", "foldAdd",
+  "title", "note", "columns", "averageOver", "copies", "unmapped", "foldAdd", "lineage",
 ];
 
 const ctx = {
@@ -75,6 +75,11 @@ for (const [viewName, spec] of Object.entries(VIEWS)) {
   }
   for (const table of tables) {
     tablesChecked += 1;
+    // Every table owes its readers a lineage — the source file behind its figures and
+    // the key that mapped them on. The type requires it; this catches an empty one.
+    if (!table.lineage?.source || !table.lineage?.key) {
+      failures.push(`${viewName} / ${table.key}: no lineage declared`);
+    }
     // What the page does before the hand-off: a derived column crosses without its
     // function, its text already written onto the rows.
     const stripped = {

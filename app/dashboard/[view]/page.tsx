@@ -515,6 +515,7 @@ export default async function ViewPage({
           title={table.title}
           note={table.note}
           foldAdd={table.foldAdd}
+          lineage={table.lineage}
           columns={table.columns}
           rows={rows}
           averageOver={table.averageOver}

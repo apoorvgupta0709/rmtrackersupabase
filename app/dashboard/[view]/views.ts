@@ -47,6 +47,14 @@ export type TableSpec = {
    */
   foldAdd?: { scope: "thickness_fold" | "od_fold"; options: string };
   /**
+   * Where this table's rows come from and what key carried a quantity onto them —
+   * appended to every header's ⓘ, after the column's own derivation note. Two answers
+   * every reader is owed without opening the data contract: which uploaded file is
+   * behind the figure, and which join would reproduce it in a workbook. Required on
+   * every table; `tools/check_client_props.mjs` fails a table that omits it.
+   */
+  lineage: { source: string; key: string };
+  /**
    * Which fields decide whether a row still needs an answer, for the "Only unanswered"
    * toggle. A row counts as answered when *any* of them carries something.
    *
@@ -468,6 +476,8 @@ type QueueSpec = {
   extras?: Column[];
   /** What an answer here is in the space of, and the field it is recorded against. */
   assign?: { scope: AssignScope; label: string };
+  /** Passed through to the table — see `lineage` on TableSpec. */
+  lineage: { source: string; key: string };
 };
 
 const asText = (v: string | ((row: Row) => string)) =>
@@ -480,6 +490,7 @@ const queue = (q: QueueSpec): TableSpec => ({
   key: q.key,
   section: q.section,
   title: q.title,
+  lineage: q.lineage,
   ...(q.note ? { note: q.note } : {}),
   columns: [
     ex(derived("__source", "Data source", asText(q.source)),
@@ -658,6 +669,12 @@ export const VIEWS: Record<string, ViewSpec> = {
     tables: (ctx) => [
       {
         key: "customer_summary",
+        lineage: {
+          source: "the RM tracker master's Schedule sheet, the daily sales dump, stock.xlsx "
+              + "(PLANT STOCKS) and wip ystockn.xlsx — one row per customer.",
+          key: "customer, as the schedule names it; every quantity reached its row through "
+              + "material code → governed bucket (Bucketting, owner assignments overriding).",
+        },
         section: "customer_summary",
         title: "By customer",
         note:
@@ -716,6 +733,12 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "customer_lines",
+        lineage: {
+          source: "one row per line of the RM tracker master's Schedule sheet; sales from the "
+              + "daily sales dump; CTL and LL pools from stock.xlsx and wip ystockn.xlsx.",
+          key: "customer × material code; quantities join on material code → governed "
+              + "bucket, and the CTL pool on the bucket with the planned cut length appended.",
+        },
         section: "customer_lines",
         title: "Schedule lines",
         pickFields: { customer: "customer_display" },
@@ -733,6 +756,11 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "customer_lines_crfh",
+        lineage: {
+          source: "the same schedule lines, narrowed to the CRFH book.",
+          key: "matched on the governed bucket — no customer list is maintained; otherwise "
+              + "exactly as the tube lines above.",
+        },
         section: "customer_lines",
         title: "CRFH line items",
         pickFields: { customer: "customer_display" },
@@ -745,6 +773,12 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "customer_sku_history",
+        lineage: {
+          source: "every sales extract the trend window holds — the daily dump plus the "
+              + "archived monthly and quarterly files.",
+          key: "the customer's own SAP codes (never the name), then material code → governed "
+              + "bucket per SKU; months off the billing date.",
+        },
         section: "trend_customer_sku_history",
         title: "Sales history — every SKU this customer has bought",
         pickFields: { customer: "customer" },
@@ -828,6 +862,14 @@ export const VIEWS: Record<string, ViewSpec> = {
     tables: (ctx) => [
       {
         key: "megh_tracker",
+        lineage: {
+          source: "the TVSM workbook's vsm stock sheet; sales from the accumulated sales ledger "
+              + "under Megh's conversion-agent codes; stock and order columns joined from the "
+              + "LL tracker's own sources.",
+          key: "the plan's stated length key — the governed bucket with the finished length "
+              + "appended; material codes reach a row through the plan's plant columns and "
+              + "megh_sku assignments.",
+        },
         section: "megh_tracker",
         title: "Megh SKU tracker",
         note:
@@ -980,6 +1022,12 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "megh_bop_added",
+        lineage: {
+          source: "the owner's bought-out (BOP) list, joined against the vsm stock plan.",
+          key: "bucket dimensions OD–ID–thickness, then nearest stated length within 50 mm, "
+              + "each side claimed once; a listed size with no plan row becomes its own "
+              + "off-plan row.",
+        },
         section: "megh_bop_added",
         title: "Bought-out sizes added off plan",
         note:
@@ -1001,6 +1049,11 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "megh_length_bucketing",
+        lineage: {
+          source: "the vsm stock plan's own length-specific mapping.",
+          key: "material code → plan SKU (length key), as the plan states it — nothing is "
+              + "inferred.",
+        },
         section: "megh_length_bucketing",
         title: "Megh length bucketing",
         note:
@@ -1056,6 +1109,13 @@ export const VIEWS: Record<string, ViewSpec> = {
     tables: () => [
       {
         key: "ll_tracker",
+        lineage: {
+          source: "demand from the RM tracker master's Schedule sheet; stock from stock.xlsx "
+              + "(PLANT STOCKS), wip ystockn.xlsx and the TVSM sheet; billing from the sales "
+              + "ledger; orders from orders.xlsx and signoff.xlsx.",
+          key: "one row per governed long-length bucket; every quantity reached it through "
+              + "material code → Bucketting → bucket, owner assignments overriding.",
+        },
         section: "ll_tracker",
         title: "Coverage by bucket",
         note:
@@ -1158,6 +1218,12 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "orders_summary",
+        lineage: {
+          source: "orders.xlsx (sheets jsr, hk_so and hk_str) — lines marked c in the remarks "
+              + "are not live demand and pool nowhere.",
+          key: "material code → governed bucket; the signed / not-signed split joins "
+              + "signoff.xlsx on the same code.",
+        },
         scalar: ["orders", "summary"],
         title: "Order book by origin",
         note:
@@ -1184,6 +1250,11 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "orders",
+        lineage: {
+          source: "orders.xlsx (sheets jsr, hk_so and hk_str), line by line.",
+          key: "material code → governed bucket; sign-off joined from signoff.xlsx on the "
+              + "material code.",
+        },
         section: "orders",
         title: "Order book",
         note:
@@ -1235,6 +1306,13 @@ export const VIEWS: Record<string, ViewSpec> = {
     tables: () => [
       queue({
         key: "missing_mappings",
+        lineage: {
+          source: "four pools — material codes off the sales, stock and schedule reads, "
+              + "customers off the OEM key read, scheduled sizes off the Schedule sheet, "
+              + "order sign-off lines off signoff.xlsx; each row names its own source.",
+          key: "whichever key failed to resolve — a material code no master governs, a "
+              + "customer the OEM key does not name, a written size no fold reaches.",
+        },
         section: "missing_mappings",
         title: "Materials, customers and scheduled sizes",
         note:
@@ -1270,6 +1348,10 @@ export const VIEWS: Record<string, ViewSpec> = {
       }),
       queue({
         key: "megh_unmapped",
+        lineage: {
+          source: "Megh purchase lines in the sales ledger that reached no plan SKU.",
+          key: "material code, which no plan plant column or megh_sku assignment claims.",
+        },
         section: "megh_unmapped",
         title: "Megh purchases reaching no plan SKU",
         note:
@@ -1300,6 +1382,10 @@ export const VIEWS: Record<string, ViewSpec> = {
       }),
       queue({
         key: "stock_unmapped",
+        lineage: {
+          source: "stock.xlsx (PLANT STOCKS) rows whose code reached no governed bucket.",
+          key: "material code → Bucketting / zmat, both of which resolved nothing.",
+        },
         section: "stock_unmapped",
         title: "Stock reaching no governed bucket",
         source: "stock.xlsx",
@@ -1319,6 +1405,10 @@ export const VIEWS: Record<string, ViewSpec> = {
       }),
       queue({
         key: "wip_unmapped",
+        lineage: {
+          source: "wip ystockn.xlsx rows whose code reached no governed bucket.",
+          key: "material code.",
+        },
         section: "wip_unmapped",
         title: "WIP reaching no governed bucket",
         note: "Unresolved WIP is excluded from long-length stock, so this is cover the tracker cannot see.",
@@ -1342,6 +1432,11 @@ export const VIEWS: Record<string, ViewSpec> = {
       }),
       queue({
         key: "rfd_unmapped",
+        lineage: {
+          source: "rfd_4731.xlsx lines carrying weight and reaching no CTL mapping.",
+          key: "material code → the CTL Bucket column of Bucketting (ctl_bucket assignments "
+              + "override).",
+        },
         section: "rfd_unmapped",
         title: "RFD 4731 lines reaching no CTL mapping",
         note:
@@ -1370,6 +1465,10 @@ export const VIEWS: Record<string, ViewSpec> = {
       }),
       queue({
         key: "orders_unmapped",
+        lineage: {
+          source: "orders.xlsx lines that reached no view.",
+          key: "material code → governed bucket.",
+        },
         section: "orders_unmapped",
         title: "Order lines missing from a view",
         note:
@@ -1421,6 +1520,10 @@ export const VIEWS: Record<string, ViewSpec> = {
       }),
       queue({
         key: "signoff_unmapped",
+        lineage: {
+          source: "signoff.xlsx lines reaching no governed bucket or plan SKU.",
+          key: "material code, against Bucketting and the Megh plan both.",
+        },
         section: "signoff_unmapped",
         title: "Order sign-off reaching no bucket or SKU",
         source: "signoff.xlsx",
@@ -1455,6 +1558,11 @@ export const VIEWS: Record<string, ViewSpec> = {
       // from the build, because that is where the plan is published.
       {
         key: "bucketting",
+        lineage: {
+          source: "the accumulated Bucketting master (every code ever mastered), read live — "
+              + "not from the build.",
+          key: "material code.",
+        },
         title: "Master · Bucketting: material code to governed bucket",
         note:
           "What Bucketting governs by hand. The pipeline resolves far more codes than this "
@@ -1486,6 +1594,11 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "oem_key",
+        lineage: {
+          source: "the accumulated OEM key master, read live.",
+          key: "customer name, trimmed and uppercased on both sides — never the customer "
+              + "code.",
+        },
         title: "Master · OEM key: customer to OEM",
         note:
           "One row per customer the OEM key names. A customer absent from it reaches no OEM "
@@ -1517,6 +1630,10 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "length_key",
+        lineage: {
+          source: "the vsm stock plan's mapping, from the published build.",
+          key: "plan SKU (length key); the codes listed are the mapping itself.",
+        },
         title: "Master · vsm stock: material code to plan SKU",
         note:
           "The plan's own length key, one row per SKU with the codes each plant extends for "
@@ -1560,6 +1677,12 @@ export const VIEWS: Record<string, ViewSpec> = {
       // cost 85,500 pieces of August schedule a bucket, and adding it took a code change.
       {
         key: "thickness_folds",
+        lineage: {
+          source: "public.size_folds, read live — the owner's rules, born on this tab rather "
+              + "than uploaded.",
+          key: "the written thickness, rounded to two decimals — the exact key "
+              + "norm_thickness looks up before any join.",
+        },
         title: "Master · Size folds: written wall thickness to the governed gauge",
         note:
           "A customer writes what their drawing says; Bucketting holds one number and "
@@ -1585,6 +1708,12 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "od_folds",
+        lineage: {
+          source: "public.size_folds, read live — the owner's rules, born on this tab rather "
+              + "than uploaded.",
+          key: "the written outside diameter, rounded to two decimals — the exact key "
+              + "norm_od looks up before any join.",
+        },
         title: "Master · Size folds: written outside diameter to the governed one",
         note:
           "The same rule for diameters: 22.23 never 22.2, 41.28 never 41.3. Each row "
@@ -1625,6 +1754,11 @@ export const VIEWS: Record<string, ViewSpec> = {
     tables: () => [
       {
         key: "sales_summary",
+        lineage: {
+          source: "the daily sales dump, with Megh's line from the TVSM sheet — the sheet's own "
+              + "grand-total row dropped at the read.",
+          key: "customer name → OEM through the OEM key; one row per OEM.",
+        },
         section: "sales_summary",
         title: "By OEM",
         note:
@@ -1694,6 +1828,11 @@ export const VIEWS: Record<string, ViewSpec> = {
     tables: (ctx) => [
       {
         key: "trend_buckets",
+        lineage: {
+          source: "the daily sales dump plus the archived extracts (sales_jul, sales_q4, "
+              + "sales_q1) — each month taken from exactly one source.",
+          key: "material code → governed bucket; months off the billing date, read as UTC.",
+        },
         section: "trend_buckets",
         title: "Bucket by month",
         note:
@@ -1721,6 +1860,12 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "trend_customer_skus",
+        lineage: {
+          source: "the daily sales dump plus the archived extracts — the same window as the "
+              + "buckets beside it.",
+          key: "customer group (the SAP ship-to spellings grouped) → the customer's codes, "
+              + "then material code → bucket per SKU.",
+        },
         section: "trend_customer_skus",
         title: "SKU trend by customer",
         note:
@@ -1773,6 +1918,12 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "trend_customer_sku_history",
+        lineage: {
+          source: "every sales extract the trend window holds — the daily dump plus the "
+              + "archived monthly and quarterly files.",
+          key: "the customer's own SAP codes, then bucket per SKU; the totals row closes on "
+              + "an average month, never a window total.",
+        },
         section: "trend_customer_sku_history",
         title: "SKU history — average month",
         note:
@@ -1814,6 +1965,11 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "trend_plants",
+        lineage: {
+          source: "the daily sales dump plus the archived extracts — the same window as the "
+              + "buckets above.",
+          key: "the invoice line's own plant; the unit toggle picks tonnes or pieces.",
+        },
         section: "trend_plants",
         title: "Despatch plant summary",
         note:
@@ -1880,6 +2036,14 @@ export const VIEWS: Record<string, ViewSpec> = {
     tables: (ctx) => [
       {
         key: "sku_pricing",
+        lineage: {
+          source: "schedule lines from the RM tracker master, priced against contract.xlsx (the "
+              + "two quarterly sheets); PO prices and operation sets are the owner's "
+              + "overrides, read live.",
+          key: "the bucket's OD–ID–thickness → contract row, narrowed by route, STKM and HST "
+              + "— each stage falling back rather than failing; the row states which route "
+              + "matched.",
+        },
         section: "sku_pricing",
         title: "Priced SKUs",
         note:
@@ -1969,6 +2133,11 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "sku_pricing_unpriced",
+        lineage: {
+          source: "schedule lines the pricing could not reach.",
+          key: "customer × bucket; the reason names what found nothing — no governed bucket, "
+              + "or no contract row for the size.",
+        },
         section: "sku_pricing_unpriced",
         title: "What cannot be priced",
         note:
@@ -1991,6 +2160,12 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "code_repository",
+        lineage: {
+          source: "the sales window (the daily dump, plus sales_history.xlsx where supplied) "
+              + "and zmat.xlsx.",
+          key: "material code; the customer reaches an OEM through the OEM key and the "
+              + "conversion-agent codes.",
+        },
         section: "code_repository",
         title: "Code repository",
         note:
@@ -2047,6 +2222,11 @@ export const VIEWS: Record<string, ViewSpec> = {
     tables: () => [
       {
         key: "stock_analysis_ctl",
+        lineage: {
+          source: "stock.xlsx (PLANT STOCKS), cut-to-length rows.",
+          key: "material code → bucket with the cut length appended (Bucketting's CTL Bucket "
+              + "column); age bands off each row's ageing date against the build's as-of.",
+        },
         section: "stock_analysis_ctl",
         title: "Cut length",
         note:
@@ -2117,6 +2297,11 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "stock_analysis_ll",
+        lineage: {
+          source: "stock.xlsx (PLANT STOCKS), long-length rows.",
+          key: "material code → governed bucket; age bands off each row's ageing date "
+              + "against the build's as-of.",
+        },
         section: "stock_analysis_ll",
         title: "Long length",
         columns: [
@@ -2164,6 +2349,11 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "stock_source_coverage",
+        lineage: {
+          source: "every stock, WIP and RFD read of this build, tallied per source.",
+          key: "per source file: the rows and tonnage whose material code resolved a bucket, "
+              + "against those that did not.",
+        },
         section: "stock_source_coverage",
         title: "Bucket mapping coverage by source",
         note:
@@ -2209,6 +2399,13 @@ export const VIEWS: Record<string, ViewSpec> = {
     tables: () => [
       {
         key: "str_plan",
+        lineage: {
+          source: "demand from the Schedule sheet for the plan customers; stock at 8406 from "
+              + "stock.xlsx; source pools from stock.xlsx and wip ystockn.xlsx; transit from "
+              + "the transfers ledger.",
+          key: "one row per governed bucket; the requirement is the target days × the "
+              + "bucket's daily schedule rate, less what 8406 already holds or has inbound.",
+        },
         section: "str_plan",
         title: "Requirement and cover by bucket",
         note:
@@ -2280,6 +2477,12 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "str_lines",
+        lineage: {
+          source: "the source-plant stock lines the plan drew on — stock.xlsx, and WIP mother "
+              + "tubes carrying an FG code from zmat.",
+          key: "governed bucket; allocated long lengths first, finished goods before WIP, "
+              + "largest holding first, until the requirement is met.",
+        },
         section: "str_plan",
         title: "STR lines to raise",
         note: "The allocation behind the plan, one line per source material, in copy order.",
@@ -2316,6 +2519,10 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "unmapped_destination_stock",
+        lineage: {
+          source: "stock.xlsx rows at 8406 whose code reached no governed bucket.",
+          key: "material code.",
+        },
         scalar: ["str_plan", "unmapped_destination_stock"],
         title: "Stock at 8406 reaching no plan bucket",
         columns: [
@@ -2330,6 +2537,10 @@ export const VIEWS: Record<string, ViewSpec> = {
       },
       {
         key: "wip_without_fg_code",
+        lineage: {
+          source: "wip ystockn.xlsx rows whose mother tube names no finished-goods code.",
+          key: "mother-tube code → zmat's FG code, which found nothing.",
+        },
         scalar: ["str_plan", "wip_without_fg_code"],
         title: "Mother tube with no finished-goods code",
         note:
@@ -2364,6 +2575,11 @@ export const VIEWS: Record<string, ViewSpec> = {
     tables: () => [
       {
         key: "transfers",
+        lineage: {
+          source: "the accumulated transfers ledger (transfer.xlsx, every line since 8 July).",
+          key: "material code → governed bucket; one row per movement, sending plant → "
+              + "receiving plant.",
+        },
         section: "transfers",
         title: "Despatched transfer lines",
         note:
@@ -2426,6 +2642,12 @@ export const VIEWS: Record<string, ViewSpec> = {
     tables: () => [
       {
         key: "overdue_analysis",
+        lineage: {
+          source: "yf65.xlsx receivables, narrowed to the TVS ancillary customers.",
+          key: "customer; ageing bands off each invoice's billing date against the build's "
+              + "as-of; the remark column is written on this tab, keyed on the invoice "
+              + "number.",
+        },
         section: "overdue_analysis",
         title: "By ancillary",
         note:
