@@ -401,9 +401,6 @@ function explainColumn(
     );
   }
 
-  const kindNote = KIND_NOTE[column.kind ?? ""];
-  if (kindNote) parts.push(kindNote);
-
   const s = column.severity;
   if (s?.words) {
     const inked = Object.entries(s.words).filter(([, band]) => band !== null);
@@ -426,20 +423,24 @@ function explainColumn(
     );
   }
 
-  if (column.total) {
-    parts.push("The totals row re-adds this column over the rows the filters left visible.");
-  }
-  if (column.detail) {
-    parts.push("Clicking a figure opens the exact rows that were added to make it.");
-  }
-
-  // The table's lineage, on every one of its columns: which files the rows were built
-  // from and which key carried a quantity onto this row. Declared once per table in
-  // `views.ts` rather than repeated four hundred times, and appended last so the
-  // column's own derivation reads first.
-  if (lineage) {
-    parts.push(`Source: ${lineage.source}`);
-    parts.push(`Mapped on: ${lineage.key}`);
+  // An authored note is the whole answer for its column. The unit line, the totals
+  // line, the click line and the table's lineage repeat verbatim on every column of a
+  // table, and appended to authored text they buried the one specific sentence under
+  // five shared ones (owner, 22 Aug). They remain only as the fallback where nobody
+  // has written the column's own derivation — there they are all the note there is.
+  if (!column.explain) {
+    const kindNote = KIND_NOTE[column.kind ?? ""];
+    if (kindNote) parts.push(kindNote);
+    if (column.total) {
+      parts.push("The totals row re-adds this column over the rows the filters left visible.");
+    }
+    if (column.detail) {
+      parts.push("Clicking a figure opens the exact rows that were added to make it.");
+    }
+    if (lineage) {
+      parts.push(`Source: ${lineage.source}`);
+      parts.push(`Mapped on: ${lineage.key}`);
+    }
   }
 
   return parts.join("\n\n");

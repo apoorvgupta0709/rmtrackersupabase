@@ -886,41 +886,44 @@ export const VIEWS: Record<string, ViewSpec> = {
           // The plan key itself is no longer a column — the dimensions are what is read —
           // but it is still on the row and still what every breakup below is keyed on.
           ex(list("materials", "Material codes"),
-            "The codes the vsm stock plan's plant columns (056, 0789, 0788) name for "
-            + "this SKU. This list is the mapping: sales, stock and orders land on this "
-            + "row only through a code here or an assignment on Missing mappings."),
-          ex(txt("od", "OD"), "The vsm stock sheet's O D column, as written."),
-          ex(txt("inner_d", "ID"), "The vsm stock sheet's ID column, as written."),
-          ex(txt("thickness", "Thickness"), "The vsm stock sheet's Thk. column, as written."),
+            "rm_tracker_tvsm.xlsx › vsm stock › 056, 0789 and 0788 — the codes the "
+            + "plan names for this SKU. This list is the mapping: sales, stock and "
+            + "orders land on this row only through a code here or a megh_sku "
+            + "assignment on Missing mappings; Bucketting is never used."),
+          ex(txt("od", "OD"), "rm_tracker_tvsm.xlsx › vsm stock › O D, as written."),
+          ex(txt("inner_d", "ID"), "rm_tracker_tvsm.xlsx › vsm stock › ID, as written."),
+          ex(txt("thickness", "Thickness"),
+            "rm_tracker_tvsm.xlsx › vsm stock › Thk., as written."),
           ex({ field: "length_m", label: "Length m", kind: "rate" },
-            "The sheet's Length, normalised to metres — the plan writes some lengths in "
-            + "millimetres (572.5 beside 5.95), and anything above the threshold is "
-            + "divided by 1,000."),
-          ex(txt("grade", "Grade"), "The vsm stock sheet's Grade column, as written."),
+            "rm_tracker_tvsm.xlsx › vsm stock › Length, normalised to metres — the "
+            + "plan writes some lengths in millimetres (572.5 beside 5.95), and "
+            + "anything above the threshold is divided by 1,000."),
+          ex(txt("grade", "Grade"), "rm_tracker_tvsm.xlsx › vsm stock › Grade, as written."),
           ex(txt("cut_type", "Cut type"),
-            "The sheet's FC/NFC column where it states one — FC is fin cut — and the "
-            + "bucket's end condition only where it does not."),
+            "rm_tracker_tvsm.xlsx › vsm stock › FC/NFC where it states one — FC is "
+            + "fin cut — and the bucket's end condition only where it does not."),
           ex(txt("bucket", "Bucket", true),
-            "The plan's key column, where the size is TVSM-bound. Empty for a Megh- "
-            + "prefixed size — those go onward to RE or HMSIL and have no governed "
-            + "bucket by design."),
+            "rm_tracker_tvsm.xlsx › vsm stock › key, where the size is TVSM-bound. "
+            + "Empty for a Megh- prefixed size — those go onward to RE or HMSIL and "
+            + "have no governed bucket by design."),
           ex(txt("end_oem", "End OEM"),
             "TVSM for a plain key. For a Megh- size, the OEM whose conversion-agent "
             + "code (943210 HMSIL, 943211 RE) actually bought it from the sales ledger; "
             + "both names where no code has bought it yet."),
           ex(bool("bop", "BOP"),
-            "Whether the SKU matched a line of the governed bought-out-parts list: "
-            + "same first three bucket parts, then the nearest length within 50 mm, "
-            + "each listed line and each SKU claimed once, nearest gap first."),
+            "Whether the SKU matched a line of the governed bought-out list "
+            + "(MEGH_BOP_ITEMS): same first three bucket parts, then the nearest "
+            + "length within 50 mm, each listed line and each SKU claimed once, "
+            + "nearest gap first."),
           // Every figure on this tab is guarded by itself. The plan writes a key onto
           // each row whether or not the SKU has any of that thing, and the breakup for
           // a zero was never built — 64 of the 73 SKUs sold nothing this month. So a
           // zero here is a zero, not a button that opens an explanation of nothing.
           drill(
             ex(mt("schedule_mt", "Schedule MT"),
-              "The vsm stock sheet's Schedule column ÷ 1,000 — the sheet's quantities "
-              + "are kilograms; its Stock reconciles to NOS × Wt/Len, which is the "
-              + "proof."),
+              "rm_tracker_tvsm.xlsx › vsm stock › Schedule, kg ÷ 1,000 — the sheet's "
+              + "quantities are kilograms; its own Stock reconciling to NOS × Wt/Len "
+              + "is the proof."),
             "MEGHSCHEDULE|{sku}",
             "{sku} · schedule",
             "schedule_mt",
@@ -930,28 +933,29 @@ export const VIEWS: Record<string, ViewSpec> = {
           // "how much is there", and the split is the follow-up question.
           drill(
             ex(mt("total_stock_mt", "VSM stock MT"),
-              "The sheet's Stock plus In Transit, ÷ 1,000. The breakup shows the two "
-              + "halves."),
+              "rm_tracker_tvsm.xlsx › vsm stock › Stock plus In Transit, kg ÷ 1,000. "
+              + "The breakup shows the two halves."),
             "{stock_detail_key}",
             "{sku} · ground plus in transit",
             "total_stock_mt",
           ),
           drill(
             ex(mt("orders_logged_mt", "Orders as per OMS MT"),
-              "The sheet's per-plant … Order columns summed, ÷ 1,000. Deliberately not "
-              + "Order qty to be logged — that is the residual still to be raised; the "
-              + "sheet's own Coverage post order confirms it, equalling "
-              + "(Stock + plant orders) ÷ Schedule × 30."),
+              "rm_tracker_tvsm.xlsx › vsm stock › the per-plant … Order columns "
+              + "summed, kg ÷ 1,000. Deliberately not Order qty to be logged — that is "
+              + "the residual still to be raised; the sheet's own Coverage post order "
+              + "confirms it, equalling (Stock + plant orders) ÷ Schedule × 30."),
             "{orders_detail_key}",
             "{sku} · orders logged as per OMS",
             "orders_logged_mt",
           ),
           drill(
             ex(mt("orders_planning_mt", "Orders as per sales planning MT"),
-              "Open lines from orders.xlsx whose customer contains MEGH, keyed to this "
-              + "SKU through the plan's own code list. Sits beside the OMS figure "
-              + "rather than replacing it — the two sources disagree on most SKUs, and "
-              + "which is right is what this tab is opened to establish."),
+              "orders.xlsx › jsr, hk_so and hk_str — open lines whose customer "
+              + "contains MEGH, matched on orders › MATL_NO / Material Number against "
+              + "this SKU's plan codes or a megh_sku assignment. Sits beside the OMS "
+              + "figure rather than replacing it — the two sources disagree on most "
+              + "SKUs, and which is right is what this tab is opened to establish."),
             "{orders_plan_detail_key}",
             "{sku} · orders logged as per sales planning, plant by plant",
           ),
@@ -959,17 +963,19 @@ export const VIEWS: Record<string, ViewSpec> = {
           // quantity columns side by side; only the heading says which half was clicked.
           drill(
             ex(mt("signoff_mt", "Signed off MT"),
-              "From the per-plant sign-off sheets, the lines on this SKU's codes with a "
-              + "sign-off quantity, kg ÷ 1,000."),
+              "signoff.xlsx › jsr (MATL_NO, Bal to Desp where Sign Off is Y), hosur "
+              + "(Material, SIGN OFF) and khopoli (Material, Sign Off) — the signed "
+              + "half of the lines on this SKU's plan codes."),
             "{signoff_detail_key}",
             "{sku} · signed off",
             "signoff_mt",
           ),
           drill(
             ex(mt("non_signoff_mt", "Not signed off MT"),
-              "The same sign-off sheets' lines on this SKU's codes, the quantity not "
-              + "yet signed. Both halves open the same breakup; the heading says which "
-              + "was clicked."),
+              "The same signoff.xlsx sheets, the half not yet signed — jsr › Bal to "
+              + "Desp where Sign Off is N, hosur › the rest of Order Qty in MT, "
+              + "khopoli › Non Sign Off — on this SKU's plan codes. Both halves open "
+              + "the same breakup; the heading says which was clicked."),
             "{signoff_detail_key}",
             "{sku} · not signed off",
             "non_signoff_mt",
@@ -985,30 +991,31 @@ export const VIEWS: Record<string, ViewSpec> = {
           // history read zero for the published month.
           drill(
             ex(mt("sales_mt", "Sales to Megh MT"),
-              "This month's sales.xlsx lines billed to Megh's codes (943209 TVS-A, "
-              + "943210 HMSIL, 943211 RE) whose material code the plan names for this "
-              + "SKU, Quantity ÷ 1,000. Nothing is inferred: a purchase on a code the "
-              + "plan does not name goes to Missing mappings instead. The breakup opens "
-              + "the ledger's months, and the published month's column adds back to this "
-              + "figure."),
+              "sales.xlsx › Sheet1 › Quantity, kg ÷ 1,000 — this month's lines billed "
+              + "to Megh's codes (943209 TVS-A, 943210 HMSIL, 943211 RE), matched on "
+              + "sales › MATERAIL NUMBER against this SKU's plan codes. Nothing is "
+              + "inferred: a purchase on a code the plan does not name goes to Missing "
+              + "mappings instead. The breakup opens the ledger's months, and the "
+              + "published month's column adds back to this figure."),
             "{sales_detail_key}",
             "{sku} · sales to Megh, month by month",
             "sales_months",
           ),
           drill(
             ex(mt("stock_at_length_mt", "TSL stock in VSM length MT"),
-              "TSL-side cover at exactly this size: stock.xlsx PLANT STOCKS plus WIP "
-              + "from wip.xlsx, long length only, in codes the plan names for this SKU. "
-              + "Long length only because a cut piece cannot be re-cut to a Megh SKU."),
+              "stock.xlsx › PLANT STOCKS › MT plus wip.xlsx › Total Stock, long "
+              + "length only, matched on stock › Material and wip › Material No "
+              + "against this SKU's plan codes. Long length only because a cut piece "
+              + "cannot be re-cut to a Megh SKU."),
             "{at_length_detail_key}",
             "{sku} · long length at required size",
             "stock_at_length_mt",
           ),
           drill(
             ex(mt("other_length_stock_mt", "TSL stock in non-VSM length MT"),
-              "The same stock and WIP pool in this SKU's family — the key without its "
-              + "length part — at other lengths. Cover that exists but would need "
-              + "cutting to a different length."),
+              "The same stock.xlsx and wip.xlsx pool in this SKU's family — the key "
+              + "without its length part — at other lengths. Cover that exists but "
+              + "would need cutting to a different length."),
             "{other_length_detail_key}",
             "{sku} · long length, other sizes",
             "other_length_stock_mt",
@@ -1040,8 +1047,8 @@ export const VIEWS: Record<string, ViewSpec> = {
           + "separate line item.",
         columns: [
           ex(txt("sku", "SKU", true),
-            "The line the governed BOP list states, keyed the plan's way so it sits "
-            + "beside the tracked rows."),
+            "The line the governed BOP list (MEGH_BOP_ITEMS) states, keyed the plan's "
+            + "way so it sits beside the tracked rows."),
           ex(txt("stated_size", "Stated size"),
             "The size exactly as the BOP list writes it."),
           ex(cnt("nos", "Nos"), "The listed pieces."),
@@ -1066,15 +1073,17 @@ export const VIEWS: Record<string, ViewSpec> = {
           + "every code the plan names. Codes missing from Bucketting is a live queue.",
         columns: [
           ex(txt("vsm_key", "Plan key", true),
-            "The plan's own length key, taken as written — derived from key + Length "
-            + "only for a row stating none."),
+            "rm_tracker_tvsm.xlsx › vsm stock › length key, taken as written — "
+            + "derived from key + Length only for a row stating none."),
           ex(txt("bucket", "Bucket", true),
-            "The plan's key column where TVSM-bound; empty for a Megh- size."),
+            "rm_tracker_tvsm.xlsx › vsm stock › key where TVSM-bound; empty for a "
+            + "Megh- size."),
           ex({ field: "length_m", label: "Length m", kind: "rate" },
-            "The plan's Length, normalised to metres."),
-          ex(txt("grade", "Grade"), "The plan's Grade column."),
+            "rm_tracker_tvsm.xlsx › vsm stock › Length, normalised to metres."),
+          ex(txt("grade", "Grade"), "rm_tracker_tvsm.xlsx › vsm stock › Grade."),
           ex(txt("cut_type", "Cut type"),
-            "The plan's FC/NFC where stated; the bucket's end condition otherwise."),
+            "rm_tracker_tvsm.xlsx › vsm stock › FC/NFC where stated; the bucket's end "
+            + "condition otherwise."),
           ex(txt("end_oem", "End OEM"),
             "TVSM for a plain key; for a Megh- size, the OEM whose code bought it."),
           ex(bool("megh_only", "Megh only"),
@@ -1084,18 +1093,22 @@ export const VIEWS: Record<string, ViewSpec> = {
             "Whether the plan row has Schedule or Stock above zero — only those rows "
             + "make the tracker."),
           ex(txt("material_codes", "Material codes", true),
-            "The codes the plan's plant columns name for this SKU — the mapping "
-            + "itself."),
-          ex(txt("plants", "Plants"), "Which plant columns named a code."),
+            "rm_tracker_tvsm.xlsx › vsm stock › 056/0789/0788 — the codes the plan "
+            + "names for this SKU; the mapping itself."),
+          ex(txt("plants", "Plants"), "Which of the 056/0789/0788 columns named a code."),
           ex(cnt("codes_total", "Codes"), "How many codes the plan names for the SKU."),
           ex(cnt("codes_in_bucketting", "In Bucketting"),
-            "How many of those codes Bucketting also governs."),
+            "How many of those codes Bucketting also governs — reporting only; "
+            + "Bucketting maps nothing on this tab."),
           ex(txt("codes_missing_from_bucketting", "Codes not in Bucketting", true),
             "The plan's codes Bucketting does not carry — the live queue this table "
             + "exists to show."),
-          ex(mt("schedule_mt", "Schedule MT"), "The plan row's Schedule, kg ÷ 1,000."),
-          ex(mt("stock_mt", "Stock MT"), "The plan row's Stock, kg ÷ 1,000."),
-          ex(txt("plan_note", "Plan note", true), "The plan's own Remark column."),
+          ex(mt("schedule_mt", "Schedule MT"),
+            "rm_tracker_tvsm.xlsx › vsm stock › Schedule, kg ÷ 1,000."),
+          ex(mt("stock_mt", "Stock MT"),
+            "rm_tracker_tvsm.xlsx › vsm stock › Stock, kg ÷ 1,000."),
+          ex(txt("plan_note", "Plan note", true),
+            "rm_tracker_tvsm.xlsx › vsm stock › Remark."),
         ],
       },
     ],

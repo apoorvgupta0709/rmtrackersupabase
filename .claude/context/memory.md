@@ -1117,6 +1117,15 @@ that the package still sits where Claude Code looks — the repo root is
   `test_a_megh_sku_is_reached_only_by_a_statement` locks; the only Bucketting mentions
   left on that tab are the "Codes not in Bucketting" queue columns, which report
   rather than map.
+- **An ⓘ note is the column's own, never a shared block.** The owner's second
+  correction the same day ("generic and same for all"): the unit line, the totals
+  line, the click line and the table lineage were appended to every column, so five
+  shared sentences buried the one specific one. `explainColumn` now appends that
+  block only where no authored note exists — an authored note stands alone with its
+  severity bands — and every Megh-view column's note is self-contained:
+  `file.xlsx › sheet › column` plus the mapping route that lands the figure on the
+  row. Other tabs' authored notes therefore no longer show Source/Mapped-on; make
+  each self-contained in the same form when touched.
 - Wants outcomes first, tables for movement vs the previous day, and defects
   stated plainly with what changed and why.
 - Copy buttons are load-bearing: dispatch plan, clearance list (WhatsApp
