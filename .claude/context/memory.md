@@ -1106,6 +1106,17 @@ that the package still sits where Claude Code looks — the repo root is
 
 - Voice-transcribed messages: expect typos ("pheth", "udate", "STROCK");
   interpret by intent, confirm when genuinely ambiguous.
+- **ⓘ lineage lines must be concrete, not prose.** The owner's correction, 22 Aug, on
+  the Megh tab's notes ("too confusing", "too verbose"): a Source line reads
+  `file.xlsx › sheet: columns`, and a Mapped-on line names the key plus the joining
+  columns of each table — never a description of where things conceptually come from.
+  The three Megh-view tables are converted; the other tabs' lineage is still prose and
+  should be brought to the same form when touched. In the same message the owner
+  restated that Megh Steel sales maps material codes **only** through the plan key,
+  never Bucketting — which the 20 Aug rule already implements and
+  `test_a_megh_sku_is_reached_only_by_a_statement` locks; the only Bucketting mentions
+  left on that tab are the "Codes not in Bucketting" queue columns, which report
+  rather than map.
 - Wants outcomes first, tables for movement vs the previous day, and defects
   stated plainly with what changed and why.
 - Copy buttons are load-bearing: dispatch plan, clearance list (WhatsApp

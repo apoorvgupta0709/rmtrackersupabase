@@ -863,12 +863,15 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "megh_tracker",
         lineage: {
-          source: "the TVSM workbook's vsm stock sheet; sales from the accumulated sales ledger "
-              + "under Megh's conversion-agent codes; stock and order columns joined from the "
-              + "LL tracker's own sources.",
-          key: "the plan's stated length key — the governed bucket with the finished length "
-              + "appended; material codes reach a row through the plan's plant columns and "
-              + "megh_sku assignments.",
+          source: "rm_tracker_tvsm.xlsx › vsm stock: Schedule, Stock, In Transit, the "
+              + "per-plant … Order columns. sales.xlsx › Sheet1: Quantity, customer codes "
+              + "943209/943210/943211. stock.xlsx › PLANT STOCKS: MT. wip.xlsx: Total Stock. "
+              + "orders.xlsx › jsr, hk_so, hk_str. signoff.xlsx › jsr, hosur, khopoli.",
+          key: "vsm stock › length key. A material code reaches a row only through "
+              + "vsm stock › 056/0789/0788 or a megh_sku assignment, matched against "
+              + "sales › MATERAIL NUMBER, stock › Material, wip › Material No, "
+              + "orders › MATL_NO / Material Number, sign-off › MATL_NO / Material. "
+              + "Bucketting is never used.",
         },
         section: "megh_tracker",
         title: "Megh SKU tracker",
@@ -1023,7 +1026,8 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "megh_bop_added",
         lineage: {
-          source: "the owner's bought-out (BOP) list, joined against the vsm stock plan.",
+          source: "the owner's governed BOP list (MEGH_BOP_ITEMS), joined against "
+              + "rm_tracker_tvsm.xlsx › vsm stock.",
           key: "bucket dimensions OD–ID–thickness, then nearest stated length within 50 mm, "
               + "each side claimed once; a listed size with no plan row becomes its own "
               + "off-plan row.",
@@ -1050,9 +1054,10 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "megh_length_bucketing",
         lineage: {
-          source: "the vsm stock plan's own length-specific mapping.",
-          key: "material code → plan SKU (length key), as the plan states it — nothing is "
-              + "inferred.",
+          source: "rm_tracker_tvsm.xlsx › vsm stock: key, length key, Length, Grade, FC/NFC, "
+              + "the 056/0789/0788 code columns, Schedule, Stock.",
+          key: "vsm stock › length key; the material codes are the plan's own 056/0789/0788 "
+              + "columns — nothing is inferred, Bucketting is never used.",
         },
         section: "megh_length_bucketing",
         title: "Megh length bucketing",
