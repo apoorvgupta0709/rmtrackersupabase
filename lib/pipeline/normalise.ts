@@ -23,6 +23,7 @@
  *    documents the choice; `--only <section>` on the parity harness is what proves it.
  */
 
+import { readFileSync } from "node:fs";
 import { pyRound, fmtG } from "./format.ts";
 
 /** A finished length at or above this many metres is stated in millimetres, not metres. */
@@ -218,41 +219,46 @@ export function normNumber(value: unknown, digits = 4): string | null {
 /**
  * Wall thicknesses customers write, folded onto the gauge Bucketting actually governs.
  *
- * Kept as a table rather than as rounding, because the next one is a line and not a new
+ * Kept as a table rather than as rounding, because the next one is a row and not a new
  * branch — and because folding here is recovering a size, not losing one. 1.22 is a
  * customer-written near-gauge like the 1.21 beside it: Bucketting governs 256 buckets at
  * 1.20 and none at either, so its absence meant Srikam, Rajsriya and NMPL lines written at
  * 1.22 met no bucket at all — 85,500 pieces on the August schedule reaching no row rather
  * than joining the 1.20 they are.
+ *
+ * The rules are the owner's, kept in `public.size_folds` and edited on the Missing
+ * mappings tab; `config/size_folds.json` is the committed echo the last published build
+ * used, rewritten by the run exactly as `config/bucket_assignments.json` is. Both
+ * languages seed from that one file at import — which is what keeps
+ * `tools/check_normalise.mjs` a proof rather than a coincidence.
  */
-export const THICKNESS_GROUPS = new Map<number, number>([
-  [1.00, 1.00], [1.01, 1.00], [1.02, 1.00],
-  [1.20, 1.20], [1.21, 1.20], [1.22, 1.20],
-  [1.62, 1.60],   // Sandhar Technology writes 1.62; Bucketting governs only 1.6
-  [1.50, 1.60], [1.60, 1.60], [1.63, 1.60],
-  [1.90, 2.00], [1.95, 2.00], [2.00, 2.00], [2.03, 2.00],
-  [2.25, 2.25], [2.32, 2.25],
-  [2.30, 2.30], [2.34, 2.30],
-  [2.41, 2.50], [2.45, 2.50], [2.50, 2.50],
-  [2.60, 2.60], [2.65, 2.60],
-  [2.70, 2.80], [2.75, 2.80], [2.80, 2.80],
-  [3.00, 3.00], [3.02, 3.00],
-  [3.40, 3.50], [3.50, 3.50],
-]);
+const SIZE_FOLDS: Record<string, Record<string, number>> = JSON.parse(
+  readFileSync(
+    new URL(
+      "../../.claude/skills/refresh-tvsm-dashboard/config/size_folds.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+).folds;
+
+const foldTable = (kind: "thickness" | "od"): Map<number, number> =>
+  new Map(
+    Object.entries(SIZE_FOLDS[kind] ?? {}).map(
+      ([written, governed]) => [Number(written), Number(governed)] as const,
+    ),
+  );
+
+export const THICKNESS_GROUPS = foldTable("thickness");
 
 /**
  * Outside diameters that name a diameter Bucketting governs under a different number.
  *
- * Both entries are cases where Bucketting holds one value and nothing near it — 22.23
- * (never 22.2) and 41.28 (never 41.3) — so folding recovers the size rather than rounding
- * it away.
+ * The seeded entries are cases where Bucketting holds one value and nothing near it —
+ * 22.23 (never 22.2) and 41.28 (never 41.3) — so folding recovers the size rather than
+ * rounding it away.
  */
-export const OD_GROUPS = new Map<number, number>([
-  [22.20, 22.23], [22.23, 22.23],
-  [28.58, 28.58], [28.60, 28.58],
-  [37.90, 37.95], [37.95, 37.95],
-  [41.28, 41.28], [41.30, 41.28],
-]);
+export const OD_GROUPS = foldTable("od");
 
 const folded = (groups: Map<number, number>, value: unknown): string | null => {
   if (isNa(value)) return null;

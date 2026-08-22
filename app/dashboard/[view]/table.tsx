@@ -28,6 +28,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import AssignCell from "./assign";
+import FoldAdd from "./fold-add";
 import { writeClipboard } from "./clipboard";
 import { COPY_FORMATS, type CopyContext, type CopySpec } from "./copies";
 import DetailPanel, { type Detail, type DetailLayouts } from "./detail";
@@ -126,10 +127,17 @@ export type SeveritySpec = {
  * material code. They are stored under the same key in `bucket_assignments` and told
  * apart by this, so a value saved in one space can never be read as another.
  *
+ * The two `_fold` scopes are a different space again: a *written size* to the size
+ * Bucketting governs, kept in `public.size_folds` with numeric keys — the route splits
+ * them off `bucket_assignments` rather than the cell knowing the difference.
+ *
  * A scope belongs in this union only once the pipeline reads it back by the same string.
- * `test_the_assignable_spaces_agree_everywhere` checks all five places at once.
+ * `test_the_assignable_spaces_agree_everywhere` checks all five places at once for the
+ * assignment scopes; `test_the_fold_scopes_close_their_own_loop` does it for the folds.
  */
-export type AssignScope = "bucket" | "megh_sku" | "ctl_bucket" | "oem";
+export type AssignScope =
+  | "bucket" | "megh_sku" | "ctl_bucket" | "oem"
+  | "thickness_fold" | "od_fold";
 
 export type AssignSpec = {
   /** Which space the choice is in. */
@@ -689,6 +697,7 @@ export default function DataTable({
   unmapped,
   source,
   pricing,
+  foldAdd,
 }: {
   title: string;
   note?: string;
@@ -714,6 +723,8 @@ export default function DataTable({
   source?: string;
   /** Corrections to the contract price, and what they are computed against. */
   pricing?: PricingContext;
+  /** Offer the add-a-fold form above this table — the fold masters only. */
+  foldAdd?: { scope: "thickness_fold" | "od_fold"; options: string };
 }) {
   /**
    * The rows as corrected, not as published.
@@ -1029,6 +1040,14 @@ export default function DataTable({
         <p className="hint" style={{ margin: "6px 0 0", maxWidth: 860 }}>
           {note}
         </p>
+      )}
+
+      {foldAdd && (
+        <FoldAdd
+          scope={foldAdd.scope}
+          options={assignOptions?.[foldAdd.options] ?? []}
+          canAssign={Boolean(canAssign)}
+        />
       )}
 
       {capped !== undefined && (

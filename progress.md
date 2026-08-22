@@ -91,6 +91,15 @@ All verified payload-neutral except the one intended ordering change.
   and `ctl_bucket` on `rfd["ctl_bucket"]`. Both are guarded by an empty-dict test and both
   sets are empty today, so all 17 checks stayed green; the change is payload-neutral *until
   somebody answers those queues*, which is the point of it.
+- **The size-fold tables are data now, 22 Aug** — `THICKNESS_GROUPS` and `OD_GROUPS` live in
+  `public.size_folds` (seeded with the 38 constant pairs, identity entries included), edited
+  on the mapping tab under `thickness_fold`/`od_fold` scopes, echoed to
+  `config/size_folds.json`. **Both languages seed at import from that one committed file** —
+  `load_size_folds(refresh=False)` in the Python, `readFileSync` in `normalise.ts` — so
+  `check_normalise.mjs` needed zero changes and stays the proof. `refresh_size_folds()`
+  re-reads the table (database first, committed file on any failure) as the first act of
+  `main()` and mutates the dicts **in place**, because the norm functions and both schedule
+  readers close over them. Proven payload-neutral by a full before/after oracle diff.
   **The CTL one is ported**, because S4 carries `rfd_unrecovered`: `stockPools` takes an
   eighth argument `assignments`, and `check_section_stock.mjs` passes the same set the
   pipeline reads. Porting it later, after an RFD assignment existed, would have shown up as

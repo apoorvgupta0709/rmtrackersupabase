@@ -189,6 +189,20 @@ export default async function ViewPage({
       order: "material_code",
     },
     oem_key: { table: "dump_oem_key", select: "customer,oem,cam", order: "customer" },
+    // The fold rules, one master per kind. Same table twice rather than one table split
+    // client-side, so each spec stays a plain fetch.
+    thickness_folds: {
+      table: "size_folds",
+      select: "kind,written,governed,note",
+      order: "written",
+      match: { kind: "thickness" },
+    },
+    od_folds: {
+      table: "size_folds",
+      select: "kind,written,governed,note",
+      order: "written",
+      match: { kind: "od" },
+    },
   } as const;
 
   const wantedMasters = [...new Set(tables.map((t) => t.master).filter(Boolean))] as
@@ -198,8 +212,9 @@ export default async function ViewPage({
       const spec = MASTERS[name];
       // Through `unknown`: the generated client types a `select` string literal, and a
       // union of two of them is not one it can parse.
-      const { data } = await supabase.from(spec.table).select(spec.select as string)
-        .order(spec.order, { ascending: true });
+      let query = supabase.from(spec.table).select(spec.select as string);
+      if ("match" in spec) query = query.match(spec.match);
+      const { data } = await query.order(spec.order, { ascending: true });
       return [name, ((data ?? []) as unknown) as Rows];
     })),
   );
@@ -282,6 +297,17 @@ export default async function ViewPage({
     }
     canAssign = me?.role === "admin";
   }
+  // The fold masters' answers ride the same map. Keyed by the written size as JavaScript
+  // renders it — `String(Number(x))` — which is exactly what the row's codeField
+  // produces, so the cell and the map can never disagree on what "22.20" is called.
+  for (const [name, scope] of [
+    ["thickness_folds", "thickness_fold"],
+    ["od_folds", "od_fold"],
+  ] as const) {
+    for (const row of masterRows[name] ?? []) {
+      assignments[`${scope}|${String(Number(row.written))}`] = String(Number(row.governed));
+    }
+  }
 
   // Corrections to the contract price, and what they are computed against. Fetched only
   // where a column asks for them, and not build-scoped for the same reason an assignment
@@ -335,6 +361,12 @@ export default async function ViewPage({
         (masterRows.oem_key ?? []).map((row) => String(row.oem ?? "").trim()).filter(Boolean),
       ),
     ].sort(),
+    // The dimensions the governed buckets actually carry, parsed off the bucket strings
+    // themselves (OD-ID-thickness-…), so the fold masters suggest only values that exist
+    // to fold onto — and a written value found in this list is one the form warns about,
+    // because folding it would swallow a real size.
+    governed_thicknesses: governedDimensions(scalars.governed_buckets, 2),
+    governed_ods: governedDimensions(scalars.governed_buckets, 0),
   };
 
   // The options each selector offers, drawn from the section rather than declared, so a
@@ -459,6 +491,7 @@ export default async function ViewPage({
           key={table.key}
           title={table.title}
           note={table.note}
+          foldAdd={table.foldAdd}
           columns={table.columns}
           rows={rows}
           averageOver={table.averageOver}
@@ -477,4 +510,22 @@ export default async function ViewPage({
       ))}
     </>
   );
+}
+
+/**
+ * The distinct values one dimension of the governed buckets takes, sorted numerically.
+ *
+ * A bucket is `OD-ID-thickness-grade-endcondition`, so index 0 is the OD and index 2 the
+ * wall — the grade may itself contain hyphens, but those sit past index 2 and never
+ * shift it. Rendered through `String(Number(x))` so "2.00" and "2" are one suggestion.
+ */
+function governedDimensions(buckets: unknown, index: number): string[] {
+  return [
+    ...new Set(
+      ((buckets as string[]) ?? [])
+        .map((bucket) => Number(String(bucket).split("-")[index]))
+        .filter((value) => Number.isFinite(value))
+        .map((value) => String(value)),
+    ),
+  ].sort((a, b) => Number(a) - Number(b));
 }

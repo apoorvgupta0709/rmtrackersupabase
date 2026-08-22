@@ -35,9 +35,17 @@ export type TableSpec = {
    * that a page is one consistent answer as of one refresh; here the point is the
    * opposite — what is governed *now*, including a decision recorded a minute ago that no
    * refresh has folded in yet. `dump_bucketing` and `dump_oem_key` each carry a "signed in
-   * reads the master" policy, which is what makes this readable at all.
+   * reads the master" policy, which is what makes this readable at all; the two fold
+   * masters read `public.size_folds` the same way.
    */
-  master?: "bucketting" | "oem_key";
+  master?: "bucketting" | "oem_key" | "thickness_folds" | "od_folds";
+  /**
+   * Offer an add-a-row form above this table, for a master whose rows are created on the
+   * tab rather than uploaded. Only the fold masters use it: every other master's rows
+   * come from a workbook, but a fold rule is *born* here. `options` names the list of
+   * governed values the form suggests, like `assign.options` does.
+   */
+  foldAdd?: { scope: "thickness_fold" | "od_fold"; options: string };
   /**
    * Which fields decide whether a row still needs an answer, for the "Only unanswered"
    * toggle. A row counts as answered when *any* of them carries something.
@@ -1216,7 +1224,7 @@ export const VIEWS: Record<string, ViewSpec> = {
       + "short because of it, how much, and the box you answer in. Type the key it belongs "
       + "to; the list drops down as you type but you are not held to it, because the usual "
       + "reason a row is here is that the master has never carried the key it needs. "
-      + "Under them are the three masters themselves, each editable in the same way — that "
+      + "Under them are the masters themselves, each editable in the same way — that "
       + "is where a mapping that is *wrong* rather than absent gets corrected, which no "
       + "queue can show you. Every box on this tab writes to the database as you leave it. "
       + "The decision is kept against the code, not against this build — the next refresh "
@@ -1231,7 +1239,10 @@ export const VIEWS: Record<string, ViewSpec> = {
         title: "Materials, customers and scheduled sizes",
         note:
           "Sizes a customer schedules that no bucket governs appear here in the form the "
-          + "customer sent them. A row reading lookup error is a bug, not a gap.",
+          + "customer sent them. A row reading lookup error is a bug, not a gap. A "
+          + "Schedule row whose size is merely *near* a governed one — a 1.22 wall where "
+          + "Bucketting governs 1.2 — is answered on the size-fold masters at the bottom "
+          + "of this tab, not by assigning a bucket to one code.",
         // The one queue that pools four sources, so all three derived columns turn on the
         // sub-type rather than on the table.
         source: (row) => String(row.source ?? ""),
@@ -1541,6 +1552,57 @@ export const VIEWS: Record<string, ViewSpec> = {
             "The plan's FC/NFC column where it states one — FC is fin cut — and the "
             + "bucket's end condition only where it does not."),
           assignIn("megh_sku", "Reassign plan SKU", "vsm_key", "megh_skus"),
+        ],
+      },
+      // The fold masters. These rows are rules, not data: what a customer *writes* on the
+      // left, what Bucketting *governs* on the right, applied by norm_thickness/norm_od
+      // before any join. They used to be code constants — 1.22 missing from the table
+      // cost 85,500 pieces of August schedule a bucket, and adding it took a code change.
+      {
+        key: "thickness_folds",
+        title: "Master · Size folds: written wall thickness to the governed gauge",
+        note:
+          "A customer writes what their drawing says; Bucketting holds one number and "
+          + "nothing near it. Each row folds a written thickness onto the governed one "
+          + "before any join, everywhere a wall is read. Add a pair only when a scheduled "
+          + "size reaches no bucket AND Bucketting clearly governs it under a neighbouring "
+          + "number — folding recovers a size, it must never swallow a real gauge. "
+          + "Applied at the next refresh, like every mapping on this tab.",
+        master: "thickness_folds" as const,
+        foldAdd: { scope: "thickness_fold", options: "governed_thicknesses" },
+        columns: [
+          ex(txt("written", "Written thickness"),
+            "The wall as a customer writes it, read at two decimals — the key "
+            + "norm_thickness looks up after rounding what the sheet holds."),
+          ex(assignIn("thickness_fold", "Governed thickness", "written", "governed_thicknesses"),
+            "The gauge Bucketting actually governs. The suggestions are the thicknesses "
+            + "of the governed buckets in the current build. Clearing the box retires "
+            + "the fold."),
+          ex(txt("note", "Note", true),
+            "Why the pair exists — which customer writes it, and what proved the fold. "
+            + "Recorded when the rule is added; judgement deserves a reason."),
+        ],
+      },
+      {
+        key: "od_folds",
+        title: "Master · Size folds: written outside diameter to the governed one",
+        note:
+          "The same rule for diameters: 22.23 never 22.2, 41.28 never 41.3. Each row "
+          + "folds a written OD onto the one Bucketting governs, before any join. Add a "
+          + "pair only when a size reaches no bucket AND Bucketting clearly governs it "
+          + "under a neighbouring number. Applied at the next refresh.",
+        master: "od_folds" as const,
+        foldAdd: { scope: "od_fold", options: "governed_ods" },
+        columns: [
+          ex(txt("written", "Written OD"),
+            "The outside diameter as a customer writes it, read at two decimals — the "
+            + "key norm_od looks up after rounding what the sheet holds."),
+          ex(assignIn("od_fold", "Governed OD", "written", "governed_ods"),
+            "The diameter Bucketting actually governs. The suggestions are the ODs of "
+            + "the governed buckets in the current build. Clearing the box retires the "
+            + "fold."),
+          ex(txt("note", "Note", true),
+            "Why the pair exists — which customer writes it, and what proved the fold."),
         ],
       },
     ],

@@ -2754,6 +2754,10 @@ def test_the_assignable_spaces_agree_everywhere():
 
     views = (REPO_ROOT / "app" / "dashboard" / "[view]" / "views.ts").read_text(encoding="utf-8")
     offered = set(re.findall(r'scope: "([a-z_]+)"', views))
+    # The `_fold` scopes are a separate space — written size to governed size, kept in
+    # `public.size_folds`, not in `bucket_assignments` — with a closed-loop test of their
+    # own, `test_the_fold_scopes_close_their_own_loop`. This test governs the rest.
+    offered -= {"thickness_fold", "od_fold"}
     assert offered <= scopes, f"a queue offers a space nothing accepts: {offered - scopes}"
 
     # And the fifth place: the pipeline reads every one of them by that same string.
@@ -2763,6 +2767,91 @@ def test_the_assignable_spaces_agree_everywhere():
         f"assignable but never read by the pipeline: {sorted(scopes - read)}. "
         "A decision filed under one of these saves, reads back, and moves nothing."
     )
+
+
+def test_the_size_folds_the_build_used_are_committed_beside_it():
+    """The fold tables are data now, and a clean clone still has to rebuild identically.
+
+    `THICKNESS_GROUPS` and `OD_GROUPS` were code constants until 22 August 2026; they
+    live in `public.size_folds` now, edited on the Missing mappings tab. Same arrangement
+    as `bucket_assignments`: the run that reads the table echoes it into the repository,
+    and a rebuild without credentials reads the committed file instead. Both languages
+    seed from that one file at import, which is what keeps `check_normalise.mjs` a proof.
+    """
+    refresh = load_refresh_module()
+    committed = SKILL_ROOT / "config" / "size_folds.json"
+    assert committed.exists(), "the file both languages seed from is committed"
+    held = json.loads(committed.read_text(encoding="utf-8"))["folds"]
+    assert set(held) == {"od", "thickness"}
+
+    # Reading with the refresh turned off must not touch the network or the file, and
+    # what it returns is by value exactly what the module seeded at import.
+    before = committed.read_bytes()
+    loaded = refresh.load_size_folds(refresh=False)
+    assert committed.read_bytes() == before
+    assert loaded == {"thickness": refresh.THICKNESS_GROUPS, "od": refresh.OD_GROUPS}
+    # Floats at two decimals on both sides of every pair — the space the lookup happens
+    # in, since the norm functions key on round(float(value), 2).
+    for table in loaded.values():
+        for written, governed in table.items():
+            assert isinstance(written, float) and isinstance(governed, float)
+            assert round(written, 2) == written and round(governed, 2) == governed
+
+
+def test_a_fold_added_to_the_table_moves_the_norm_functions():
+    """The dicts are live state, not a copy taken at import.
+
+    `refresh_size_folds()` mutates them in place precisely so that every closure and
+    every importer sees a new rule without being handed anything. A pair added to the
+    table must therefore move `norm_thickness` immediately — and removing it must put
+    the answer back, or the mutation path is not the one the functions read.
+    """
+    refresh = load_refresh_module()
+    assert refresh.norm_thickness(2.95) == "2.95", "2.95 passes through ungoverned today"
+    refresh.THICKNESS_GROUPS[2.95] = 3.0
+    try:
+        assert refresh.norm_thickness(2.95) == "3"
+    finally:
+        del refresh.THICKNESS_GROUPS[2.95]
+    assert refresh.norm_thickness(2.95) == "2.95"
+
+
+def test_the_fold_scopes_close_their_own_loop():
+    """`thickness_fold` and `od_fold` save to `size_folds`, and the pipeline reads it back.
+
+    The same closed-loop rule the assignment scopes live under, in their own table: the
+    cell posts a fold scope, the route maps it to a kind the check constraint stores, and
+    `refresh_size_folds()` reads the table back before any frame is built. `oem` shipped
+    without the last leg once and had to be withdrawn the same night; a fold scope must
+    not repeat that.
+    """
+    route = (REPO_ROOT / "app" / "api" / "assign" / "route.ts").read_text(encoding="utf-8")
+    assert 'thickness_fold: "thickness"' in route and 'od_fold: "od"' in route
+    assert 'from("size_folds")' in route
+
+    migrations = "".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((REPO_ROOT / "supabase" / "migrations").glob("*.sql"))
+    )
+    constraint = migrations.rindex("check (kind in (")
+    stated = migrations[constraint:migrations.index("))", constraint)]
+    assert {s.strip(" '") for s in stated.split("(")[-1].split(",")} == {"thickness", "od"}
+    folds_table = migrations[migrations.index("create table public.size_folds"):]
+    folds_table = folds_table[:folds_table.index(");")]
+    assert "build_id" not in folds_table, "a fold must outlive the build it was decided on"
+    assert "primary key (kind, written)" in folds_table
+
+    views = (REPO_ROOT / "app" / "dashboard" / "[view]" / "views.ts").read_text(encoding="utf-8")
+    assert 'assignIn("thickness_fold"' in views and 'assignIn("od_fold"' in views
+
+    # The last leg, and the ordering: the run refreshes the folds before it reads any
+    # frame, because the first join already depends on them.
+    pipeline = (SKILL_ROOT / "scripts" / "refresh_dashboard.py").read_text(encoding="utf-8")
+    assert '"size_folds"' in pipeline
+    main_at = pipeline.index("def main(")
+    refresh_at = pipeline.index("refresh_size_folds()", main_at)
+    first_frame = pipeline.index('src.frame("bucketting")', main_at)
+    assert refresh_at < first_frame, "the folds are refreshed before the first frame is read"
 
 
 def test_the_assign_cell_takes_an_answer_the_master_does_not_carry_yet():

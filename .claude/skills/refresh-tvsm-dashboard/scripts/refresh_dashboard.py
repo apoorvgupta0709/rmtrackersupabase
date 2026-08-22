@@ -35,6 +35,10 @@ ASSIGNMENTS_FILE = SKILL_ROOT / "config" / "bucket_assignments.json"
 # The same arrangement for what the owner corrects on the SKU pricing tab: which
 # value-added operations a SKU really carries, and what the customer's PO prices it at.
 PRICING_OVERRIDES_FILE = SKILL_ROOT / "config" / "pricing_overrides.json"
+# And for the size-fold rules — which customer-written near-values fold onto the
+# dimension Bucketting governs. These used to be code constants; they are the owner's
+# judgement, so they live in `public.size_folds` and are edited on the mapping tab.
+SIZE_FOLDS_FILE = SKILL_ROOT / "config" / "size_folds.json"
 
 
 def load_bucket_assignments(path: Path = ASSIGNMENTS_FILE, *, refresh: bool = True) -> dict:
@@ -153,6 +157,58 @@ def load_pricing_overrides(
             f"  pricing overrides: {len(fresh['operations'])} operation sets, "
             f"{len(fresh['po_prices'])} PO prices, file updated"
         )
+    return fresh
+
+
+def load_size_folds(path: Path = SIZE_FOLDS_FILE, *, refresh: bool = True) -> dict:
+    """The owner's size-fold rules, freshest first.
+
+    Same arrangement as `load_bucket_assignments`: decided in the browser, kept in
+    `public.size_folds` which is not scoped to a build, read here database-first, and the
+    committed file rewritten so a clean clone with no credentials reproduces the same
+    build. A database that cannot be reached means today's run folds with the committed
+    set — the same set the last published build used.
+
+    Keys and values are floats at two decimals, because the lookup key is
+    `round(float(value), 2)` in `norm_thickness` and `norm_od` — the JSON file writes
+    the keys as `%g` strings only because JSON keys must be strings.
+    """
+    held = {"od": {}, "thickness": {}}
+    if path.exists():
+        stored = json.loads(path.read_text(encoding="utf-8")).get("folds", {})
+        for kind in held:
+            held[kind] = {
+                float(written): float(governed)
+                for written, governed in stored.get(kind, {}).items()
+            }
+
+    if not refresh:
+        return held
+
+    try:
+        from supabase_rest import SupabaseRest  # noqa: PLC0415 — optional at build time
+
+        client = SupabaseRest(env_file=SKILL_ROOT.parents[2] / ".env.local")
+        rows = client.select("size_folds", "select=kind,written,governed&order=kind,written")
+    except Exception as error:  # noqa: BLE001 — any failure means "use what is committed"
+        print(f"  size folds: keeping the committed set ({type(error).__name__})")
+        return held
+
+    fresh = {"od": {}, "thickness": {}}
+    for row in rows:
+        fresh[row["kind"]][float(row["written"])] = float(row["governed"])
+
+    if fresh != held:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            kind: {f"{written:g}": governed for written, governed in table.items()}
+            for kind, table in fresh.items()
+        }
+        path.write_text(
+            json.dumps({"folds": payload}, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        print(f"  size folds: {sum(len(v) for v in fresh.values())} recorded, file updated")
     return fresh
 
 
@@ -870,24 +926,21 @@ def norm_number(value, digits=4):
         return norm_text(value)
 
 
-THICKNESS_GROUPS = {
-    1.00: 1.00, 1.01: 1.00, 1.02: 1.00,
-    # 1.22 is a customer-written near-gauge, like 1.21 beside it: Bucketting governs 256
-    # buckets at 1.20 and none at 1.21 or 1.22. Its absence meant Srikam, Rajsriya and
-    # NMPL lines written at 1.22 met no bucket at all — 85,500 pieces on the August
-    # schedule reaching no row rather than joining the 1.20 they are.
-    1.20: 1.20, 1.21: 1.20, 1.22: 1.20,
-    1.62: 1.60,   # Sandhar Technology writes 1.62; Bucketting governs only 1.6
-    1.50: 1.60, 1.60: 1.60, 1.63: 1.60,
-    1.90: 2.00, 1.95: 2.00, 2.00: 2.00, 2.03: 2.00,
-    2.25: 2.25, 2.32: 2.25,
-    2.30: 2.30, 2.34: 2.30,
-    2.41: 2.50, 2.45: 2.50, 2.50: 2.50,
-    2.60: 2.60, 2.65: 2.60,
-    2.70: 2.80, 2.75: 2.80, 2.80: 2.80,
-    3.00: 3.00, 3.02: 3.00,
-    3.40: 3.50, 3.50: 3.50,
-}
+# The fold tables are the owner's rules, not the code's: kept in `public.size_folds`,
+# edited on the Missing mappings tab, and committed under `config/size_folds.json` as the
+# set the last published build used — which is what a clean clone rebuilds from. Seeded
+# here at import so `norm_thickness`, `norm_od` and the schedule readers that import this
+# module work without a database; `refresh_size_folds()` re-reads them, database first,
+# at the start of a run.
+#
+# Folding is recovering a size, not rounding it away — a pair belongs here only when the
+# written value reaches no bucket and Bucketting clearly governs it under a neighbouring
+# number. 1.22 is a customer-written near-gauge like the 1.21 beside it: Bucketting
+# governs 256 buckets at 1.20 and none at either, and its absence meant Srikam, Rajsriya
+# and NMPL lines written at 1.22 met no bucket at all — 85,500 pieces on the August
+# schedule reaching no row rather than joining the 1.20 they are.
+_size_folds = load_size_folds(refresh=False)
+THICKNESS_GROUPS = _size_folds["thickness"]
 
 
 def norm_thickness(value):
@@ -901,16 +954,23 @@ def norm_thickness(value):
 
 
 # Outside diameters customers write that name a diameter Bucketting governs under a
-# different number. The same idea as THICKNESS_GROUPS and kept as a table for the same
-# reason: the next one is a line, not a new branch. Both entries here are cases where
-# Bucketting holds one value and nothing near it — 22.23 (never 22.2) and 41.28 (never
-# 41.3) — so folding is recovering the size, not rounding it away.
-OD_GROUPS = {
-    22.20: 22.23, 22.23: 22.23,
-    28.58: 28.58, 28.60: 28.58,
-    37.90: 37.95, 37.95: 37.95,
-    41.28: 41.28, 41.30: 41.28,
-}
+# different number. The same idea as THICKNESS_GROUPS and kept in the same table: the
+# next one is a row, not a new branch. The seeded entries are cases where Bucketting
+# holds one value and nothing near it — 22.23 (never 22.2) and 41.28 (never 41.3).
+OD_GROUPS = _size_folds["od"]
+
+
+def refresh_size_folds() -> None:
+    """Re-read the owner's fold rules, database first, into the tables already in use.
+
+    The dicts are mutated in place rather than rebound: `norm_thickness` and `norm_od`
+    close over these names, and so do the schedule readers that import them.
+    """
+    fresh = load_size_folds()
+    THICKNESS_GROUPS.clear()
+    THICKNESS_GROUPS.update(fresh["thickness"])
+    OD_GROUPS.clear()
+    OD_GROUPS.update(fresh["od"])
 
 
 def norm_od(value):
@@ -1211,9 +1271,12 @@ def main(input_dir: Path, output_dir: Path, as_of: str | None = None,
     input_dir = input_dir.resolve()
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    # Read before anything else is built, because it decides what a material code means
-    # and every frame in this run joins on that. A caller may pass its own set — the
-    # tests do — and then nothing is read and nothing is written.
+    # Read before anything else is built. The fold rules decide what a written size
+    # means and the assignments decide what a material code means; every frame in this
+    # run joins on both. A caller may pass its own assignments — the tests do — and then
+    # those are neither read nor written; the folds refresh unconditionally, falling
+    # back to the committed set wherever the database cannot be reached.
+    refresh_size_folds()
     if assignments is None:
         assignments = load_bucket_assignments()
     if pricing_overrides is None:

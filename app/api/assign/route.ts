@@ -26,8 +26,23 @@ import { supabaseServer } from "@/lib/supabase/server";
 // map first, not this line.
 const SCOPES = new Set(["bucket", "megh_sku", "ctl_bucket", "oem"]);
 
+// The fold scopes write to `public.size_folds`, not to `bucket_assignments`: a fold is
+// keyed by a written size rather than a material code, and both sides of it are numbers
+// at two decimals — `norm_thickness` and `norm_od` look the written value up as
+// `round(float, 2)`, so the column type is what keeps the key exact. Same closed loop as
+// the scopes above: the pipeline reads these back through `load_size_folds`.
+const FOLDS: Record<string, "thickness" | "od"> = {
+  thickness_fold: "thickness",
+  od_fold: "od",
+};
+
 export async function POST(request: Request) {
-  let body: { scope?: string; material_code?: string; assigned_to?: string | null };
+  let body: {
+    scope?: string;
+    material_code?: string;
+    assigned_to?: string | null;
+    note?: string | null;
+  };
   try {
     body = await request.json();
   } catch {
@@ -38,7 +53,7 @@ export async function POST(request: Request) {
   const code = String(body.material_code ?? "").trim();
   const value = body.assigned_to == null ? null : String(body.assigned_to).trim() || null;
 
-  if (!SCOPES.has(scope)) {
+  if (!SCOPES.has(scope) && !(scope in FOLDS)) {
     return NextResponse.json({ error: `Unknown scope ${scope}.` }, { status: 400 });
   }
   if (!code) {
@@ -51,24 +66,50 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Sign in first." }, { status: 401 });
   }
 
-  // Clearing is a delete rather than a row holding null, so the queue reads as "nobody
-  // has decided this yet" again rather than "somebody decided nothing".
-  const { error } = value === null
-    ? await supabase.from("bucket_assignments").delete().eq("scope", scope).eq("material_code", code)
-    : await supabase.from("bucket_assignments").upsert(
-        { scope, material_code: code, assigned_to: value, assigned_by: auth.user.id,
-          assigned_at: new Date().toISOString() },
-        { onConflict: "scope,material_code" },
+  let result;
+  if (scope in FOLDS) {
+    const kind = FOLDS[scope];
+    const written = Number(code);
+    if (!Number.isFinite(written)) {
+      return NextResponse.json(
+        { error: "The written size must be a number." }, { status: 400 },
       );
+    }
+    if (value !== null && !Number.isFinite(Number(value))) {
+      return NextResponse.json(
+        { error: "The governed size must be a number." }, { status: 400 },
+      );
+    }
+    const note = body.note == null ? null : String(body.note).trim() || null;
+    result = value === null
+      ? await supabase.from("size_folds").delete().eq("kind", kind).eq("written", written)
+      : await supabase.from("size_folds").upsert(
+          { kind, written, governed: Number(value), note,
+            decided_by: auth.user.id, decided_at: new Date().toISOString() },
+          { onConflict: "kind,written" },
+        );
+  } else {
+    // Clearing is a delete rather than a row holding null, so the queue reads as "nobody
+    // has decided this yet" again rather than "somebody decided nothing".
+    result = value === null
+      ? await supabase.from("bucket_assignments").delete().eq("scope", scope).eq("material_code", code)
+      : await supabase.from("bucket_assignments").upsert(
+          { scope, material_code: code, assigned_to: value, assigned_by: auth.user.id,
+            assigned_at: new Date().toISOString() },
+          { onConflict: "scope,material_code" },
+        );
+  }
+  const { error } = result;
 
   if (error) {
     // A policy refusal comes back as an ordinary error, and reads as one to anyone who
     // is not an admin. Say which it is rather than showing a database string.
     const refused = error.code === "42501" || /row-level security/i.test(error.message);
+    const subject = scope in FOLDS ? "record a size fold" : "assign a bucket";
     return NextResponse.json(
       {
         error: refused
-          ? "Only the admin account can assign a bucket. The decision was not saved."
+          ? `Only the admin account can ${subject}. The decision was not saved.`
           : `The assignment was not saved: ${error.message}`,
       },
       { status: refused ? 403 : 500 },

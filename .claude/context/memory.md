@@ -139,6 +139,14 @@ On 5 August, after v16: empty — the owner's master governs every scheduled siz
 number and nothing near it — 22.23 never 22.2, 41.28 never 41.3, 1.2 never 1.21/1.22,
 1.6 never 1.62/1.63. Confirmed by counting buckets before adding each. Add the pair when
 a size reaches no bucket and `Bucketting` clearly governs it under a neighbouring number.
+**Since 22 Aug the fold tables are data, not code**: `public.size_folds` (38 seeded
+pairs, identity entries kept), edited on two "Master · Size folds" tables on the Missing
+mappings tab under the `thickness_fold`/`od_fold` scopes of `/api/assign`, applied at the
+next refresh, echoed to `config/size_folds.json` — which is the file **both** languages
+seed from at import, so `check_normalise.mjs` stays a proof unchanged. The pipeline
+refreshes them database-first at the top of `main()` and mutates the dicts in place; the
+migration is `20260822084116`. Adding the next 1.22 is now a row on the tab, not a code
+change. The move was proven payload-neutral by a full before/after oracle diff.
 
 **Never take tonnage from `Bucketting.kG/nos`.** The column carries two units: kilograms
 per *piece* on a cut-length row, kilograms per *metre* on a 5.6 m or 6 m one — 25.4 x 3.5
