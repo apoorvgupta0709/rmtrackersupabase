@@ -1110,8 +1110,8 @@ that the package still sits where Claude Code looks — the repo root is
   the Megh tab's notes ("too confusing", "too verbose"): a Source line reads
   `file.xlsx › sheet: columns`, and a Mapped-on line names the key plus the joining
   columns of each table — never a description of where things conceptually come from.
-  The three Megh-view tables are converted; the other tabs' lineage is still prose and
-  should be brought to the same form when touched. In the same message the owner
+  All eleven views were swept to this form on 22 Aug — every authored note and every
+  lineage block names its file, sheet and columns. In the same message the owner
   restated that Megh Steel sales maps material codes **only** through the plan key,
   never Bucketting — which the 20 Aug rule already implements and
   `test_a_megh_sku_is_reached_only_by_a_statement` locks; the only Bucketting mentions
@@ -1124,8 +1124,11 @@ that the package still sits where Claude Code looks — the repo root is
   block only where no authored note exists — an authored note stands alone with its
   severity bands — and every Megh-view column's note is self-contained:
   `file.xlsx › sheet › column` plus the mapping route that lands the figure on the
-  row. Other tabs' authored notes therefore no longer show Source/Mapped-on; make
-  each self-contained in the same form when touched.
+  row. The full sweep across all 39 tables (22 Aug) made every authored note
+  self-contained the same way — and caught two notes that were *wrong*, which is what
+  the concrete form is for: both order tables claimed their tonnage was "kg ÷ 1,000"
+  where the orders.xlsx sheets state MT directly, and the Bucketting master's note
+  still described the attribute inference retired that same day.
 - Wants outcomes first, tables for movement vs the previous day, and defects
   stated plainly with what changed and why.
 - Copy buttons are load-bearing: dispatch plan, clearance list (WhatsApp

@@ -550,60 +550,66 @@ const isCrfh = (row: Row) => String(row.bucket ?? "").toUpperCase().includes("CR
  */
 const customerLineColumns = (): Column[] => [
   ex(txt("OEM", "OEM"),
-    "From the schedule sheet's own OEM column in the RM tracker workbook — this is the "
-    + "schedule's grouping, not the OEM key's. The sales beside it are classified "
-    + "through the OEM key separately."),
+    "rm_tracker_model.xlsx › Schedule July › OEM — the schedule's own grouping, not "
+    + "the OEM key's. The sales beside it are classified through the OEM key "
+    + "separately."),
   ex(txt("customer_display", "Customer", true),
-    "The schedule sheet's Helper Customer. One display name can stand for a set of SAP "
-    + "customer codes (Customer Code Set), and the dispatch column sums sales across "
-    + "every code in the set."),
+    "rm_tracker_model.xlsx › Schedule July › Helper Customer. One display name can "
+    + "stand for a set of SAP customer codes, and the dispatch column sums sales "
+    + "across every code in the set."),
   ex(txt("ctl_bucket", "SKU / CTL bucket", true),
-    "The schedule sheet's CTL Bucket — the governed bucket with the finished length "
-    + "appended. Where the sheet leaves it blank but names a MATERIAL NO, it is "
-    + "recovered through Bucketting; the sheet's own value always wins."),
-  ex(txt("Plant", "Plant"), "The schedule sheet's Supply Plant, as written."),
+    "rm_tracker_model.xlsx › Schedule July › CTL Bucket — the governed bucket with "
+    + "the finished length appended. Where the sheet leaves it blank but names a "
+    + "MATERIAL NO, it is recovered through Bucketting; the sheet's own value always "
+    + "wins."),
+  ex(txt("Plant", "Plant"), "rm_tracker_model.xlsx › Schedule July › Plant, as written."),
   ex(cnt("schedule_qty", "Schedule Qty"),
-    "SCHEDULE in nos from the month's schedule sheet, summed over the group. Only rows "
-    + "with a schedule above zero are read."),
+    "rm_tracker_model.xlsx › Schedule July › SCHEDULE in nos, summed over the group. "
+    + "Only rows with a schedule above zero are read."),
   ex(cnt("sales_qty", "Dispatch Qty"),
-    "This month's lines from sales.xlsx for this customer's code set and this CTL "
-    + "bucket: qty in no summed where the schedule is in NOS, metres where it is in M. "
-    + "A sales line finds its bucket by description first, material code second — the "
-    + "dump zeroes the last digit of every material number, so codes alone cannot be "
-    + "trusted."),
+    "sales.xlsx › Sheet1 › qty in no where the schedule is in NOS, Domain for "
+    + "z_qty_meter where it is in M — this month's lines for this customer's code set "
+    + "and this CTL bucket. A sales line finds its bucket by description first, "
+    + "material code second — the dump zeroes the last digit of every material "
+    + "number, so codes alone cannot be trusted."),
   ex(cnt("balance_qty", "Balance Qty"), "Schedule Qty − Dispatch Qty."),
   ex(mt("schedule_mt", "Schedule MT"),
-    "The sheet's SCHEDULE IN MT where present; otherwise computed from the geometry: "
-    + "π × (OD − thickness) × thickness × 7.85 / 1000 kg per metre, × length × pieces."),
+    "rm_tracker_model.xlsx › Schedule July › SCHEDULE IN MT where present; otherwise "
+    + "computed from the geometry: π × (OD − thickness) × thickness × 7.85 / 1000 kg "
+    + "per metre, × length × pieces."),
   ex(mt("sales_mt", "Dispatch MT"),
-    "The same sales.xlsx lines' Quantity summed ÷ 1,000 — the dump carries kilograms."),
+    "The same sales.xlsx › Sheet1 lines' Quantity summed ÷ 1,000 — the dump carries "
+    + "kilograms."),
   ex(mt("balance_mt", "Balance MT"),
     "Schedule MT − Dispatch MT. Negative means over-dispatch; it is shown, not "
     + "zeroed."),
   drill(
     ex({ field: "ctl_stock_pool_nos", label: "CTL stock NOS", kind: "nos" },
-      "Two sources and no others: stock.xlsx PLANT STOCKS pieces at plant 0789 marked "
-      + "CTL, plus rfd_4731.xlsx RFD Qty. mapped to the CTL bucket through the "
-      + "master's CTL Code. Plant-stock 4731 rows are deliberately not added on top of "
-      + "RFD. A pool shared between customers drawing on it — do not sum down the "
-      + "column. The breakup lists the lots."),
+      "Two sources and no others: stock.xlsx › PLANT STOCKS › NOS at plant 0789 "
+      + "marked CTL, plus rfd_4731.xlsx › Sheet5 › RFD Qty. mapped to the CTL bucket "
+      + "through the master's CTL Code. Plant-stock 4731 rows are deliberately not "
+      + "added on top of RFD. A pool shared between customers drawing on it — do not "
+      + "sum down the column. The breakup lists the lots."),
     "{ctl_stock_detail_key}",
     "{customer_display} · {ctl_bucket} · CTL stock",
   ),
   drill(
     ex(pool("ll_stock_pool_mt", "LL stock MT"),
-      "Long-length cover for the row's bucket: stock.xlsx plant stock marked LL for "
-      + "this pool's OEM, plus mapped WIP from wip.xlsx, plus TRANSIT STOCK rows "
-      + "(shared at bucket level). Megh's TVS-A code counts into the TVS pool. A "
-      + "shared pool — do not sum down the column. The breakup names each source."),
+      "Long-length cover for the row's bucket: stock.xlsx › PLANT STOCKS › MT on "
+      + "rows marked LL for this pool's OEM, plus mapped WIP from wip.xlsx › Total "
+      + "Stock, plus the PLANT STOCKS rows held as TRANSIT STOCK (shared at bucket "
+      + "level). Megh's TVS-A code counts into the TVS pool. A shared pool — do not "
+      + "sum down the column. The breakup names each source."),
     "{ll_stock_detail_key}",
     "{customer_display} · {bucket} · LL stock",
   ),
   drill(
     ex({ field: "history_avg_month_mt", label: "Avg month sales", kind: "mt" },
-      "From the accumulated sales ledger: this customer's codes × this SKU, summed per "
-      + "month, averaged over the months that actually moved — a month with no sale "
-      + "does not drag the average down. The breakup shows every month."),
+      "The sales ledger — sales.xlsx › Sheet1 and the archived extracts, "
+      + "deduplicated on billing document + item: this customer's codes × this SKU, "
+      + "Quantity summed per month ÷ 1,000, averaged over the months that actually "
+      + "moved — a month with no sale does not drag the average down. The breakup "
+      + "shows every month."),
     "{history_detail_key}",
     "{customer_display} · {ctl_bucket} · sales month by month",
   ),
@@ -670,10 +676,11 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "customer_summary",
         lineage: {
-          source: "the RM tracker master's Schedule sheet, the daily sales dump, stock.xlsx "
-              + "(PLANT STOCKS) and wip ystockn.xlsx — one row per customer.",
-          key: "customer, as the schedule names it; every quantity reached its row through "
-              + "material code → governed bucket (Bucketting, owner assignments overriding).",
+          source: "rm_tracker_model.xlsx › Schedule July: Helper Customer, OEM, SCHEDULE IN "
+              + "MT, SCHEDULE in nos. sales.xlsx › Sheet1: Quantity, qty in no — one row "
+              + "per customer.",
+          key: "Schedule July › Helper Customer; sales join on the customer's SAP codes and "
+              + "material code → Bucketting › Bucket (owner assignments overriding).",
         },
         section: "customer_summary",
         title: "By customer",
@@ -708,22 +715,25 @@ export const VIEWS: Record<string, ViewSpec> = {
         },
         columns: [
           ex(txt("customer_display", "Customer", true),
-            "The schedule sheet's Helper Customer — the tracker's own grouping of SAP "
-            + "codes."),
-          ex(txt("OEM", "OEM"), "The schedule sheet's OEM column for the customer's lines."),
+            "rm_tracker_model.xlsx › Schedule July › Helper Customer — the tracker's "
+            + "own grouping of SAP codes."),
+          ex(txt("OEM", "OEM"),
+            "rm_tracker_model.xlsx › Schedule July › OEM, off the customer's lines."),
           ex(cnt("schedule_lines", "Lines"),
-            "How many schedule lines the customer has this month."),
+            "How many Schedule July lines the customer has this month."),
           ex(mt("schedule_mt", "Schedule MT"),
-            "The customer's lines' Schedule MT summed — the sheet's own figure, or "
-            + "geometry × pieces where the sheet leaves it blank."),
+            "rm_tracker_model.xlsx › Schedule July › SCHEDULE IN MT summed over the "
+            + "customer's lines — the sheet's own figure, or geometry × pieces where "
+            + "the sheet leaves it blank."),
           ex(cnt("schedule_qty", "Schedule pcs"),
-            "Pieces, summed over the customer's NOS-scheduled lines only — twenty "
-            + "lines are scheduled in metres, and a metre added to a piece means "
-            + "nothing."),
+            "rm_tracker_model.xlsx › Schedule July › SCHEDULE in nos, summed over the "
+            + "customer's NOS-scheduled lines only — twenty lines are scheduled in "
+            + "metres, and a metre added to a piece means nothing."),
           ex(mt("sales_mt", "Dispatch MT"),
-            "This month's sales.xlsx lines for the customer's code set, Quantity "
-            + "÷ 1,000, summed over its lines."),
-          ex(cnt("sales_qty", "Dispatch pcs"), "The same lines' qty in no, NOS lines only."),
+            "sales.xlsx › Sheet1 › Quantity ÷ 1,000, this month's lines for the "
+            + "customer's code set, summed over its lines."),
+          ex(cnt("sales_qty", "Dispatch pcs"),
+            "The same sales.xlsx lines' qty in no, NOS lines only."),
           ex(mt("balance_mt", "Balance MT"), "Schedule MT − Dispatch MT."),
           ex(cnt("balance_qty", "Balance pcs"), "Schedule pcs − Dispatch pcs."),
           ex(cnt("unresolved_sales_lines", "Unmapped sales lines"),
@@ -734,10 +744,12 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "customer_lines",
         lineage: {
-          source: "one row per line of the RM tracker master's Schedule sheet; sales from the "
-              + "daily sales dump; CTL and LL pools from stock.xlsx and wip ystockn.xlsx.",
-          key: "customer × material code; quantities join on material code → governed "
-              + "bucket, and the CTL pool on the bucket with the planned cut length appended.",
+          source: "rm_tracker_model.xlsx › Schedule July, one row per line. sales.xlsx › "
+              + "Sheet1: Quantity, qty in no. stock.xlsx › PLANT STOCKS: MT, NOS. "
+              + "wip.xlsx: Total Stock. rfd_4731.xlsx › Sheet5: RFD Qty.",
+          key: "Schedule July › Helper Customer × CTL Bucket; sales join on the customer's "
+              + "codes and material code → Bucketting › Bucket, the CTL pool on the "
+              + "bucket with the cut length appended.",
         },
         section: "customer_lines",
         title: "Schedule lines",
@@ -774,10 +786,10 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "customer_sku_history",
         lineage: {
-          source: "every sales extract the trend window holds — the daily dump plus the "
-              + "archived monthly and quarterly files.",
-          key: "the customer's own SAP codes (never the name), then material code → governed "
-              + "bucket per SKU; months off the billing date.",
+          source: "the sales ledger — sales.xlsx › Sheet1 plus the archived extracts "
+              + "(sales_jul, sales_q4, sales_q1): Quantity, qty in no, BILLING DATE.",
+          key: "the customer's own SAP codes (CUSTOMER CD — never the name), then material "
+              + "code → Bucketting per SKU; months off BILLING DATE.",
         },
         section: "trend_customer_sku_history",
         title: "Sales history — every SKU this customer has bought",
@@ -1128,11 +1140,14 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "ll_tracker",
         lineage: {
-          source: "demand from the RM tracker master's Schedule sheet; stock from stock.xlsx "
-              + "(PLANT STOCKS), wip ystockn.xlsx and the TVSM sheet; billing from the sales "
-              + "ledger; orders from orders.xlsx and signoff.xlsx.",
-          key: "one row per governed long-length bucket; every quantity reached it through "
-              + "material code → Bucketting → bucket, owner assignments overriding.",
+          source: "rm_tracker_model.xlsx › Schedule July: SCHEDULE IN MT. "
+              + "rm_tracker_tvsm.xlsx › TVSM: VSM Requirement, VSM Sales, VSM Stock. "
+              + "sales.xlsx › Sheet1: Quantity. stock.xlsx › PLANT STOCKS: MT. wip.xlsx: "
+              + "Total Stock. orders.xlsx › jsr, hk_so, hk_str. signoff.xlsx › jsr, "
+              + "hosur, khopoli.",
+          key: "one row per governed long-length bucket (Bucketting › Bucket); quantities "
+              + "join on material code → Bucketting (owner assignments overriding); the "
+              + "TVSM sheet joins on its own key column.",
         },
         section: "ll_tracker",
         title: "Coverage by bucket",
@@ -1142,8 +1157,9 @@ export const VIEWS: Record<string, ViewSpec> = {
           + "to Total sales beside it.",
         columns: [
           ex(txt("bucket", "Bucket", true),
-            "The governed bucket, from Bucketting: OD-ID-thickness-grade-endcondition. "
-            + "One row per long-length bucket any TVS-scope customer schedules."),
+            "rm_tracker_model.xlsx › Bucketting › Bucket: OD-ID-thickness-grade-"
+            + "endcondition. One row per long-length bucket any TVS-scope customer "
+            + "schedules."),
           ex(sev(txt("risk", "Risk"), { words: RISK_WORDS }),
             "The pipeline's verdict on Cover days: below 15 is Critical, below 30 Low, "
             + "below 45 Watch, 45 and past it Adequate; a bucket with no schedule reads "
@@ -1151,16 +1167,18 @@ export const VIEWS: Record<string, ViewSpec> = {
             + "word, so the numbers and the verdict can never disagree."),
           drill(
             ex(mt("total_schedule_mt", "Schedule MT"),
-              "This month's schedule for the bucket, summed over the TVS-scope customers "
-              + "scheduling it — TSL's own schedule sheet plus the TVSM tracker's "
-              + "requirement. The breakup behind the figure names each contributor."),
+              "rm_tracker_model.xlsx › Schedule July › SCHEDULE IN MT summed over the "
+              + "TVS-scope customers scheduling this bucket, plus rm_tracker_tvsm.xlsx "
+              + "› TVSM › VSM Requirement ÷ 1,000. The breakup names each "
+              + "contributor."),
             "LLSCHEDULE|{bucket}",
             "{bucket} · total schedule breakup",
           ),
           drill(
             ex(mt("total_sales_mt", "Sales MT"),
-              "Dispatched against that schedule this month: TSL billing plus the TVSM "
-              + "tracker's own sales figure. The breakup names both."),
+              "Dispatched against that schedule this month: sales.xlsx › Sheet1 › "
+              + "Quantity ÷ 1,000 on the bucket, plus rm_tracker_tvsm.xlsx › TVSM › "
+              + "VSM Sales ÷ 1,000. The breakup names both."),
             "LLSALES|{bucket}",
             "{bucket} · total sales breakup",
           ),
@@ -1185,10 +1203,11 @@ export const VIEWS: Record<string, ViewSpec> = {
           // short against another's.
           drill(
             ex(sev(mt("available_ll_stock_mt", "LL stock MT"), { from: "risk", words: RISK_WORDS }),
-              "One pool: plant stock at long length, plus WIP, plus material in transit, "
-              + "plus the TVSM tracker's own stock — the breakup names all four sources. "
-              + "Stock resolves to the bucket through Bucketting; unresolved WIP is "
-              + "excluded and reported on Missing mappings instead."),
+              "One pool: stock.xlsx › PLANT STOCKS › MT at long length, plus wip.xlsx "
+              + "› Total Stock, plus material in transit, plus rm_tracker_tvsm.xlsx › "
+              + "TVSM › VSM Stock ÷ 1,000 — the breakup names all four sources. A code "
+              + "resolves to the bucket through Bucketting; unresolved WIP is excluded "
+              + "and reported on Missing mappings instead."),
             "{stock_detail_key}",
             "{bucket} · consolidated LL stock",
           ),
@@ -1211,24 +1230,27 @@ export const VIEWS: Record<string, ViewSpec> = {
             "LLGAP45|{bucket}", "{bucket} · gap to 45 days"),
           drill(
             ex(mt("order_logged_mt", "Ordered MT"),
-              "Open order lines on this bucket from the order-book sheets, summed. The "
-              + "breakup lists them plant by plant."),
+              "Open order lines on this bucket: orders.xlsx › jsr › Bal to Desp, "
+              + "hk_so › BAL FOR PROD/ROLL(MT), hk_str › Actual BTP (MT) — live lines "
+              + "only, summed. The breakup lists them plant by plant."),
             "{order_detail_key}",
             "{bucket} · orders logged, plant by plant",
           ),
           drill(
             ex(mt("signoff_mt", "Signed MT"),
-              "Tonnage signed off against this bucket on the per-plant sign-off sheets. "
-              + "The breakup lists the lines."),
+              "signoff.xlsx › jsr (MATL_NO, Bal to Desp where Sign Off is Y), hosur "
+              + "(Material, SIGN OFF) and khopoli (Material, Sign Off) — the signed "
+              + "tonnage on this bucket's codes. The breakup lists the lines."),
             "{signoff_detail_key}",
             "{bucket} · signed off",
             "signoff_mt",
           ),
           drill(
             ex(mt("last_month_sales_mt", "Last month MT"),
-              "TSL's own billing for this bucket last month, off the sales ledger. It "
-              + "does not carry Megh's onward dispatch, so it is not meant to tie to "
-              + "Total sales. The breakup shows the months."),
+              "TSL's own billing for this bucket last month — the sales ledger "
+              + "(sales.xlsx › Sheet1 › Quantity ÷ 1,000, ancillaries plus Megh "
+              + "943209). It does not carry Megh's onward dispatch, so it is not "
+              + "meant to tie to Total sales. The breakup shows the months."),
             "{history_detail_key}",
             "{bucket} · billed month by month",
           ),
@@ -1251,11 +1273,16 @@ export const VIEWS: Record<string, ViewSpec> = {
         columns: [
           ex(txt("origin", "Origin"), "The despatching origin the order book files the sheet under."),
           ex(txt("sheet", "Sheet"), "The orders.xlsx sheet the lines came from (jsr, hk_so, hk_str)."),
-          ex(txt("basis", "Basis", true), "What the sheet's quantity column measures, as the sheet states it."),
+          ex(txt("basis", "Basis", true),
+            "What the sheet's quantity column measures: jsr › Bal to Desp (balance to "
+            + "despatch), hk_so › BAL FOR PROD/ROLL(MT) (balance for production), "
+            + "hk_str › Actual BTP (MT) (booked to production). Three stages of the "
+            + "same commitment — never added as one measure."),
           ex(cnt("lines", "Live lines"),
             "Order lines counted as live demand — the sheet's lines less the excluded "
             + "ones."),
-          ex(mt("order_mt", "Order MT"), "The live lines' tonnage, kg ÷ 1,000."),
+          ex(mt("order_mt", "Order MT"),
+            "The live lines' tonnage — the sheet's own quantity column, already in MT."),
           ex(cnt("lines_in_sheet", "Lines in sheet"), "Everything the sheet carries, before exclusion."),
           ex(cnt("excluded_lines", "Excluded lines"),
             "Lines marked c in the sheet's remarks column — not live demand, listed so "
@@ -1289,15 +1316,22 @@ export const VIEWS: Record<string, ViewSpec> = {
           ex(txt("material_code", "Material code"), "As the sheet writes it."),
           ex(txt("description", "Description", true), "As the sheet writes it."),
           ex(txt("bucket", "Bucket", true),
-            "Resolved through Bucketting — code first, description second."),
+            "Resolved through rm_tracker_model.xlsx › Bucketting — code first, "
+            + "description second; hk_str carries no code, so its bucket comes from "
+            + "the description alone."),
           ex({ field: "length_m", label: "Length m", kind: "rate" }, "The governed length in metres."),
-          ex(txt("basis", "Basis", true), "What the sheet's quantity column measures."),
+          ex(txt("basis", "Basis", true),
+            "What the sheet's quantity column measures: jsr › Bal to Desp, hk_so › "
+            + "BAL FOR PROD/ROLL(MT), hk_str › Actual BTP (MT)."),
           ex(txt("remark", "Remark"), "The sheet's own remarks column, as written."),
           ex(bool("excluded", "Excluded"),
             "Yes where the remark is c — not live demand, flagged rather than dropped "
             + "so the sheet still reconciles."),
-          ex(days("age_days", "Age days"), "As-of date − the line's date, on the sheet's age basis."),
-          ex(mt("order_mt", "Order MT"), "The line's quantity, kg ÷ 1,000."),
+          ex(days("age_days", "Age days"),
+            "jsr › AGE and hk_so › Ageing Days as stated; hk_str states only STR "
+            + "Date, so its age is the as-of date less that date."),
+          ex(mt("order_mt", "Order MT"),
+            "The line's quantity — the sheet's own column, already in MT."),
         ],
       },
     ],
@@ -1416,7 +1450,7 @@ export const VIEWS: Record<string, ViewSpec> = {
         qty: "stock_mt",
         extras: [
           ex(txt("length_type", "Length"),
-            "LL or CTL off the stock sheet's own CTL/LL column."),
+            "stock.xlsx › PLANT STOCKS › CTL/LL, as the sheet marks the row."),
           ex(cnt("batches", "Batches"), "How many batches the unmapped tonnage stands in."),
         ],
         assign: { scope: "bucket", label: "Assign bucket" },
@@ -1424,7 +1458,7 @@ export const VIEWS: Record<string, ViewSpec> = {
       queue({
         key: "wip_unmapped",
         lineage: {
-          source: "wip ystockn.xlsx rows whose code reached no governed bucket.",
+          source: "wip.xlsx rows whose code reached no governed bucket.",
           key: "material code.",
         },
         section: "wip_unmapped",
@@ -1583,30 +1617,28 @@ export const VIEWS: Record<string, ViewSpec> = {
         },
         title: "Master · Bucketting: material code to governed bucket",
         note:
-          "What Bucketting governs by hand. The pipeline resolves far more codes than this "
-          + "by matching physical attributes against these rows, so a code absent here is "
-          + "not necessarily unmapped — it is unmapped *directly*, and the bucket it "
-          + "resolves to is only as right as the row it was learned from.",
+          "What Bucketting governs by hand. A code resolves only off a row here or an "
+          + "owner assignment — the attribute inference that used to fill the gaps is "
+          + "gone, so a code absent from both is unmapped and queued, never guessed.",
         master: "bucketting" as const,
         unmapped: ["bucket", "__assign_bucket"],
         columns: [
           ex(txt("material_code", "Material code"),
-            "The Bucketting sheet's own Material Codes column, read live from the "
+            "rm_tracker_model.xlsx › Bucketting › Material Codes, read live from the "
             + "accumulated master — not from the build, so a row added this morning is "
             + "already here."),
           ex(txt("bucket", "Governed bucket", true),
-            "The bucket this sheet states for the code, shaped OD-ID-thickness-grade-"
-            + "endcondition. This is the statement the whole dashboard is governed by: "
-            + "TVSM ancillaries sales, stock, WIP and the schedule all classify through "
-            + "it, and the pipeline also learns from these rows to resolve codes with "
-            + "identical physical attributes that the sheet does not name."),
+            "rm_tracker_model.xlsx › Bucketting › Bucket, shaped OD-ID-thickness-"
+            + "grade-endcondition. This is the statement the whole dashboard is "
+            + "governed by: TVSM ancillaries sales, stock, WIP and the schedule all "
+            + "classify through it."),
           ex(txt("ctl_bucket", "CTL bucket", true),
-            "The sheet's CTL Bucket column: the bucket with the cut length appended. "
-            + "Read only by the RFD 4731 reconciliation, which resolves through this "
-            + "column and never through the governed bucket."),
+            "rm_tracker_model.xlsx › Bucketting › CTL Bucket: the bucket with the cut "
+            + "length appended. Read only by the RFD 4731 reconciliation, which "
+            + "resolves through this column and never through the governed bucket."),
           ex(txt("ll_or_ctl", "LL or CTL"),
-            "As the sheet states it: whether the code is a long-length or a cut-to-"
-            + "length material."),
+            "As the Bucketting sheet states it: whether the code is a long-length or "
+            + "a cut-to-length material."),
           assignIn("bucket", "Reassign bucket", "material_code", "buckets"),
         ],
       },
@@ -1628,17 +1660,20 @@ export const VIEWS: Record<string, ViewSpec> = {
         unmapped: ["oem", "__assign_oem"],
         columns: [
           ex(txt("customer", "Customer", true),
-            "The OEM key's own Customer column, read live from the accumulated master. "
-            + "Sales rows join to it by customer *name*, normalised on both sides — "
-            + "trimmed, uppercased — never by customer code."),
+            "rm_tracker_model.xlsx › OEM_key_1_rev codes › Customer, read live from "
+            + "the accumulated master. Sales rows join to it by customer *name*, "
+            + "normalised on both sides — trimmed, uppercased — never by customer "
+            + "code."),
           ex(txt("oem", "OEM"),
-            "The OEM this customer's sales are classified under. This single mapping "
-            + "feeds the sales frame, the schedule, stock, receivables, the code "
-            + "repository and the trend — and the LL tracker's TVS scope is every "
-            + "customer this column says TVS for. One exception overrides it: a material "
-            + "group ending BOT, COR or AHT is classified Boiler regardless."),
+            "rm_tracker_model.xlsx › OEM_key_1_rev codes › OEM — what this customer's "
+            + "sales are classified under. This single mapping feeds the sales frame, "
+            + "the schedule, stock, receivables, the code repository and the trend — "
+            + "and the LL tracker's TVS scope is every customer this column says TVS "
+            + "for. One exception overrides it: a sales line whose MATERIAL GROUP ends "
+            + "BOT, COR or AHT is classified Boiler regardless."),
           ex(txt("cam", "CAM"),
-            "As the sheet states it. Not read by any calculation; carried for reference."),
+            "As the OEM key sheet states it. Not read by any calculation; carried for "
+            + "reference."),
           // Writable since 19 August, and not before: the box exists because
           // `refresh_dashboard.py` now applies an `oem` assignment over `oem_map` where
           // that map is built. It was drawn once without that and withdrawn the same
@@ -1649,8 +1684,9 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "length_key",
         lineage: {
-          source: "the vsm stock plan's mapping, from the published build.",
-          key: "plan SKU (length key); the codes listed are the mapping itself.",
+          source: "rm_tracker_tvsm.xlsx › vsm stock: length key, key, the 056/0789/0788 "
+              + "code columns — from the published build.",
+          key: "vsm stock › length key; the codes listed are the mapping itself.",
         },
         title: "Master · vsm stock: material code to plan SKU",
         note:
@@ -1664,28 +1700,29 @@ export const VIEWS: Record<string, ViewSpec> = {
         unmapped: ["material_codes", "__assign_megh_sku"],
         columns: [
           ex(txt("vsm_key", "Plan SKU (length key)", true),
-            "The plan's own length key column, taken as written — the pipeline derives "
-            + "one from the plan's key and Length only for a row that states none. A "
-            + "Megh- prefix marks a size supplied onward to RE or HMSIL rather than to "
-            + "TVSM."),
+            "rm_tracker_tvsm.xlsx › vsm stock › length key, taken as written — the "
+            + "pipeline derives one from the plan's key and Length only for a row "
+            + "that states none. A Megh- prefix marks a size supplied onward to RE or "
+            + "HMSIL rather than to TVSM."),
           ex(txt("bucket", "Governed bucket", true),
-            "The plan's key column where the size is TVSM-bound; empty for a Megh- "
-            + "prefixed size, which has no governed bucket by design. Where both this "
-            + "plan and Bucketting name the same material code, the two must agree."),
+            "rm_tracker_tvsm.xlsx › vsm stock › key where the size is TVSM-bound; "
+            + "empty for a Megh- prefixed size, which has no governed bucket by "
+            + "design. Where both this plan and Bucketting name the same material "
+            + "code, the two must agree."),
           ex(txt("material_codes", "Material codes", true),
-            "The codes the plan's plant columns (056, 0789, 0788) name for this SKU. "
-            + "This list *is* the mapping: a Megh purchase or stock line lands on this "
-            + "SKU only if its code is here or you assign it on this tab. Nothing is "
-            + "inferred."),
+            "rm_tracker_tvsm.xlsx › vsm stock › 056, 0789 and 0788 — the codes the "
+            + "plan names for this SKU. This list *is* the mapping: a Megh purchase "
+            + "or stock line lands on this SKU only if its code is here or you assign "
+            + "it on this tab. Nothing is inferred."),
           ex(txt("plants", "Plants"),
-            "Which of the plan's plant columns named a code for this SKU."),
+            "Which of the 056/0789/0788 columns named a code for this SKU."),
           ex(txt("end_oem", "Ends at"),
             "Where the size finally goes. TVSM for a plain key; for a Megh- size, the "
             + "OEM whose conversion-agent code (943210 HMSIL, 943211 RE) actually bought "
             + "it — or both names where no code has bought it yet."),
           ex(txt("cut_type", "Cut type"),
-            "The plan's FC/NFC column where it states one — FC is fin cut — and the "
-            + "bucket's end condition only where it does not."),
+            "rm_tracker_tvsm.xlsx › vsm stock › FC/NFC where it states one — FC is "
+            + "fin cut — and the bucket's end condition only where it does not."),
           assignIn("megh_sku", "Reassign plan SKU", "vsm_key", "megh_skus"),
         ],
       },
@@ -1773,9 +1810,11 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "sales_summary",
         lineage: {
-          source: "the daily sales dump, with Megh's line from the TVSM sheet — the sheet's own "
+          source: "sales.xlsx › Sheet1: Quantity, qty in no, Domain for z_qty_meter, "
+              + "MATERIAL GROUP; rm_tracker_tvsm.xlsx › TVSM: VSM Sales — the sheet's own "
               + "grand-total row dropped at the read.",
-          key: "customer name → OEM through the OEM key; one row per OEM.",
+          key: "sales › CUSTOMER NAME → rm_tracker_model.xlsx › OEM_key_1_rev codes › OEM; "
+              + "one row per OEM.",
         },
         section: "sales_summary",
         title: "By OEM",
@@ -1785,19 +1824,20 @@ export const VIEWS: Record<string, ViewSpec> = {
           + "to Boiler.",
         columns: [
           ex(txt("OEM", "OEM"),
-            "The group a line lands in, decided in order: a material group ending BOT, "
-            + "COR or AHT is Boiler regardless of customer; a Megh code routes to the "
-            + "OEM it converts for (943209 TVS, 943210 HMSIL, 943211 RE, 943213 Rane); "
-            + "otherwise the customer name looked up in the OEM key."),
+            "The group a line lands in, decided in order: sales.xlsx › MATERIAL GROUP "
+            + "ending BOT, COR or AHT is Boiler regardless of customer; a Megh code "
+            + "routes to the OEM it converts for (943209 TVS, 943210 HMSIL, 943211 "
+            + "RE, 943213 Rane); otherwise sales › CUSTOMER NAME looked up in "
+            + "rm_tracker_model.xlsx › OEM_key_1_rev codes."),
           drill(
             ex(mt("sales_mt", "Sales MT"),
-              "This month's sales.xlsx lines in the group, Quantity summed ÷ 1,000. "
-              + "The breakup splits it customer by customer."),
+              "sales.xlsx › Sheet1 › Quantity summed ÷ 1,000, this month's lines in "
+              + "the group. The breakup splits it customer by customer."),
             "{detail_key}", "{OEM} · sales by customer"),
           ex(nos("sales_nos", "Sales nos"),
-            "The same lines' qty in no, summed."),
+            "The same sales.xlsx lines' qty in no, summed."),
           ex({ field: "sales_m", label: "Sales m", kind: "mt", total: true },
-            "The same lines' metres column (Domain for z_qty_meter), summed."),
+            "The same sales.xlsx lines' Domain for z_qty_meter (metres), summed."),
           ex(cntNoTotal("customers", "Customers"),
             "Distinct customer names within the group. Not totalled: one customer can "
             + "appear under two groups when its material group routes a line to "
@@ -1847,9 +1887,11 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "trend_buckets",
         lineage: {
-          source: "the daily sales dump plus the archived extracts (sales_jul, sales_q4, "
-              + "sales_q1) — each month taken from exactly one source.",
-          key: "material code → governed bucket; months off the billing date, read as UTC.",
+          source: "the sales ledger — sales.xlsx › Sheet1 plus the archived extracts "
+              + "(sales_jul, sales_q4, sales_q1), deduplicated on Billing Document Number "
+              + "+ Billing Item: Quantity, qty in no, BILLING DATE.",
+          key: "material code → Bucketting › Bucket (description through zmat.xlsx "
+              + "first); months off BILLING DATE.",
         },
         section: "trend_buckets",
         title: "Bucket by month",
@@ -1860,9 +1902,9 @@ export const VIEWS: Record<string, ViewSpec> = {
         columns: [
           ex(txt("bucket", "Bucket", true),
             "The governed bucket each ledger line resolved to — description through "
-            + "zmat first, material code second, both against Bucketting. Lines "
-            + "resolving to none pool into the figure on the strip above and cannot "
-            + "appear here."),
+            + "zmat.xlsx › MATERIAL DESCRIPTION first, material code second, both "
+            + "against rm_tracker_model.xlsx › Bucketting. Lines resolving to none "
+            + "pool into the figure on the strip above and cannot appear here."),
           ...monthColumns(ctx.months, ctx.unit, (m) => ({
             key: `TRENDBUCKET|{bucket}|${m}`,
             title: `{bucket} · ${monthLabel(m)} · split by party`,
@@ -1879,10 +1921,11 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "trend_customer_skus",
         lineage: {
-          source: "the daily sales dump plus the archived extracts — the same window as the "
-              + "buckets beside it.",
-          key: "customer group (the SAP ship-to spellings grouped) → the customer's codes, "
-              + "then material code → bucket per SKU.",
+          source: "the sales ledger — sales.xlsx › Sheet1 plus the archived extracts: "
+              + "Quantity, qty in no, CUSTOMER CD, CUSTOMER NAME — the same window as "
+              + "the buckets beside it.",
+          key: "customer group (the SAP ship-to spellings grouped) → the customer's codes "
+              + "(CUSTOMER CD), then material code → Bucketting per SKU.",
         },
         section: "trend_customer_skus",
         title: "SKU trend by customer",
@@ -1910,8 +1953,8 @@ export const VIEWS: Record<string, ViewSpec> = {
           ex(txt("length_type", "Length"),
             "LL where the governed length is 4 m or more, CTL below it."),
           ex({ field: "length_m", label: "Length m", kind: "rate" },
-            "The governed length: Bucketting's where it states one, zmat's length "
-            + "attribute otherwise."),
+            "The governed length: rm_tracker_model.xlsx › Bucketting's where it "
+            + "states one, zmat.xlsx's length attribute otherwise."),
           ex(txt("segment", "Segment"),
             "TVSM ancillaries where the OEM key says TVS; Megh Steel 943209 where the "
             + "line is billed to that code. Never merged."),
@@ -1937,10 +1980,10 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "trend_customer_sku_history",
         lineage: {
-          source: "every sales extract the trend window holds — the daily dump plus the "
-              + "archived monthly and quarterly files.",
-          key: "the customer's own SAP codes, then bucket per SKU; the totals row closes on "
-              + "an average month, never a window total.",
+          source: "the sales ledger — sales.xlsx › Sheet1 plus the archived extracts "
+              + "(sales_jul, sales_q4, sales_q1): Quantity, qty in no, BILLING DATE.",
+          key: "the customer's own SAP codes (CUSTOMER CD), then bucket per SKU; the "
+              + "totals row closes on an average month, never a window total.",
         },
         section: "trend_customer_sku_history",
         title: "SKU history — average month",
@@ -1984,9 +2027,10 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "trend_plants",
         lineage: {
-          source: "the daily sales dump plus the archived extracts — the same window as the "
-              + "buckets above.",
-          key: "the invoice line's own plant; the unit toggle picks tonnes or pieces.",
+          source: "the sales ledger — sales.xlsx › Sheet1 plus the archived extracts: "
+              + "Quantity, qty in no, DESP PLANT, BILLING DATE.",
+          key: "the invoice line's own DESP PLANT; the unit toggle picks tonnes or "
+              + "pieces.",
         },
         section: "trend_plants",
         title: "Despatch plant summary",
@@ -1996,21 +2040,21 @@ export const VIEWS: Record<string, ViewSpec> = {
           + "chamferring are properties of the SKU as scheduled, so a material never "
           + "scheduled this month carries neither rather than a guess.",
         columns: [
-          ex(txt("plant", "Plant"), "The ledger line's despatch plant, as billed."),
-          ex(txt("month", "Month"), "The billing month, off the line's BILLING DATE."),
+          ex(txt("plant", "Plant"), "sales.xlsx › Sheet1 › DESP PLANT, as billed."),
+          ex(txt("month", "Month"), "The billing month, off sales.xlsx › BILLING DATE."),
           ex(txt("length_type", "Length"),
             "LL where the line's governed length is 4 m or more, CTL below it."),
           ex(bool("angle_cut", "Angle cut"),
-            "Whether the schedule sheet flags the material angle-cut. A property of "
-            + "the SKU as scheduled — a material never scheduled this month carries "
-            + "no flag rather than a guess."),
+            "rm_tracker_model.xlsx › Schedule July › Angle Cut, matched on the "
+            + "material code. A property of the SKU as scheduled — a material never "
+            + "scheduled this month carries no flag rather than a guess."),
           ex(bool("chamfer", "Chamfer"),
-            "Whether the schedule sheet flags the material chamferred, on the same "
+            "rm_tracker_model.xlsx › Schedule July › Chamferring, on the same "
             + "as-scheduled basis."),
           ex(ctx.unit === "mt" ? mt("sales_mt", "Sales MT") : nos("sales_nos", "Sales nos"),
-            "The ledger lines at this grain summed — Quantity ÷ 1,000 in MT, qty in "
-            + "no in pieces. Held at the grain the filters cut on rather than pivoted, "
-            + "so the figures stay addable."),
+            "The ledger lines at this grain summed — sales.xlsx › Quantity ÷ 1,000 in "
+            + "MT, qty in no in pieces. Held at the grain the filters cut on rather "
+            + "than pivoted, so the figures stay addable."),
         ],
       },
     ],
@@ -2055,12 +2099,13 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "sku_pricing",
         lineage: {
-          source: "schedule lines from the RM tracker master, priced against contract.xlsx (the "
-              + "two quarterly sheets); PO prices and operation sets are the owner's "
+          source: "rm_tracker_model.xlsx › Schedule July (the scheduled lines), priced "
+              + "against contract.xlsx › the ERW and CEW sheets: base price per quarter, "
+              + "operation rates, kg/m. PO prices and operation sets are the owner's "
               + "overrides, read live.",
-          key: "the bucket's OD–ID–thickness → contract row, narrowed by route, STKM and HST "
-              + "— each stage falling back rather than failing; the row states which route "
-              + "matched.",
+          key: "the bucket's OD–ID–thickness → contract.xlsx › Key (dimension1-dimension2-"
+              + "thickness), narrowed by route, STKM and HST — each stage falling back "
+              + "rather than failing; the row states which route matched.",
         },
         section: "sku_pricing",
         title: "Priced SKUs",
@@ -2072,25 +2117,26 @@ export const VIEWS: Record<string, ViewSpec> = {
         pickFields: { customer: "customer" },
         columns: [
           ex(txt("customer", "Customer", true),
-            "The schedule sheet's Helper Customer — every scheduled SKU is priced for "
-            + "the customer scheduling it."),
+            "rm_tracker_model.xlsx › Schedule July › Helper Customer — every "
+            + "scheduled SKU is priced for the customer scheduling it."),
           ex(txt("material_code", "Material code"),
-            "The scheduled material, recovered through Bucketting where the sheet "
-            + "leaves it blank."),
-          ex(txt("description", "Description", true), "As written on the schedule line."),
-          ex(txt("bucket", "Bucket", true), "The governed bucket, from Bucketting."),
+            "rm_tracker_model.xlsx › Schedule July › MATERIAL NO, recovered through "
+            + "Bucketting where the sheet leaves it blank."),
+          ex(txt("description", "Description", true),
+            "rm_tracker_model.xlsx › Schedule July › MATERIAL DES, as written."),
+          ex(txt("bucket", "Bucket", true), "rm_tracker_model.xlsx › Bucketting › Bucket."),
           ex(txt("ctl_bucket", "CTL bucket", true),
             "The bucket with the scheduled finished length appended."),
           ex(txt("kind", "Kind"), "LL or CTL, off the governed length."),
           ex(txt("contract_type", "Contract type"),
-            "Which contract sheet priced it — ERW off the ERW quarter sheet, CEW off "
-            + "the CEW one. An ERW 2 size takes the -HST contract variant wherever the "
-            + "size has one."),
+            "Which contract.xlsx sheet priced it — ERW off the ERW quarter sheet, CEW "
+            + "off the CEW one. An ERW 2 size takes the -HST contract variant "
+            + "wherever the size has one."),
           ex(txt("matched_via", "Matched via"),
-            "How the size found its contract row. The match narrows in stages — exact "
-            + "Key (dimension1-dimension2-thickness), then progressively looser — and "
-            + "each stage only applies if it still leaves a candidate; this names the "
-            + "stage that decided."),
+            "How the size found its contract.xlsx row. The match narrows in stages — "
+            + "exact Key (dimension1-dimension2-thickness), then progressively looser "
+            + "— and each stage only applies if it still leaves a candidate; this "
+            + "names the stage that decided."),
           ex(txt("unit", "Unit"),
             "The unit the SKU is scheduled and priced in: per piece for a cut length, "
             + "per metre or per tonne otherwise."),
@@ -2105,14 +2151,16 @@ export const VIEWS: Record<string, ViewSpec> = {
           // reconciliation is an operation question. Adding one adds its rung to the
           // build-up and moves the price beside it, here and at the next refresh.
           ex({ ...list("operations", "Operations"), edit: { kind: "operations" } },
-            "The value-adding operations priced on top of the base — from the schedule "
-            + "sheet's own flags (angle cut, chamfer …), each at its governed INR/tonne "
-            + "rate (the fact strip above lists the rates). Editable: adding one adds "
-            + "its rung to the build-up and moves the price beside it now; the edit is "
-            + "saved and the next rebuild carries it too."),
+            "The value-adding operations priced on top of the base — rm_tracker_model"
+            + ".xlsx › Schedule July › FC/NFC, Angle Cut and Chamferring, annealing "
+            + "off Bucketting › Annealed — each at its governed INR/tonne rate (the "
+            + "fact strip above lists the rates). Editable: adding one adds its rung "
+            + "to the build-up and moves the price beside it now; the edit is saved "
+            + "and the next rebuild carries it too."),
           ex(mt("schedule_mt", "Schedule MT"),
-            "The month's schedule for this SKU, from the schedule sheet."),
-          ex(nos("schedule_qty", "Schedule qty"), "The schedule sheet's pieces."),
+            "rm_tracker_model.xlsx › Schedule July › SCHEDULE IN MT for this SKU."),
+          ex(nos("schedule_qty", "Schedule qty"),
+            "rm_tracker_model.xlsx › Schedule July › SCHEDULE in nos."),
           // The price build-up is per quarter, so the key is read out of the row's own
           // map of them rather than off a single field: a SKU repriced in Q4 has a
           // different working behind each column. Three columns per quarter: what the
@@ -2125,7 +2173,7 @@ export const VIEWS: Record<string, ViewSpec> = {
                 `{bucket} · ${q} · price build-up`,
               ),
                 `The contract price for ${q}, in the SKU's own unit: the matched `
-                + "contract row's base per tonne, converted through kg/m and the "
+                + "contract.xlsx row's base per tonne, converted through kg/m and the "
                 + "length, plus each operation's INR/tonne rung. Click the figure for "
                 + "the build-up line by line."),
               priceQuarter: q,
@@ -2163,7 +2211,8 @@ export const VIEWS: Record<string, ViewSpec> = {
           + "bucket at all, or the bucket is governed and the contract has no row for it.",
         pickFields: { customer: "customer" },
         columns: [
-          ex(txt("customer", "Customer", true), "The schedule sheet's Helper Customer."),
+          ex(txt("customer", "Customer", true),
+            "rm_tracker_model.xlsx › Schedule July › Helper Customer."),
           ex(txt("bucket", "Bucket", true),
             "The governed bucket, where the line has one at all."),
           ex(txt("reason", "Reason", true),
@@ -2179,10 +2228,11 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "code_repository",
         lineage: {
-          source: "the sales window (the daily dump, plus sales_history.xlsx where supplied) "
-              + "and zmat.xlsx.",
-          key: "material code; the customer reaches an OEM through the OEM key and the "
-              + "conversion-agent codes.",
+          source: "sales.xlsx › Sheet1 (plus sales_history.xlsx where supplied): CUSTOMER "
+              + "CD, SHIP TO PARTY C, DESP PLANT, MATERAIL NUMBER, Quantity, qty in no; "
+              + "descriptions through zmat.xlsx.",
+          key: "material code; the customer reaches an OEM through OEM_key_1_rev codes "
+              + "and the conversion-agent codes.",
         },
         section: "code_repository",
         title: "Code repository",
@@ -2192,13 +2242,15 @@ export const VIEWS: Record<string, ViewSpec> = {
           + "and one customer buys the same SKU under several codes.",
         columns: [
           ex(txt("bill_to_code", "Bill-to code"),
-            "The sales line's CUSTOMER CD — who is invoiced."),
-          ex(txt("bill_to_name", "Bill-to", true), "As the sales file spells it."),
+            "sales.xlsx › Sheet1 › CUSTOMER CD — who is invoiced."),
+          ex(txt("bill_to_name", "Bill-to", true),
+            "sales.xlsx › CUSTOMER NAME, as the file spells it."),
           ex(txt("ship_to_code", "Ship-to code"),
-            "The sales line's ship-to party — where it is delivered, which a PCR "
+            "sales.xlsx › SHIP TO PARTY C — where it is delivered, which a PCR "
             + "raised on the sold-to alone would miss."),
-          ex(txt("ship_to_name", "Ship-to", true), "As the sales file spells it."),
-          ex(txt("plant", "Plant"), "The despatching plant, off the sales line."),
+          ex(txt("ship_to_name", "Ship-to", true),
+            "sales.xlsx › SHIPTO PARTY DISC, as the file spells it."),
+          ex(txt("plant", "Plant"), "sales.xlsx › DESP PLANT — the despatching plant."),
           ex(txt("material_code", "Material code"),
             "As billed. Scope: the customer's OEM is TVS, or the code is a conversion "
             + "agent's (Megh, Rane) — the codes a price change request can be raised "
@@ -2215,12 +2267,12 @@ export const VIEWS: Record<string, ViewSpec> = {
             "The customer's OEM off the key; a conversion agent's code shows the OEM "
             + "it converts for."),
           ex(cnt("invoices", "Invoices"),
-            "Distinct billing documents over the repository window (the fact strip "
-            + "above states the window and its source file)."),
-          ex(nos("qty_nos", "Qty nos"), "The window's qty in no, summed."),
-          ex(mt("qty_mt", "Qty MT"), "The window's Quantity summed ÷ 1,000."),
-          ex(txt("first_billed", "First billed"), "Earliest billing date in the window."),
-          ex(txt("last_billed", "Last billed"), "Latest billing date in the window."),
+            "Distinct Billing Document Numbers over the repository window (the fact "
+            + "strip above states the window and its source file)."),
+          ex(nos("qty_nos", "Qty nos"), "sales.xlsx › qty in no, summed over the window."),
+          ex(mt("qty_mt", "Qty MT"), "sales.xlsx › Quantity summed ÷ 1,000 over the window."),
+          ex(txt("first_billed", "First billed"), "The earliest BILLING DATE in the window."),
+          ex(txt("last_billed", "Last billed"), "The latest BILLING DATE in the window."),
         ],
         // One button per quarter rather than a quarter dropdown: a PCR names the quarter
         // it is raised for, and a control that silently holds last quarter is a wrong
@@ -2241,9 +2293,11 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "stock_analysis_ctl",
         lineage: {
-          source: "stock.xlsx (PLANT STOCKS), cut-to-length rows.",
-          key: "material code → bucket with the cut length appended (Bucketting's CTL Bucket "
-              + "column); age bands off each row's ageing date against the build's as-of.",
+          source: "stock.xlsx › PLANT STOCKS: Plant, Material, CUSTOMER NAME, Ageing days, "
+              + "MT, NOS — cut-to-length rows; rfd_4731.xlsx › Sheet5: WEIGHT, RFD Qty. "
+              + "for the plant 4731 reconciliation.",
+          key: "material code → the bucket with the cut length appended (Bucketting › CTL "
+              + "Bucket); age bands off each row's Ageing days against the build's as-of.",
         },
         section: "stock_analysis_ctl",
         title: "Cut length",
@@ -2251,23 +2305,24 @@ export const VIEWS: Record<string, ViewSpec> = {
           "Plant 4731 rows carry the RFD reconciliation: what the RFD extract accounts for "
           + "and what it does not, with the verdict behind it.",
         columns: [
-          ex(txt("plant", "Plant"), "The PLANT STOCKS sheet's Plant column, off stock.xlsx."),
-          ex(txt("material_code", "Material code"), "As the stock sheet writes it."),
-          ex(txt("description", "Description", true), "As the stock sheet writes it."),
+          ex(txt("plant", "Plant"), "stock.xlsx › PLANT STOCKS › Plant."),
+          ex(txt("material_code", "Material code"), "stock.xlsx › PLANT STOCKS › Material."),
+          ex(txt("description", "Description", true),
+            "stock.xlsx › PLANT STOCKS › Material Description."),
           ex(txt("holder", "Held for", true),
-            "The stock sheet's customer column — who each lot can be liquidated to, "
-            + "which is what makes an aged lot actionable. TRANSIT STOCK marks pipeline "
-            + "material with no owner yet."),
+            "stock.xlsx › PLANT STOCKS › CUSTOMER NAME — who each lot can be "
+            + "liquidated to, which is what makes an aged lot actionable. TRANSIT "
+            + "STOCK marks pipeline material with no owner yet."),
           ex(sev(days("oldest_age_days", "Oldest days"), AGEING),
-            "The oldest batch's age *at month end*: the sheet's Ageing days + (month "
+            "The oldest batch's age *at month end*: stock.xlsx › Ageing days + (month "
             + "end − as-of). How bad the worst batch is — the band columns beside "
             + "Stock MT say how much stands in each age range."),
           drill(
             ex(mt("stock_mt", "Stock MT"),
-              "The line's stock across its batches, kg ÷ 1,000, cut-length rows only. "
-              + "The breakup lists each batch with its ageing. This view reads the "
-              + "whole sheet — every OEM, transit included — so CTL plus LL reconciles "
-              + "to the sheet's positive rows."),
+              "stock.xlsx › PLANT STOCKS › MT summed over the line's batches, "
+              + "cut-length rows only. The breakup lists each batch with its ageing. "
+              + "This view reads the whole sheet — every OEM, transit included — so "
+              + "CTL plus LL reconciles to the sheet's positive rows."),
             "{detail_key}",
             "Cut length · {material_code} · plant {plant}",
           ),
@@ -2295,12 +2350,13 @@ export const VIEWS: Record<string, ViewSpec> = {
             "High age · {material_code} · plant {plant}",
             "high_age_mt",
           ),
-          ex(nos("stock_nos", "Stock nos"), "The line's pieces, summed over its batches."),
+          ex(nos("stock_nos", "Stock nos"),
+            "stock.xlsx › PLANT STOCKS › NOS, summed over the line's batches."),
           ex(cnt("batches", "Batches"), "How many batches the line's stock stands in."),
           ex(txt("rfd_status", "RFD status"),
-            "Plant 4731 only: whether rfd_4731.xlsx accounts for this material's "
-            + "tonnage. The reconciliation compares the sheet's WEIGHT (MT) against "
-            + "plant stock, matching through the master's CTL Code."),
+            "Plant 4731 only: whether rfd_4731.xlsx › Sheet5 accounts for this "
+            + "material's tonnage. The reconciliation compares that sheet's WEIGHT "
+            + "(MT) against plant stock, matching through its CTL Code."),
           ex(txt("rfd_verdict", "RFD verdict", true),
             "The reconciliation's conclusion for the material — covered, partly "
             + "covered, or absent from the RFD extract."),
@@ -2316,27 +2372,31 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "stock_analysis_ll",
         lineage: {
-          source: "stock.xlsx (PLANT STOCKS), long-length rows.",
-          key: "material code → governed bucket; age bands off each row's ageing date "
+          source: "stock.xlsx › PLANT STOCKS: Plant, Material, CUSTOMER NAME, Ageing days, "
+              + "MT, NOS — long-length rows.",
+          key: "material code → Bucketting › Bucket; age bands off each row's Ageing days "
               + "against the build's as-of.",
         },
         section: "stock_analysis_ll",
         title: "Long length",
         columns: [
-          ex(txt("plant", "Plant"), "The PLANT STOCKS sheet's Plant column, off stock.xlsx."),
-          ex(txt("material_code", "Material code"), "As the stock sheet writes it."),
-          ex(txt("description", "Description", true), "As the stock sheet writes it."),
+          ex(txt("plant", "Plant"), "stock.xlsx › PLANT STOCKS › Plant."),
+          ex(txt("material_code", "Material code"), "stock.xlsx › PLANT STOCKS › Material."),
+          ex(txt("description", "Description", true),
+            "stock.xlsx › PLANT STOCKS › Material Description."),
           ex(txt("holder", "Held for", true),
-            "The stock sheet's customer column — who each lot can be liquidated to. "
-            + "TRANSIT STOCK marks pipeline material with no owner yet."),
+            "stock.xlsx › PLANT STOCKS › CUSTOMER NAME — who each lot can be "
+            + "liquidated to. TRANSIT STOCK marks pipeline material with no owner "
+            + "yet."),
           ex(sev(days("oldest_age_days", "Oldest days"), AGEING),
-            "The oldest batch's age *at month end*: the sheet's Ageing days + (month "
+            "The oldest batch's age *at month end*: stock.xlsx › Ageing days + (month "
             + "end − as-of). How bad the worst batch is — the band columns beside "
             + "Stock MT say how much stands in each age range."),
           drill(
             ex(mt("stock_mt", "Stock MT"),
-              "The line's stock across its batches, kg ÷ 1,000, long-length rows "
-              + "only. The breakup lists each batch with its ageing."),
+              "stock.xlsx › PLANT STOCKS › MT summed over the line's batches, "
+              + "long-length rows only. The breakup lists each batch with its "
+              + "ageing."),
             "{detail_key}",
             "Long length · {material_code} · plant {plant}",
           ),
@@ -2361,7 +2421,8 @@ export const VIEWS: Record<string, ViewSpec> = {
             "High age · {material_code} · plant {plant}",
             "high_age_mt",
           ),
-          ex(nos("stock_nos", "Stock nos"), "The line's pieces, summed over its batches."),
+          ex(nos("stock_nos", "Stock nos"),
+            "stock.xlsx › PLANT STOCKS › NOS, summed over the line's batches."),
           ex(cnt("batches", "Batches"), "How many batches the line's stock stands in."),
         ],
       },
@@ -2418,11 +2479,13 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "str_plan",
         lineage: {
-          source: "demand from the Schedule sheet for the plan customers; stock at 8406 from "
-              + "stock.xlsx; source pools from stock.xlsx and wip ystockn.xlsx; transit from "
-              + "the transfers ledger.",
-          key: "one row per governed bucket; the requirement is the target days × the "
-              + "bucket's daily schedule rate, less what 8406 already holds or has inbound.",
+          source: "rm_tracker_model.xlsx › Schedule July: SCHEDULE IN MT for the plan "
+              + "customers. stock.xlsx › PLANT STOCKS: MT (at 8406 and at the source "
+              + "plants). wip.xlsx: Total Stock. transfer.xlsx: Quantity, GR DATE for the "
+              + "in-transit figure.",
+          key: "one row per governed bucket (Bucketting › Bucket); the requirement is the "
+              + "target days × the bucket's daily schedule rate, less what 8406 already "
+              + "holds or has inbound.",
         },
         section: "str_plan",
         title: "Requirement and cover by bucket",
@@ -2443,18 +2506,22 @@ export const VIEWS: Record<string, ViewSpec> = {
             "The finished lengths those customers schedule — 8406 cuts to length on "
             + "site, which is why the plan's grain is the bucket alone."),
           ex(mt("schedule_mt", "Schedule MT"),
-            "The plan customers' schedule on this bucket this month."),
-          ex(mt("sales_mt", "Sales MT"), "Dispatched against it so far this month."),
+            "rm_tracker_model.xlsx › Schedule July › SCHEDULE IN MT — the plan "
+            + "customers' schedule on this bucket this month."),
+          ex(mt("sales_mt", "Sales MT"),
+            "sales.xlsx › Sheet1 › Quantity ÷ 1,000 dispatched against it so far "
+            + "this month."),
           ex(mt("balance_mt", "Balance MT"), "Schedule less sales, floored at zero."),
           ex({ field: "daily_mt", label: "Daily MT", kind: "mt", total: true },
             "The run rate: schedule ÷ days in the month. The requirement is built from "
             + "this."),
           ex(mt("requirement_mt", "Requirement MT"),
             "Daily MT × the target cover in days — what 8406 should be holding."),
-          ex(mt("owned_8406_mt", "Owned at 8406 MT"), "Stock standing at 8406, on the ground."),
+          ex(mt("owned_8406_mt", "Owned at 8406 MT"),
+            "stock.xlsx › PLANT STOCKS › MT at plant 8406 — standing on the ground."),
           ex(mt("in_transit_mt", "In transit MT"),
-            "Transfer lines despatched to 8406 with no goods receipt yet, from "
-            + "transfer.xlsx — an empty GR DATE is the in-transit flag."),
+            "transfer.xlsx › Quantity ÷ 1,000 on lines despatched to 8406 with no "
+            + "goods receipt yet — an empty GR DATE is the in-transit flag."),
           drill(
             ex(sev(mt("stock_8406_mt", "Stock at 8406 MT"), { from: "risk", words: RISK_WORDS }),
               "Owned plus in transit — what 8406 has or is about to have. The breakup "
@@ -2483,8 +2550,9 @@ export const VIEWS: Record<string, ViewSpec> = {
             + "is exactly what Short means."),
           drill(
             ex(mt("source_stock_mt", "Source stock MT"),
-              "Long-length stock of this bucket standing at the source plants, before "
-              + "allocation. The breakup lists it plant by plant."),
+              "Long-length stock of this bucket at the source plants before "
+              + "allocation — stock.xlsx › PLANT STOCKS › MT plus wip.xlsx › Total "
+              + "Stock. The breakup lists it plant by plant."),
             "{source_detail_key}",
             "{bucket} · stock at the source plants",
           ),
@@ -2518,8 +2586,9 @@ export const VIEWS: Record<string, ViewSpec> = {
           ex(txt("plant_label", "Source plant", true), "The source plant, named."),
           ex(txt("material_code", "Material code"),
             "The finished-goods code the STR is raised on. For WIP this is recovered "
-            + "by swapping the mother tube's PTM- description to TUB- and finding that "
-            + "code in zmat — an STR cannot be raised on a mother tube itself."),
+            + "by swapping the mother tube's PTM- description to TUB- and finding "
+            + "that code in zmat.xlsx (MATERIAL TYPE = FERT) — an STR cannot be "
+            + "raised on a mother tube itself."),
           ex(txt("description", "Description", true), "As the source sheet writes it."),
           ex(txt("source", "Source"),
             "Which pool the line draws on: plant stock (stock.xlsx) or WIP "
@@ -2545,9 +2614,9 @@ export const VIEWS: Record<string, ViewSpec> = {
         title: "Stock at 8406 reaching no plan bucket",
         columns: [
           ex(txt("customer_name", "Held for", true),
-            "The stock sheet's customer on the 8406 rows that resolve to no bucket "
-            + "the plan tracks."),
-          ex(txt("customer_code", "Customer code"), "As the stock sheet writes it."),
+            "stock.xlsx › PLANT STOCKS › CUSTOMER NAME on the 8406 rows that resolve "
+            + "to no bucket the plan tracks."),
+          ex(txt("customer_code", "Customer code"), "As the stock.xlsx row writes it."),
           ex(mt("stock_mt", "Stock MT"),
             "Tonnage at 8406 the plan cannot see — held against no plan bucket, so "
             + "no coverage counts it."),
@@ -2556,7 +2625,7 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "wip_without_fg_code",
         lineage: {
-          source: "wip ystockn.xlsx rows whose mother tube names no finished-goods code.",
+          source: "wip.xlsx rows whose mother tube names no finished-goods code.",
           key: "mother-tube code → zmat's FG code, which found nothing.",
         },
         scalar: ["str_plan", "wip_without_fg_code"],
@@ -2594,9 +2663,12 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "transfers",
         lineage: {
-          source: "the accumulated transfers ledger (transfer.xlsx, every line since 8 July).",
-          key: "material code → governed bucket; one row per movement, sending plant → "
-              + "receiving plant.",
+          source: "the accumulated transfers ledger — transfer.xlsx, every line since "
+              + "8 July: DESP PLANT, CUSTOMER CD, MATERAIL NUMBER, Quantity, qty in no, "
+              + "BILLING DATE, GR DATE.",
+          key: "material code → Bucketting › Bucket; one row per movement, sending plant "
+              + "→ receiving plant, merged on billing document + item so a later dump "
+              + "fills in GR DATE.",
         },
         section: "transfers",
         title: "Despatched transfer lines",
@@ -2606,43 +2678,48 @@ export const VIEWS: Record<string, ViewSpec> = {
           + "carried the sales dump under the transfer filename.",
         columns: [
           ex(txt("source_plant_label", "From", true),
-            "transfer.xlsx's DESP PLANT — the sending plant, named from the file's own "
-            + "PLANT DESC."),
+            "transfer.xlsx › DESP PLANT — the sending plant, named from the file's "
+            + "own PLANT DESC."),
           ex(txt("dest_plant_label", "To", true),
-            "The file's CUSTOMER CD / CUSTOMER NAME — which on a transfer names the "
-            + "receiving plant, not a customer."),
-          ex(txt("document", "Billing doc"), "The line's billing document number."),
-          ex(txt("sto_no", "STO no"), "The file's DO/STO NO, as written."),
-          ex(txt("material_code", "Material code"), "The file's material number, as written."),
-          ex(txt("description", "Description", true), "As the file writes it."),
+            "transfer.xlsx › CUSTOMER CD / CUSTOMER NAME — which on a transfer names "
+            + "the receiving plant, not a customer."),
+          ex(txt("document", "Billing doc"), "transfer.xlsx › the line's billing document number."),
+          ex(txt("sto_no", "STO no"), "transfer.xlsx › DO/STO NO, as written."),
+          ex(txt("material_code", "Material code"),
+            "transfer.xlsx › MATERAIL NUMBER, as written."),
+          ex(txt("description", "Description", true),
+            "transfer.xlsx › Material Description, as written."),
           ex(txt("bucket", "Bucket", true),
-            "Resolved through Bucketting — code first, description second."),
+            "Resolved through rm_tracker_model.xlsx › Bucketting — code first, "
+            + "description second."),
           ex(txt("ctl_bucket", "CTL bucket", true),
             "The bucket with the governed length appended."),
           ex(txt("length_type", "Length"),
             "LL where the governed length is 4 m or more, CTL below it."),
-          ex(txt("billing_date", "Billed"), "The file's BILLING DATE — when it left."),
+          ex(txt("billing_date", "Billed"), "transfer.xlsx › BILLING DATE — when it left."),
           ex(txt("grn_date", "GRN"),
-            "When the receiving plant posted its goods receipt. Empty is the "
-            + "in-transit flag: the line is still on the road."),
+            "transfer.xlsx › GR DATE — when the receiving plant posted its goods "
+            + "receipt. Empty is the in-transit flag: the line is still on the road."),
           ex(txt("status", "Status"),
             "In transit where GRN is empty, Received otherwise."),
           ex(days("transit_days", "Transit days"),
             "GRN date − billing date once received; as-of date − billing date while "
             + "still open, so an open line keeps aging."),
           ex(txt("mark_customer", "Marked for", true),
-            "The file's MARK DESTINATION, or MARK CUSTOMER where destination is "
+            "transfer.xlsx › MARK DESTINATION, or MARK CUSTOMER where destination is "
             + "blank — who the material is intended for on arrival."),
           drill(
             ex(mt("qty_mt", "Qty MT"),
-              "The grouped lines' Quantity ÷ 1,000 — the file carries kilograms. The "
-              + "breakup lists the batches. Later dumps fill in GR DATE on lines "
-              + "already held, which is why this table merges rather than appends: "
-              + "appending once read 445 lines in transit against a true 218."),
+              "transfer.xlsx › Quantity summed ÷ 1,000 over the grouped lines — the "
+              + "file carries kilograms. The breakup lists the batches. Later dumps "
+              + "fill in GR DATE on lines already held, which is why this table "
+              + "merges rather than appends: appending once read 445 lines in transit "
+              + "against a true 218."),
             "{detail_key}",
             "{source_plant_label} → {dest_plant_label} · {material_code}",
           ),
-          ex(nos("qty_nos", "Qty nos"), "The file's qty in no, summed over the group."),
+          ex(nos("qty_nos", "Qty nos"),
+            "transfer.xlsx › qty in no, summed over the group."),
           ex(cnt("batches", "Batches"), "Distinct batches in the group."),
         ],
       },
@@ -2661,10 +2738,12 @@ export const VIEWS: Record<string, ViewSpec> = {
       {
         key: "overdue_analysis",
         lineage: {
-          source: "yf65.xlsx receivables, narrowed to the TVS ancillary customers.",
-          key: "customer; ageing bands off each invoice's billing date against the build's "
-              + "as-of; the remark column is written on this tab, keyed on the invoice "
-              + "number.",
+          source: "yf65.xlsx › Sheet1: Customer Code, Customer Name, Doc Type, Nature, "
+              + "Document Date, Open Amount, Billing Doc — narrowed to the TVS ancillary "
+              + "customers.",
+          key: "yf65 › Customer Name → OEM_key_1_rev codes; ageing off Document Date + 47 "
+              + "days against the build's as-of; the remark column is written on this "
+              + "tab, keyed on Billing Doc.",
         },
         section: "overdue_analysis",
         title: "By ancillary",
@@ -2674,9 +2753,10 @@ export const VIEWS: Record<string, ViewSpec> = {
           + "rather than shown here, where they sat between the figure and its ageing.",
         columns: [
           ex(txt("ancillary", "Ancillary", true),
-            "A customer from the receivables file (yf65) whose name resolves to OEM "
-            + "TVS through the OEM key, after conversion-agent routing."),
-          ex(txt("customer_code", "Customer code"), "As the receivables file writes it."),
+            "yf65.xlsx › Sheet1 › Customer Name, resolved to OEM TVS through "
+            + "rm_tracker_model.xlsx › OEM_key_1_rev codes, after conversion-agent "
+            + "routing."),
+          ex(txt("customer_code", "Customer code"), "yf65.xlsx › Customer Code."),
           // Banded by how old the money is, not by how much it is: a large receivable a
           // week past due is a call, and a small one two years past due is a write-off.
           drill(
@@ -2686,14 +2766,14 @@ export const VIEWS: Record<string, ViewSpec> = {
               alert: OVERDUE_ALERT_DAYS,
               attention: 1,
             }),
-              "Open billing documents (Doc Type RV or RD — actual invoices, not "
-              + "credit notes or balances) past due, summed. Due date is invoice date "
-              + "+ 47 days — the governed term, which replaces the file's own due "
-              + "flag: its Net Due Date sits 0, 45 or 51 days from the document date "
-              + "depending on the row. The colour follows the oldest document's age, "
-              + "not the amount — a large receivable a week late is a call, a small "
-              + "one two years late is a write-off. The breakup lists the invoices, "
-              + "oldest first."),
+              "yf65.xlsx › Open Amount summed over open billing documents (Doc Type "
+              + "RV or RD — actual invoices, not credit notes or balances) past due. "
+              + "Due date is Document Date + 47 days — the governed term, which "
+              + "replaces the file's own due flag: its Net Due Date sits 0, 45 or 51 "
+              + "days from the document date depending on the row. The colour follows "
+              + "the oldest document's age, not the amount — a large receivable a "
+              + "week late is a call, a small one two years late is a write-off. The "
+              + "breakup lists the invoices, oldest first."),
             "{detail_key}",
             "Overdue · {ancillary}",
           ),
@@ -2717,12 +2797,13 @@ export const VIEWS: Record<string, ViewSpec> = {
           // An ancillary with no open credit note has the key and nothing behind it.
           drill(
             ex(inr("offsets_amount", "Offsets INR"),
-              "Open documents that *reduce* what is owed — Nature is CREDIT NOTE, "
-              + "OTHER CREDIT BALANCE or COLLECTION. Told by Nature, never by Doc "
-              + "Type, which cannot decide it (AB carries both credit and debit "
-              + "balances). Debit balances are excluded: they add to the exposure, and "
-              + "netting them in once made the figure a net of two unrelated things. "
-              + "Shown beside the overdue, never subtracted from it."),
+              "yf65.xlsx › Open Amount on documents that *reduce* what is owed — "
+              + "Nature is CREDIT NOTE, OTHER CREDIT BALANCE or COLLECTION. Told by "
+              + "Nature, never by Doc Type, which cannot decide it (AB carries both "
+              + "credit and debit balances). Debit balances are excluded: they add to "
+              + "the exposure, and netting them in once made the figure a net of two "
+              + "unrelated things. Shown beside the overdue, never subtracted from "
+              + "it."),
             "{offsets_detail_key}",
             "Open payments and credit notes · {ancillary}",
             "offsets_documents",
