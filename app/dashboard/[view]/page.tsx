@@ -259,6 +259,29 @@ export default async function ViewPage({
       const waiting = awaiting.some((p) => table.pickFields?.[p.param]);
       if (waiting) return false;
       return !(table.hideWhenEmpty && rows.length === 0);
+    })
+    // A function cannot cross to a client component — the rule `copies` and `detail`
+    // already live under, and a `derive` on a column breaks it at request time, not at
+    // build time: Next refuses the serialization and the whole tab dies, which is how
+    // the mapping tab shipped broken on 20 Aug with both deploys green. So a derived
+    // column is resolved here, row by row, and what crosses is the text it produced
+    // plus a column that no longer derives. `derive(row) || null` mirrors the client's
+    // own fallback, so an empty answer still renders as an em dash.
+    .map(({ table, rows, capped }) => {
+      const derivers = table.columns.filter((column) => column.derive);
+      if (derivers.length === 0) return { table, rows, capped };
+      return {
+        table: {
+          ...table,
+          columns: table.columns.map(({ derive, ...plain }) => plain),
+        },
+        rows: rows.map((row) => {
+          const resolved = { ...row };
+          for (const column of derivers) resolved[column.field] = column.derive!(row) || null;
+          return resolved;
+        }),
+        capped,
+      };
     });
 
   const facts = spec.facts ? spec.facts(scalars) : [];

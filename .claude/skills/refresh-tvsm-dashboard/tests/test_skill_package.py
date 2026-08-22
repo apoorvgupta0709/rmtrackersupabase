@@ -2854,6 +2854,30 @@ def test_the_fold_scopes_close_their_own_loop():
     assert refresh_at < first_frame, "the folds are refreshed before the first frame is read"
 
 
+def test_nothing_function_valued_crosses_to_the_client():
+    """A function in a client component's props kills the whole tab, at request time.
+
+    `tsc` cannot see it and both deploys stay green: Next refuses the serialization only
+    when the page renders, which is how the mapping tab shipped broken on 20 Aug and was
+    found by the owner two days later. The queue's `derive` columns are functions by
+    design — the page resolves them server-side and strips them before the hand-off —
+    and `tools/check_client_props.mjs` proves both halves: the strip still exists in
+    `page.tsx`, and nothing function-valued survives in any prop `DataTable` receives,
+    across every table of every view.
+    """
+    import shutil
+
+    node = shutil.which("node")
+    if not node:
+        return
+
+    result = subprocess.run(
+        [str(node), str(REPO_ROOT / "tools" / "check_client_props.mjs")],
+        capture_output=True, text=True, cwd=REPO_ROOT,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_the_assign_cell_takes_an_answer_the_master_does_not_carry_yet():
     """A dropdown of governed buckets had this queue backwards.
 
